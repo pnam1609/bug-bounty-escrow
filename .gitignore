@@ -1,0 +1,17 @@
+node_modules/
+.turbo/
+dist/
+coverage/
+.next/
+
+.env
+.env.*
+!.env.example
+
+packages/contracts/out/
+packages/contracts/cache/
+supabase/.temp/
+supabase/.branches/
+
+
+*.tsbuildinfo

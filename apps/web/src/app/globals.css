@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+
+/* The BBE design tokens live in the ui package so both the component library and the app read
+   one source. Tailwind must also scan that package's source, or class names that only appear
+   inside shared components get tree-shaken out of the stylesheet. */
+@import '@bug-bounty-escrow/ui/theme.css';
+
+@source '../../../../packages/ui/src';

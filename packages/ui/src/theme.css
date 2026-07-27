@@ -1,0 +1,153 @@
+/*
+ * BBE Design System — Tailwind v4 theme.
+ *
+ * Ported from the Figma variables on the "BBE Design System" page
+ * (file PXhIUlWSb44xjonYNxviCN, node 31:2). Every value here has a counterpart in that file;
+ * do not invent tokens locally. When Figma changes, re-run get_variable_defs and update this
+ * file — components must reference these names, never a raw hex value.
+ *
+ * The product ships a single dark visual world by design, so there is no light theme: the
+ * palette, the escrow mint and the severity ramp are all tuned against the #11121a ground.
+ */
+
+/* Radix state-driven enter/exit keyframes (data-[state=open|closed]). Tailwind v4 successor to
+   tailwindcss-animate. Every animated component must still pair these with motion-reduce. */
+@import 'tw-animate-css';
+
+@theme {
+  /* ── Surfaces ─────────────────────────────────────────────────────────────── */
+  --color-background: #11121a;
+  --color-surface: #171823;
+  --color-surface-raised: #222335;
+  --color-ambient: #292641;
+
+  /* ── Lines ────────────────────────────────────────────────────────────────── */
+  --color-border: #3a3b54;
+  --color-border-brand: #7965ff;
+
+  /* ── Text ─────────────────────────────────────────────────────────────────── */
+  --color-text: #f7f6fb;
+  --color-text-muted: #9d9bad;
+  --color-text-disabled: #6e6b7f;
+
+  /* ── Brand ────────────────────────────────────────────────────────────────── */
+  --color-primary: #7965ff;
+  --color-primary-hover: #6047f2;
+  --color-primary-contrast: #ffffff;
+  --color-focus: #7965ff;
+
+  /* ── Semantic ─────────────────────────────────────────────────────────────── */
+  /* Mint is reserved for escrow and completed states, never generic success chrome. */
+  --color-escrow: #22d3a6;
+  --color-success: #22c55e;
+  --color-error: #ff4d6d;
+  --color-usdc: #2775ca;
+
+  /* ── Severity ramp ────────────────────────────────────────────────────────── */
+  --color-critical: #ff4d6d;
+  --color-high: #ff8a4c;
+  --color-medium: #f5c451;
+  --color-low: #38bdf8;
+  /* Figma has no `informational` swatch yet, so it reuses muted text: the ramp stays complete
+     without inventing a brand colour. Replace once the design system defines one. */
+  --color-informational: #9d9bad;
+
+  /* ── Form control surfaces ────────────────────────────────────────────────── */
+  --color-input: #171823;
+  --color-input-border: #3a3b54;
+  --color-input-border-focus: #7965ff;
+  --color-input-placeholder: #9d9bad;
+
+  /* ── Spacing scale ────────────────────────────────────────────────────────── */
+  --spacing-none: 0px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  --spacing-3xl: 48px;
+
+  /* ── Radius ───────────────────────────────────────────────────────────────── */
+  --radius-none: 0px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* ── Elevation ────────────────────────────────────────────────────────────── */
+  --shadow-subtle: 0 2px 8px 0 #00000038;
+  --shadow-elevated: 0 16px 40px -8px #0000005c, 0 0 24px 0 #8b5cf61f;
+  --shadow-overlay: 0 24px 64px -12px #00000075, 0 0 36px 0 #7965ff1a;
+
+  /* ── Type scale ───────────────────────────────────────────────────────────── */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --text-h1: 32px;
+  --text-h1--line-height: 40px;
+  --text-h1--font-weight: 700;
+  --text-h1--letter-spacing: -0.5px;
+
+  --text-h2: 24px;
+  --text-h2--line-height: 32px;
+  --text-h2--font-weight: 600;
+  --text-h2--letter-spacing: -0.25px;
+
+  --text-h3: 18px;
+  --text-h3--line-height: 24px;
+  --text-h3--font-weight: 600;
+  --text-h3--letter-spacing: 0px;
+
+  --text-body: 16px;
+  --text-body--line-height: 24px;
+  --text-body--font-weight: 400;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 20px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label-lg: 14px;
+  --text-label-lg--line-height: 20px;
+  --text-label-lg--font-weight: 500;
+  --text-label-lg--letter-spacing: 0.1px;
+
+  --text-label-md: 12px;
+  --text-label-md--line-height: 16px;
+  --text-label-md--font-weight: 500;
+  --text-label-md--letter-spacing: 0.2px;
+
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 16px;
+  --text-label-sm--font-weight: 500;
+  --text-label-sm--letter-spacing: 0.4px;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* One focus treatment everywhere, at the token colour, so keyboard users never lose their
+     place regardless of which control they are on. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  ::placeholder {
+    color: var(--color-input-placeholder);
+  }
+}

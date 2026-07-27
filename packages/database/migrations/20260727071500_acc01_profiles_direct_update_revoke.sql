@@ -1,0 +1,46 @@
+-- ACC-01: Close the direct-write path on public.profiles that sidesteps
+-- update_profile_display_name_atomic, the only sanctioned Account-settings write.
+--
+-- Grants only — no table shapes change, so the generated database types are unaffected. The
+-- architecture is API-only (PROJECT_CONTEXT §11): apps/api talks to the database as service_role
+-- (unaffected by this revoke) and writes the display name exclusively through the RPC. The web
+-- app's only Supabase client is the auth session handler (apps/web/src/providers/auth-provider.tsx);
+-- no client in the monorepo issues a PostgREST write against public.profiles. Same hole class
+-- CP-01 closed for programs INSERT and SR-04b closed for the report tables.
+--
+-- RLS-001 granted `update (display_name, wallet_address, avatar_url)` to `authenticated`, gated by
+-- profiles_update_self (id = auth.uid()). Identity is therefore never at risk — but the three
+-- columns are, because the policy is the ONLY check a direct PostgREST update passes:
+--
+--   display_name — update_profile_display_name_atomic btrims the value, enforces 1..120 characters
+--     (the shared contract's rule) and writes the `profile.display_name_changed` audit row. A
+--     direct update satisfies none of that: profiles_display_name_not_blank_check only rejects a
+--     blank name, so any length is storable and the account-settings audit trail simply has a hole
+--     where the change should be. That defeats ACC-01 AC 3 and AC 6 through a second door.
+--
+--   wallet_address — the payout wallet belongs to the reward flow, which owns proving control of
+--     the address (PROJECT_CONTEXT §11, account-settings flow doc §3.4 and §14). No code in the
+--     monorepo writes this column yet, so today the grant is purely an unguarded way for any
+--     authenticated user to point their own payouts at an arbitrary unverified address, with no
+--     server-side flow and no audit event. Revoked before the flow exists rather than after.
+--
+--   avatar_url — likewise write-capable with no validation whatsoever (the column has no
+--     constraint), and no writer in the monorepo. A stored javascript:/data: URL is rendered
+--     wherever avatars are shown.
+--
+-- role and onboarding_completed_at were never in the grant, so the privilege-escalation boundary
+-- ACC-01 AC 4 protects was already sound at the SQL layer; verify_rls.sql asserts that directly.
+-- This migration closes the remaining columns.
+--
+-- profiles_update_self is deliberately LEFT IN PLACE. It becomes dormant (default deny with no
+-- grant), exactly like the report_impacts insert policy SR-04b left standing: should a later flow
+-- ever re-grant a column here, the self-only guard must already be there rather than be
+-- remembered. A table-level REVOKE does not remove column-level privileges, so the revoke below
+-- mirrors the original grant column by column.
+--
+-- Rollback (restores the exact pre-migration grant; safe to re-run):
+--   grant update (display_name, wallet_address, avatar_url) on public.profiles to authenticated;
+--   delete from public.schema_migrations
+--     where version = '20260727071500_acc01_profiles_direct_update_revoke.sql';
+
+revoke update (display_name, wallet_address, avatar_url) on public.profiles from authenticated;
