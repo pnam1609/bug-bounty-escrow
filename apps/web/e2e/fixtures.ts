@@ -778,6 +778,19 @@ async function configurePage(page_: Page, role: Role, state: MockState): Promise
       );
     }
 
+    const ownerProgramDetail = /^\/api\/owner\/programs\/([^/]+)$/.exec(path);
+    if (ownerProgramDetail !== null && method === 'GET') {
+      const found = DETAILS[ownerProgramDetail[1] ?? ''];
+      if (found === undefined) return fail(route, 404, 'not_found', 'Program not found');
+      return serve(
+        state,
+        route,
+        programResponseSchema,
+        { success: true, data: found },
+        'GET /api/owner/programs/:id',
+      );
+    }
+
     if (path === '/api/programs' && method === 'POST') {
       checkRequest(state, createProgramRequestSchema, body, 'POST /api/programs');
       const input = body as { name?: string; slug?: string; shortSummary?: string };
@@ -834,7 +847,11 @@ async function configurePage(page_: Page, role: Role, state: MockState): Promise
 
     const programDetail = /^\/api\/programs\/([^/]+)$/.exec(path);
     if (programDetail !== null) {
-      const found = DETAILS[programDetail[1] ?? ''];
+      const identifier = programDetail[1] ?? '';
+      const found =
+        method === 'PATCH'
+          ? DETAILS[identifier]
+          : Object.values(DETAILS).find((program) => program.slug === identifier);
       if (found === undefined) {
         return fail(route, 404, 'not_found', 'Program not found');
       }
@@ -852,7 +869,7 @@ async function configurePage(page_: Page, role: Role, state: MockState): Promise
         route,
         programResponseSchema,
         { success: true, data: found },
-        'GET /api/programs/:id',
+        'GET /api/programs/:slug',
       );
     }
 

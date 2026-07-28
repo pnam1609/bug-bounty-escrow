@@ -11,8 +11,8 @@ export const SUBMIT_WRONG_ROLE_TITLE = "This workspace isn't available";
 export const SUBMIT_WRONG_ROLE_DESCRIPTION =
   'Your account does not have Security researcher access.';
 
-export function composerReturnTo(programId: string): string {
-  return `/reports/new?programId=${encodeURIComponent(programId)}`;
+export function composerReturnTo(programSlug: string): string {
+  return `/reports/new?programSlug=${encodeURIComponent(programSlug)}`;
 }
 
 export function retainFailedCreatePayload(
@@ -32,9 +32,9 @@ export async function retryAttachmentOnly(input: {
 
 export function discardLocalReportDraft(input: {
   readonly navigate: (href: string) => void;
-  readonly programId: string;
+  readonly programSlug: string;
   readonly returnTo?: string | undefined;
 }): void {
-  clearDraft(input.programId);
-  input.navigate(input.returnTo ?? `/programs/${encodeURIComponent(input.programId)}`);
+  clearDraft(input.programSlug);
+  input.navigate(input.returnTo ?? `/programs/${encodeURIComponent(input.programSlug)}`);
 }

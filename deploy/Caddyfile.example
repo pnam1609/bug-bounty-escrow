@@ -1,0 +1,9 @@
+bountyescrow.xyz {
+	handle /api/* {
+		reverse_proxy 127.0.0.1:7831
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:7830
+	}
+}

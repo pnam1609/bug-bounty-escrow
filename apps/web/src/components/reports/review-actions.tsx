@@ -725,11 +725,12 @@ function ConfirmPaymentAction({ busy, submit }: ActionProps) {
 /* ── Panel ────────────────────────────────────────────────────────────────────────────────── */
 
 export interface ReviewActionsProps {
+  readonly principalId: string;
   readonly report: ReportDetail;
   readonly token: string | undefined;
 }
 
-export function ReviewActions({ report, token }: ReviewActionsProps) {
+export function ReviewActions({ principalId, report, token }: ReviewActionsProps) {
   const client = useQueryClient();
 
   const mutation = useMutation({
@@ -742,8 +743,8 @@ export function ReviewActions({ report, token }: ReviewActionsProps) {
     onSuccess: async (response) => {
       // The transition endpoints return the updated report, so the detail cache is written
       // directly and only the lists need a refetch.
-      client.setQueryData(queryKeys.report(report.id), response);
-      await client.invalidateQueries({ queryKey: ['reports'] });
+      client.setQueryData(queryKeys.report(principalId, report.id), response);
+      await client.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) });
     },
   });
 

@@ -26,7 +26,7 @@ Controllers chỉ xử lý HTTP concerns. Business logic nằm trong services/do
 |---|---|---|---|
 | BE-PRG-001 | `GET /api/programs` | BE-PLT-002, BE-PLT-007, DB-002 đến DB-004, RLS-002 | Public chỉ nhận active programs; pagination/filter/sort được validate; không trả private owner data |
 | BE-PRG-002 | `POST /api/programs` | BE-PLT-009, DB-002 đến DB-004 | Owner tạo draft với scopes/reward tiers hợp lệ; slug unique; researcher/anonymous bị từ chối |
-| BE-PRG-003 | `GET /api/programs/:id` | BE-PRG-001 | Public đọc active program; owner đọc draft của mình; unknown/unauthorized resource trả đúng contract |
+| BE-PRG-003 | `GET /api/programs/:slug` + `GET /api/owner/programs/:id` | BE-PRG-001 | Public detail lookup bằng canonical unique slug; owner read bằng UUID được bảo vệ; draft/paused không lộ cho anonymous; unknown/unauthorized resource trả đúng contract |
 | BE-PRG-004 | `PATCH /api/programs/:id` | BE-PLT-009, BE-PRG-003 | Chỉ owner cập nhật field/state được phép; immutable funded fields không bị sửa; optimistic conflict được xử lý |
 | BE-PRG-005 | `POST /api/programs/:id/deploy` | BE-PLT-009, BE-PRG-003, BC-004 | Chỉ owner deploy một lần; request idempotent; contract address và tx được persist |
 | BE-PRG-006 | `POST /api/programs/:id/fund` | BE-PLT-009, BE-PRG-003, BC-005 | Tx receipt được verify đúng owner/token/contract/amount; duplicate tx không cộng balance hai lần |

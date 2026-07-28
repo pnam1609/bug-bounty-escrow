@@ -1,5 +1,39 @@
 begin;
 
+-- The API response contracts use the shared Zod UUID primitive. PostgreSQL accepts UUID text
+-- whose variant nibble is outside 8..b, so guard the demo IDs at the DB/API seam as well.
+do $demo_uuid_contract$
+declare
+  shared_uuid_pattern constant text :=
+    '^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$';
+begin
+  if exists (
+    select 1
+    from public.program_impacts
+    where id::text !~ shared_uuid_pattern
+  ) then
+    raise exception 'Seeded program impact ID violates the shared UUID contract';
+  end if;
+
+  if exists (
+    select 1
+    from public.program_reward_tiers
+    where id::text !~ shared_uuid_pattern
+  ) then
+    raise exception 'Seeded program reward tier ID violates the shared UUID contract';
+  end if;
+
+  if exists (
+    select 1
+    from public.report_impacts
+    where program_impact_id is not null
+      and program_impact_id::text !~ shared_uuid_pattern
+  ) then
+    raise exception 'Seeded report impact reference violates the shared UUID contract';
+  end if;
+end;
+$demo_uuid_contract$;
+
 -- Seed layout used below (see seeds/offchain-demo.sql):
 --   report 09 -> program 2, status submitted
 --   report 10 -> program 3, status triaged
@@ -1007,6 +1041,20 @@ begin
   exception
     when sqlstate '23505' then null;
   end;
+
+  ---------------------------------------------------------------- canonical slug stays immutable
+  begin
+    update public.programs
+    set slug = 'cp02-renamed-program'
+    where id = created_program;
+    raise exception 'An existing program slug was changed';
+  exception
+    when sqlstate '22023' then
+      get stacked diagnostics rejected_code = pg_exception_detail;
+      if rejected_code <> 'program_slug_immutable' then
+        raise exception 'Expected program_slug_immutable, got %', rejected_code;
+      end if;
+  end;
 end;
 $create_program_contract$;
 
@@ -1052,6 +1100,97 @@ begin
   end if;
 end;
 $scope_edit_after_report$;
+
+-- MR-01: summary metrics are one whole-dataset snapshot, scoped to the authenticated researcher.
+do $mr01_researcher_report_summary$
+declare
+  actor uuid := '30000000-0000-4000-8000-000000000002';
+  owner_actor uuid := '30000000-0000-4000-8000-000000000001';
+  expected_all bigint;
+  expected_needs_information bigint;
+  expected_under_review bigint;
+  expected_rewards_paid text;
+  actual_all bigint;
+  actual_needs_information bigint;
+  actual_under_review bigint;
+  actual_rewards_paid text;
+begin
+  select
+    count(report.id)::bigint,
+    count(report.id) filter (where report.status = 'needs_information')::bigint,
+    count(report.id) filter (where report.status in ('submitted', 'triaged'))::bigint,
+    coalesce(
+      sum(report.approved_reward) filter (where report.status = 'paid'),
+      0
+    )::numeric(30, 6)::text
+  into
+    expected_all,
+    expected_needs_information,
+    expected_under_review,
+    expected_rewards_paid
+  from public.reports report
+  where report.researcher_id = actor;
+
+  select
+    summary.all_reports,
+    summary.needs_information,
+    summary.under_review,
+    summary.rewards_paid
+  into
+    actual_all,
+    actual_needs_information,
+    actual_under_review,
+    actual_rewards_paid
+  from public.researcher_report_summary(actor) summary;
+
+  if row(
+    actual_all,
+    actual_needs_information,
+    actual_under_review,
+    actual_rewards_paid
+  ) is distinct from row(
+    expected_all,
+    expected_needs_information,
+    expected_under_review,
+    expected_rewards_paid
+  ) then
+    raise exception 'MR-01 summary does not match the researcher whole-dataset aggregate';
+  end if;
+
+  begin
+    perform public.researcher_report_summary(owner_actor);
+    raise exception 'MR-01 accepted a non-researcher actor';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  if has_function_privilege(
+    'authenticated',
+    'public.researcher_report_summary(uuid)',
+    'EXECUTE'
+  ) then
+    raise exception 'Authenticated clients can execute the MR-01 service-only read model';
+  end if;
+
+  if not has_function_privilege(
+    'service_role',
+    'public.researcher_report_summary(uuid)',
+    'EXECUTE'
+  ) then
+    raise exception 'The API service role cannot execute the MR-01 read model';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'reports'
+      and indexname = 'reports_researcher_status_submitted_at_idx'
+  ) then
+    raise exception 'MR-01 is missing the researcher/status aggregate index';
+  end if;
+end;
+$mr01_researcher_report_summary$;
 
 -- MR-02: filter options cover the researcher's complete report dataset, and only that dataset.
 -- This checks the SQL read model independently of the HTTP mock so a removed researcher predicate
@@ -1165,7 +1304,7 @@ $bt03_public_paid_sort_key$;
 -- happy path must produce a submitted report whose selected impacts are snapshotted relational
 -- rows, and every reject branch must raise the machine-readable code the API maps into
 -- `error.code`. Seed layout: program 1 active/smart_contract/PoC-required (scope 1 in scope,
--- scope 101 out of scope, impacts 32200000-...-0001-...01..05 = informational..critical),
+-- scope 101 out of scope, impacts 32200000-...-8001-...01..05 = informational..critical),
 -- program 2 active/website, program 3 active/PoC-optional, program 7 paused.
 do $sr04_submit_report_contract$
 declare
@@ -1180,12 +1319,12 @@ declare
   scope_two uuid := '32000000-0000-4000-8000-000000000002';
   scope_optional_poc uuid := '32000000-0000-4000-8000-000000000003';
   scope_paused uuid := '32000000-0000-4000-8000-000000000007';
-  impact_low uuid := '32200000-0000-4000-0001-000000000002';
-  impact_medium uuid := '32200000-0000-4000-0001-000000000003';
-  impact_high uuid := '32200000-0000-4000-0001-000000000004';
-  impact_critical uuid := '32200000-0000-4000-0001-000000000005';
-  impact_foreign uuid := '32200000-0000-4000-0002-000000000004';
-  impact_optional_poc uuid := '32200000-0000-4000-0003-000000000004';
+  impact_low uuid := '32200000-0000-4000-8001-000000000002';
+  impact_medium uuid := '32200000-0000-4000-8001-000000000003';
+  impact_high uuid := '32200000-0000-4000-8001-000000000004';
+  impact_critical uuid := '32200000-0000-4000-8001-000000000005';
+  impact_foreign uuid := '32200000-0000-4000-8002-000000000004';
+  impact_optional_poc uuid := '32200000-0000-4000-8003-000000000004';
   cross_asset_impact uuid := '39000000-0000-4000-8000-000000000001';
   base_input jsonb;
   rejected_code text;
@@ -1613,5 +1752,357 @@ begin
   end if;
 end;
 $sr04_submit_report_contract$;
+
+do $rw02_researcher_reward_projection$
+declare
+  researcher_actor uuid;
+  report_status_before text;
+  transactions_before integer;
+  settlement_reviews_before integer;
+  projected_total bigint;
+  expected_total bigint;
+  pending_position bigint;
+  approved_position bigint;
+  paid_position bigint;
+begin
+  select researcher_id into researcher_actor
+  from public.reports
+  where id = '33000000-0000-4000-8000-000000000009';
+
+  if exists (
+    select 1
+    from public.researcher_rewards(researcher_actor, null, 100, 0) as reward
+    join public.reports as report on report.id = reward.report_id
+    where report.researcher_id <> researcher_actor
+  ) then
+    raise exception 'Researcher reward projection crossed the report ownership boundary';
+  end if;
+
+  select count(*) into expected_total
+  from public.reports
+  where researcher_id = researcher_actor
+    and status in ('reward_approved', 'payment_pending', 'paid');
+  select total_count into projected_total
+  from public.researcher_rewards(researcher_actor, null, 20, 100000)
+  where report_id is null;
+
+  if projected_total is distinct from expected_total then
+    raise exception
+      'Out-of-range reward page lost exact total: expected %, got %',
+      expected_total,
+      projected_total;
+  end if;
+
+  if not exists (
+    select 1
+    from public.researcher_rewards(researcher_actor, null, 100, 0)
+    where report_id = '33000000-0000-4000-8000-000000000009'
+      and reward_status = 'paid'
+      and approved_reward = '1000.000000'
+      and submitted_at is not null
+      and paid_at is not null
+      and payment_status = 'confirmed'
+      and payment_chain_id is not null
+      and payment_token_address = '0x' || repeat('b', 40)
+      and payment_transaction_hash = '0x' || repeat('a', 64)
+      and payment_confirmations = 12
+      and payment_confirmed_at is not null
+  ) then
+    raise exception 'Paid reward projection did not link the confirmed payout evidence';
+  end if;
+
+  -- Pagination must happen after lifecycle-priority ordering. A client cannot safely reorder one
+  -- page without corrupting the order across the complete researcher dataset.
+  update public.reports
+  set status = 'payment_pending'
+  where id = '33000000-0000-4000-8000-000000000006'
+    and researcher_id = researcher_actor
+    and status = 'reward_approved';
+
+  select
+    min(position) filter (where reward_status = 'payment_pending'),
+    min(position) filter (where reward_status = 'reward_approved'),
+    min(position) filter (where reward_status = 'paid')
+  into pending_position, approved_position, paid_position
+  from public.researcher_rewards(researcher_actor, null, 100, 0)
+    with ordinality as reward(
+      report_id,
+      program_id,
+      program_name,
+      report_title,
+      final_severity,
+      reward_status,
+      approved_reward,
+      submitted_at,
+      reward_approved_at,
+      payment_chain_id,
+      payment_token_address,
+      payment_transaction_hash,
+      payment_status,
+      payment_confirmations,
+      payment_confirmed_at,
+      paid_at,
+      total_count,
+      position
+    );
+
+  if pending_position is null
+    or approved_position is null
+    or paid_position is null
+    or not (pending_position < approved_position and approved_position < paid_position)
+  then
+    raise exception
+      'Reward projection order is not payment_pending -> reward_approved -> paid: %, %, %',
+      pending_position,
+      approved_position,
+      paid_position;
+  end if;
+
+  if exists (
+    select 1
+    from public.researcher_rewards(researcher_actor, 'paid', 100, 0)
+    where reward_status <> 'paid'
+  ) then
+    raise exception 'Reward status filter returned another lifecycle state';
+  end if;
+
+  begin
+    perform 1
+    from public.researcher_rewards(
+      '30000000-0000-4000-8000-000000000001',
+      null,
+      20,
+      0
+    );
+    raise exception 'Owner identity read the researcher-only reward projection';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  -- Settlement RPCs independently reject a researcher even when they know a report UUID.
+  begin
+    perform public.approve_report_reward_atomic(
+      researcher_actor,
+      '33000000-0000-4000-8000-000000000005',
+      1000
+    );
+    raise exception 'Researcher approved a reward';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  begin
+    perform public.start_report_payment_atomic(
+      researcher_actor,
+      '33000000-0000-4000-8000-000000000009',
+      '0x' || repeat('e', 64),
+      '0x' || repeat('f', 40)
+    );
+    raise exception 'Researcher started a payout';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  begin
+    perform public.confirm_report_payment_atomic(
+      researcher_actor,
+      '33000000-0000-4000-8000-000000000009',
+      9999,
+      '0x' || repeat('d', 64),
+      12
+    );
+    raise exception 'Researcher confirmed a payout';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  -- AI rows are passive assistance. Writing one must not create reviews, transactions or a
+  -- settlement state transition.
+  select status into report_status_before
+  from public.reports
+  where id = '33000000-0000-4000-8000-000000000017';
+  select count(*) into transactions_before from public.escrow_transactions;
+  select count(*) into settlement_reviews_before
+  from public.report_reviews
+  where action in ('approve_reward', 'start_payment', 'confirm_payment');
+
+  insert into public.ai_triage_results (
+    id,
+    report_id,
+    provider,
+    model,
+    schema_version,
+    result,
+    confidence
+  )
+  values (
+    '88000000-0000-4000-8000-000000000002',
+    '33000000-0000-4000-8000-000000000017',
+    'mock',
+    'rw02-passive-assistance',
+    1,
+    '{"summary":"No settlement instruction","suggestedSeverity":"low"}'::jsonb,
+    0.5
+  );
+
+  if (
+    select status <> report_status_before
+    from public.reports
+    where id = '33000000-0000-4000-8000-000000000017'
+  ) or (select count(*) from public.escrow_transactions) <> transactions_before
+    or (
+      select count(*) from public.report_reviews
+      where action in ('approve_reward', 'start_payment', 'confirm_payment')
+    ) <> settlement_reviews_before
+  then
+    raise exception 'AI output triggered a settlement side effect';
+  end if;
+end;
+$rw02_researcher_reward_projection$;
+
+do $rw04_researcher_payout_wallet$
+declare
+  researcher_actor uuid := '30000000-0000-4000-8000-000000000002';
+  inactive_actor uuid := '30000000-0000-4000-8000-000000000098';
+  first_wallet text := '0x' || repeat('A', 40);
+  normalized_first_wallet text := '0x' || repeat('a', 40);
+  replacement_wallet text := '0x' || repeat('b', 40);
+  audit_count integer;
+begin
+  if has_function_privilege(
+    'authenticated',
+    'public.researcher_payout_wallet(uuid)',
+    'execute'
+  ) or has_function_privilege(
+    'authenticated',
+    'public.set_researcher_payout_wallet(uuid,text,boolean)',
+    'execute'
+  ) then
+    raise exception 'Authenticated clients could bypass the payout-wallet API boundary';
+  end if;
+
+  if not has_function_privilege(
+    'service_role',
+    'public.researcher_payout_wallet(uuid)',
+    'execute'
+  ) or not has_function_privilege(
+    'service_role',
+    'public.set_researcher_payout_wallet(uuid,text,boolean)',
+    'execute'
+  ) then
+    raise exception 'Service role cannot execute the payout-wallet RPCs';
+  end if;
+
+  if not exists (
+    select 1
+    from public.researcher_payout_wallet(researcher_actor)
+    where wallet_address is null
+      and wallet_updated_at is null
+      and has_active_rewards
+  ) then
+    raise exception 'Researcher wallet read did not expose the active-reward requirement';
+  end if;
+
+  begin
+    perform 1
+    from public.researcher_payout_wallet('30000000-0000-4000-8000-000000000001');
+    raise exception 'Owner read the researcher-only payout wallet';
+  exception
+    when sqlstate '42501' then null;
+  end;
+
+  begin
+    perform 1
+    from public.set_researcher_payout_wallet(
+      researcher_actor,
+      'not-an-address',
+      false
+    );
+    raise exception 'Invalid payout wallet unexpectedly succeeded';
+  exception
+    when sqlstate '22023' then
+      if sqlerrm <> 'wallet_address_invalid' then
+        raise;
+      end if;
+  end;
+
+  perform 1
+  from public.set_researcher_payout_wallet(researcher_actor, first_wallet, false);
+
+  if not exists (
+    select 1
+    from public.researcher_payout_wallet(researcher_actor)
+    where wallet_address = normalized_first_wallet
+      and wallet_updated_at is not null
+      and has_active_rewards
+  ) then
+    raise exception 'Payout wallet was not normalized and stored for the researcher';
+  end if;
+
+  select count(*) into audit_count
+  from public.audit_logs
+  where actor_id = researcher_actor
+    and action = 'profile.payout_wallet_set'
+    and metadata @> '{"network":"Arc","asset":"USDC","hadPreviousDestination":false}'::jsonb
+    and metadata::text not like '%' || normalized_first_wallet || '%';
+
+  if audit_count <> 1 then
+    raise exception 'Initial payout-wallet write did not create one redacted audit event';
+  end if;
+
+  begin
+    perform 1
+    from public.set_researcher_payout_wallet(researcher_actor, replacement_wallet, false);
+    raise exception 'Active payout wallet changed without explicit confirmation';
+  exception
+    when sqlstate '22023' then null;
+  end;
+
+  if (
+    select wallet_address <> normalized_first_wallet
+    from public.profiles
+    where id = researcher_actor
+  ) then
+    raise exception 'Rejected payout-wallet replacement changed the stored destination';
+  end if;
+
+  perform 1
+  from public.set_researcher_payout_wallet(researcher_actor, replacement_wallet, true);
+  perform 1
+  from public.set_researcher_payout_wallet(researcher_actor, replacement_wallet, false);
+
+  select count(*) into audit_count
+  from public.audit_logs
+  where actor_id = researcher_actor
+    and action in ('profile.payout_wallet_set', 'profile.payout_wallet_changed');
+
+  if audit_count <> 2 or not exists (
+    select 1
+    from public.audit_logs
+    where actor_id = researcher_actor
+      and action = 'profile.payout_wallet_changed'
+      and metadata @> '{"activeRewardChangeConfirmed":true}'::jsonb
+      and metadata::text not like '%' || replacement_wallet || '%'
+  ) then
+    raise exception 'Confirmed payout-wallet replacement audit is missing or not redacted';
+  end if;
+
+  insert into auth.users (id, email, encrypted_password, raw_user_meta_data)
+  values (
+    inactive_actor,
+    'inactive-wallet@local.demo',
+    '__DEMO_PASSWORD_HASH__',
+    '{"display_name":"Inactive Researcher"}'
+  );
+
+  begin
+    perform 1
+    from public.set_researcher_payout_wallet(inactive_actor, normalized_first_wallet, false);
+    raise exception 'Researcher without an active reward configured a payout wallet';
+  exception
+    when sqlstate '22023' then null;
+  end;
+end;
+$rw04_researcher_payout_wallet$;
 
 rollback;

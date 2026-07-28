@@ -1,0 +1,9 @@
+services:
+  kong:
+    ports: !override
+      - '127.0.0.1:7832:8000/tcp'
+
+  supavisor:
+    ports: !override
+      - '127.0.0.1:5433:5432/tcp'
+      - '127.0.0.1:6544:6543/tcp'

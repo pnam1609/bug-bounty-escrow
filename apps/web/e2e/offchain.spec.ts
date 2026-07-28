@@ -1,6 +1,5 @@
 import {
   AEGIS_SUMMARY,
-  IDS,
   LUMEN_SUMMARY,
   ORBIT_SUMMARY,
   PRIVATE_PROGRAM_NAMES,
@@ -47,7 +46,7 @@ test('QA-E2E-001 the bounty table lists public programs, marks a private payout 
 
   await table.getByRole('link', { name: `View bounty for ${AEGIS_SUMMARY.name}` }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/programs/${IDS.aegis}$`));
+  await expect(page).toHaveURL(new RegExp(`/programs/${AEGIS_SUMMARY.slug}$`));
   await expect(page.getByRole('heading', { level: 1, name: AEGIS_SUMMARY.name })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Submit a private report' })).toBeVisible();
 });

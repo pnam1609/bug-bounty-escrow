@@ -59,7 +59,7 @@ nhất theo domain và thêm assertion chống drift trong `verify_schema.sql`.
 | §11 API | Không có publish | Create-program flow CP-13 kết thúc bằng `Publish program` → cần `POST /api/programs/:id/publish` |
 | §11 API | Không có notifications | Cả 2 flow researcher/owner đều có notification icon trong header |
 | §9 Security rules | "Public chỉ xem active programs" | Bounty-table flow: public xem cả `active` và ended (`expired`/`closed`) |
-| §7 routes | `programs/[slug]` | Cả 3 flow dùng `/programs/:id`. Cần chốt một cái. |
+| §7 routes | `programs/[slug]` | Đã chốt canonical public route `/programs/:slug`; owner mutations, report submission và foreign key tiếp tục dùng UUID. |
 | §2 state machine | `SUBMITTED → TRIAGED → …` | Đúng, nhưng `DRAFT` không tồn tại server-side (submit flow §2: draft chỉ nằm trong `localStorage`) |
 
 ---
@@ -487,7 +487,7 @@ create unique index escrow_transactions_hash_idx
 | Method | Path | Trạng thái | Ghi chú |
 | --- | --- | --- | --- |
 | GET | `/api/programs` | ⚠️ | Xem 6.3 |
-| GET | `/api/programs/:id` | ⚠️ | Cần trả thêm `impacts`, `tags`, `resources`, `prohibitedActivities`, `pocPolicy`, `rewardPolicy`, `totalPaid`, `totalPaidVisibility` |
+| GET | `/api/programs/:slug` | ⚠️ | Canonical public detail lookup; cần trả thêm `impacts`, `tags`, `resources`, `prohibitedActivities`, `pocPolicy`, `rewardPolicy`, `totalPaid`, `totalPaidVisibility` |
 | GET | `/api/programs/:id/disclosures` | ❌ | Known Issues — chỉ đọc `report_disclosures` đã published |
 
 ### 6.3 `GET /api/programs` — query contract đích

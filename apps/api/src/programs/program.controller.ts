@@ -1,4 +1,12 @@
-import { Controller, Delete, Get, Inject, Patch, Post, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Patch,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   assignReviewerRequestSchema,
   commentListQuerySchema,
@@ -8,7 +16,9 @@ import {
   logoUploadRequestSchema,
   ownerProgramListQuerySchema,
   programIdParamsSchema,
+  programSlugParamsSchema,
   programListQuerySchema,
+  programListResponseSchema,
   programReviewerParamsSchema,
   programStatusChangeRequestSchema,
   transactionHashParamsSchema,
@@ -25,6 +35,7 @@ import {
   type ProgramListQuery,
   type ProgramListResponse,
   type ProgramResponse,
+  type ProgramSlugParams,
   type ProgramReviewerListResponse,
   type ProgramReviewerParams,
   type ProgramStatusChangeRequest,
@@ -34,7 +45,7 @@ import {
   type UpdateProgramRequest,
 } from '@bug-bounty-escrow/shared';
 
-import { ZodBody, ZodParam, ZodQuery } from '../openapi/zod-openapi.js';
+import { ApiZodResponse, ZodBody, ZodParam, ZodQuery } from '../openapi/zod-openapi.js';
 import { CurrentPrincipal } from '../common/decorators/current-principal.decorator.js';
 import { Public } from '../common/decorators/public.decorator.js';
 import { RateLimit } from '../common/decorators/rate-limit.decorator.js';
@@ -56,6 +67,11 @@ export class ProgramController {
   /** Public bounty table. Never returns draft, awaiting-funding or paused programs. */
   @Public()
   @Get()
+  @ApiZodResponse(
+    200,
+    'Public programs with active programs ordered before ended programs',
+    programListResponseSchema,
+  )
   public list(
     @ZodQuery(programListQuerySchema)
     query: ProgramListQuery,
@@ -74,12 +90,12 @@ export class ProgramController {
   }
 
   @Public()
-  @Get(':id')
+  @Get(':slug')
   public async get(
-    @ZodParam(programIdParamsSchema) params: ProgramIdParams,
+    @ZodParam(programSlugParamsSchema) params: ProgramSlugParams,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ProgramResponse> {
-    return { success: true, data: await this.service.get(params.id, principal) };
+    return { success: true, data: await this.service.getBySlug(params.slug, principal) };
   }
 
   @Roles('owner')
@@ -205,6 +221,7 @@ export class ProgramController {
     };
   }
 
+  @Roles('owner', 'reviewer')
   @Get(':id/transactions')
   public transactions(
     @ZodParam(programIdParamsSchema) params: ProgramIdParams,
@@ -235,12 +252,25 @@ export class OwnerProgramController {
   ): Promise<ProgramListResponse> {
     return this.service.listOwned(requirePrincipal(principal), query);
   }
+
+  @Roles('owner')
+  @Get(':id')
+  public async get(
+    @ZodParam(programIdParamsSchema) params: ProgramIdParams,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<ProgramResponse> {
+    return {
+      success: true,
+      data: await this.service.getOwned(requirePrincipal(principal), params.id),
+    };
+  }
 }
 
 @Controller('transactions')
 export class TransactionController {
   public constructor(@Inject(ProgramService) private readonly service: ProgramService) {}
 
+  @Roles('owner', 'reviewer')
   @Get(':hash')
   public async get(
     @ZodParam(transactionHashParamsSchema) params: TransactionHashParams,

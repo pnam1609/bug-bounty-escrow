@@ -83,15 +83,16 @@ describe('SR-10 successful completion lifecycle', () => {
     });
 
     await finishSubmittedReport({
-      programId: 'program-a',
+      principalId: 'researcher-a',
+      draftKey: 'aegis-protocol',
       queryClient: {
         setQueryData: (key, value) => {
-          expect(key).toEqual(['report', 'report-42']);
+          expect(key).toEqual(['private', 'researcher-a', 'report', 'report-42']);
           expect(value).toBe(report);
           events.push('cache');
         },
         invalidateQueries: async ({ queryKey }) => {
-          expect(queryKey).toEqual(['reports']);
+          expect(queryKey).toEqual(['private', 'researcher-a', 'reports']);
           events.push('invalidate');
         },
       },
@@ -102,7 +103,7 @@ describe('SR-10 successful completion lifecycle', () => {
     });
 
     expect(events).toEqual([
-      'clear:offchain-report-draft:program-a',
+      'clear:offchain-report-draft:aegis-protocol',
       'cache',
       'invalidate',
       'replace:/reports/report-42',

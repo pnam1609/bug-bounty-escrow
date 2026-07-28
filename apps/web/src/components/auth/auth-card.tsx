@@ -9,9 +9,11 @@ import {
   Separator,
 } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
-import { useId, type ReactNode, type Ref } from 'react';
+import { useState, type ReactNode, type Ref } from 'react';
 
 import type { AuthFailure } from './auth-errors';
+import { buildGoogleOAuthCallbackUrl } from './oauth';
+import { useAuth } from '@/providers/auth-provider';
 
 /**
  * The pieces both auth cards share: Figma `Sign In / Form Card` (62:117) and
@@ -48,21 +50,42 @@ export function AuthCard({ children, description, title, titleRef }: AuthCardPro
 }
 
 /**
- * The frame's "Continue with Google" action. `auth-provider.tsx` exposes password sign-in only and
- * no OAuth provider is configured, so the control is drawn as designed but disabled, with the
- * reason in text next to it rather than left as a dead affordance.
+ * The shared Google action used by sign-in and registration. Supabase owns the provider exchange;
+ * the app callback only receives the resulting session and applies BBE's role-aware routing.
  */
-export function AuthOauthAction() {
-  const noteId = useId();
+export function AuthOauthAction({ returnTo }: { readonly returnTo: string | null }) {
+  const auth = useAuth();
+  const [failure, setFailure] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function continueWithGoogle(): Promise<void> {
+    setFailure(null);
+    setLoading(true);
+
+    try {
+      await auth.signInWithGoogle(buildGoogleOAuthCallbackUrl(window.location.origin, returnTo));
+      // Successful OAuth navigation leaves this document. Keep the button busy until that happens
+      // so a slow provider redirect cannot be started twice.
+    } catch {
+      setFailure('Google sign-in could not be started. Please try again.');
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="flex w-full flex-col gap-sm">
-      <Button aria-describedby={noteId} className="w-full" disabled size="lg" variant="secondary">
+      {failure === null ? null : <Callout variant="danger">{failure}</Callout>}
+      <Button
+        className="w-full"
+        disabled={auth.error !== null || auth.loading}
+        loading={loading}
+        loadingLabel="Opening Google sign-in"
+        onClick={() => void continueWithGoogle()}
+        size="lg"
+        variant="secondary"
+      >
         Continue with Google
       </Button>
-      <p className="text-label-sm text-text-muted" id={noteId}>
-        Google sign-in is not enabled yet. Continue with your email address below.
-      </p>
     </div>
   );
 }

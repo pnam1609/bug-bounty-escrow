@@ -14,7 +14,7 @@ import {
  * The walk-through example is the flow doc's own: an anonymous click on the report composer.
  */
 
-const composer = '/reports/new?programId=3f8a1f6e-1111-4222-8333-944445555666';
+const composer = '/reports/new?programSlug=aegis-protocol';
 
 /** A signed-in, onboarded researcher standing on the composer route — overridden per case. */
 function onComposer(overrides: Partial<RouteAccessInput> = {}): RouteAccessInput {
@@ -41,7 +41,7 @@ describe('branch 1 — anonymous', () => {
     // The doc's literal example: §6.9 spells this exact URL out.
     expect(decision).toHaveProperty(
       'href',
-      '/login?returnTo=%2Freports%2Fnew%3FprogramId%3D3f8a1f6e-1111-4222-8333-944445555666',
+      '/login?returnTo=%2Freports%2Fnew%3FprogramSlug%3Daegis-protocol',
     );
   });
 
@@ -53,6 +53,22 @@ describe('branch 1 — anonymous', () => {
       }),
     );
     expect(decision.kind).toBe('redirect-login');
+  });
+
+  it('preserves the rewards destination without exposing any reward data', () => {
+    const decision = decideRouteAccess(
+      onComposer({
+        hasSession: false,
+        location: '/rewards',
+        pathname: '/rewards',
+        profile: undefined,
+      }),
+    );
+
+    expect(decision).toMatchObject({
+      kind: 'redirect-login',
+      href: '/login?returnTo=%2Frewards',
+    });
   });
 });
 
@@ -120,6 +136,22 @@ describe('branch 3 — wrong role', () => {
     });
   });
 
+  it('uses the same safe researcher-only guard for the reward dashboard', () => {
+    const decision = decideRouteAccess(
+      onComposer({
+        location: '/rewards',
+        pathname: '/rewards',
+        profile: { onboardingComplete: true, role: 'owner' },
+      }),
+    );
+
+    expect(decision).toMatchObject({
+      kind: 'forbidden',
+      title: FORBIDDEN_TITLE,
+      message: 'Your account does not have Security researcher access.',
+    });
+  });
+
   it('joins multi-role areas, e.g. the review inbox', () => {
     expect(forbiddenAccessMessage(['owner', 'reviewer'])).toBe(
       'Your account does not have Program owner or Reviewer access.',
@@ -136,6 +168,9 @@ describe('branch 3 — wrong role', () => {
     );
     expect(forbiddenMessageForPath('/review')).toBe(
       'Your account does not have Program owner or Reviewer access.',
+    );
+    expect(forbiddenMessageForPath('/rewards')).toBe(
+      'Your account does not have Security researcher access.',
     );
     // `/ownership` is not `/owner`, and an unguarded path names no role at all.
     expect(forbiddenMessageForPath('/ownership')).toBe(

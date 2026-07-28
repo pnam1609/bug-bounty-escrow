@@ -32,10 +32,11 @@ const PAGE_SIZE = 20;
 
 export function ReviewInboxView() {
   const { session } = useAuth();
+  const principalId = session?.user.id ?? 'no-session';
   const controls = useReportFilters();
 
   const query = useInfiniteQuery({
-    queryKey: queryKeys.reports(toReportQueryKey(controls.filters, 'review')),
+    queryKey: queryKeys.reports(principalId, toReportQueryKey(controls.filters, 'review')),
     enabled: session !== null,
     queryFn: ({ pageParam }) =>
       apiRequest(

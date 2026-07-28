@@ -9,7 +9,7 @@ interface SummaryRow {
   readonly all_reports: string | number;
   readonly needs_information: string | number;
   readonly under_review: string | number;
-  readonly rewards_paid: string | number;
+  readonly rewards_paid: string;
 }
 
 type SummaryCounts = Pick<
@@ -27,14 +27,12 @@ function count(value: string | number): number {
   return parsed;
 }
 
-function money(value: string | number): string {
-  const decimal = typeof value === 'number' ? value.toFixed(6) : value;
-
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(decimal)) {
+function money(value: string): string {
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(value)) {
     throw new Error('The database returned an invalid paid reward total');
   }
 
-  const [whole = '0', fraction = ''] = decimal.split('.');
+  const [whole = '0', fraction = ''] = value.split('.');
   return `${whole}.${fraction.padEnd(6, '0')}`;
 }
 

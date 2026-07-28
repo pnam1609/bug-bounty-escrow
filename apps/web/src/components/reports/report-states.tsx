@@ -1,7 +1,20 @@
 'use client';
 
-import { Button, Card } from '@bug-bounty-escrow/ui';
+import {
+  Button,
+  Card,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@bug-bounty-escrow/ui';
 import type { ReactNode } from 'react';
+
+import { ReportPageHeader, ReportSummarySkeleton } from './report-summary';
+import { REPORT_COLUMN_WIDTHS } from './report-table';
 
 /*
  * No Figma source — the message and skeleton states for the report surfaces.
@@ -64,11 +77,103 @@ export function ReportLoadError({
  * boxes — the live region on the surface itself announces that the page is loading.
  */
 export function ReportListSkeleton({ rows = 4 }: { readonly rows?: number }) {
+  const columns = [
+    ['report', 'w-40'],
+    ['program', 'w-28'],
+    ['severity', 'w-20'],
+    ['status', 'w-24'],
+    ['reward', 'w-16'],
+    ['updated', 'w-20'],
+    ['action', 'w-12'],
+  ] as const;
+
   return (
-    <div aria-hidden="true" className="flex flex-col gap-md">
-      {Array.from({ length: rows }, (_, index) => (
-        <Card className="h-24" key={index} />
-      ))}
+    <div aria-label="Loading reports" role="status">
+      <div aria-hidden="true">
+        <Table containerClassName="hidden rounded-lg md:block">
+          <TableCaption className="caption-top m-0 p-xl text-left">
+            <span className="flex items-center justify-between gap-xl">
+              <span className="text-label-lg text-text">Recent reports</span>
+              <span className="text-label-sm text-text-muted">
+                Participant-only · Newest submitted first
+              </span>
+            </span>
+          </TableCaption>
+          <TableHeader>
+            <TableRow className="hover:bg-surface-raised">
+              <TableHead className={REPORT_COLUMN_WIDTHS.report}>Report</TableHead>
+              <TableHead className={REPORT_COLUMN_WIDTHS.program}>Program</TableHead>
+              <TableHead className={REPORT_COLUMN_WIDTHS.severity}>Severity</TableHead>
+              <TableHead className={REPORT_COLUMN_WIDTHS.status}>Status</TableHead>
+              <TableHead className={REPORT_COLUMN_WIDTHS.reward}>Reward</TableHead>
+              <TableHead className={REPORT_COLUMN_WIDTHS.updated}>Updated</TableHead>
+              <TableHead className={`${REPORT_COLUMN_WIDTHS.action} text-right`}>Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: rows }, (_, row) => (
+              <TableRow className="h-20" key={row}>
+                {columns.map(([column, width]) => (
+                  <TableCell
+                    className={REPORT_COLUMN_WIDTHS[column]}
+                    key={`${String(row)}-${column}`}
+                  >
+                    <span
+                      className={`block h-4 animate-pulse rounded-sm bg-ambient motion-reduce:animate-none ${width}`}
+                    />
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+
+        <div className="flex flex-col gap-md md:hidden">
+          {Array.from({ length: rows }, (_, row) => (
+            <Card className="gap-md" key={row}>
+              <span className="h-4 w-40 animate-pulse rounded-sm bg-ambient motion-reduce:animate-none" />
+              <span className="h-4 w-28 animate-pulse rounded-sm bg-ambient motion-reduce:animate-none" />
+              <span className="h-8 w-48 animate-pulse rounded-full bg-ambient motion-reduce:animate-none" />
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ReportFilterSkeleton() {
+  const fields = [
+    ['Program', 'sm:w-72'],
+    ['Status', 'sm:w-64'],
+    ['Severity', 'sm:w-60'],
+  ] as const;
+
+  return (
+    <div aria-label="Loading report filters" role="status">
+      <div aria-hidden="true" className="flex flex-col gap-lg sm:flex-row sm:items-end">
+        {fields.map(([label, width]) => (
+          <div className={`flex flex-col gap-sm ${width}`} key={label}>
+            <span className="text-label-lg text-text">{label}</span>
+            <span className="h-14 rounded-md border border-border bg-surface" />
+          </div>
+        ))}
+        <Button className="sm:mb-px" disabled size="lg" variant="ghost">
+          Reset filters
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Suspense fallback with the same major geometry as the settled My Reports screen. */
+export function ReportListPageSkeleton() {
+  return (
+    <div className="flex flex-col gap-xl">
+      <ReportPageHeader />
+      <ReportSummarySkeleton />
+      <ReportFilterSkeleton />
+      <ReportListSkeleton />
     </div>
   );
 }

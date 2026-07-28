@@ -56,7 +56,7 @@ export interface StepAssetsImpactProps {
   readonly onRemoveStaleImpacts: () => void;
   readonly onSelectScope: (scopeId: string) => void;
   readonly onToggleImpact: (impactId: string, checked: boolean) => void;
-  readonly programId: string;
+  readonly programSlug: string;
   readonly scope: ProgramScope | undefined;
   readonly scopes: readonly ProgramScope[];
   /**
@@ -78,7 +78,7 @@ export function StepAssetsImpact({
   onRemoveStaleImpacts,
   onSelectScope,
   onToggleImpact,
-  programId,
+  programSlug,
   scope,
   scopes,
   staleImpactCount,
@@ -262,7 +262,7 @@ export function StepAssetsImpact({
 
       <Link
         className="inline-flex min-h-11 w-fit items-center gap-sm rounded-sm text-body-sm text-primary hover:underline"
-        href={`/programs/${programId}#scope`}
+        href={`/programs/${programSlug}#scope`}
       >
         View impact definitions
         <ExternalLink aria-hidden="true" className="size-4 shrink-0" />

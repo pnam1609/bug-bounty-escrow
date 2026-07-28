@@ -4,7 +4,7 @@ import { URL, pathToFileURL } from 'node:url';
 
 import pg from 'pg';
 
-import { compatibilityBootstrap } from './reset-demo.mjs';
+import { compatibilityBootstrap } from './compatibility-bootstrap.mjs';
 
 /*
  * Applies `migrations/` to a real PostgreSQL over a connection string.

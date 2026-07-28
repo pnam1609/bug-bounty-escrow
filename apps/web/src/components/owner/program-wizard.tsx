@@ -337,7 +337,10 @@ export function ProgramWizard({ initialDraft, onClose, program }: ProgramWizardP
     },
     onSuccess: async ({ logoFailed, program: saved }) => {
       setDirty(false);
-      client.setQueryData(queryKeys.program(saved.id), { success: true, data: saved });
+      client.setQueryData(
+        queryKeys.ownerProgram(session?.user.id ?? 'no-session', saved.id),
+        { success: true, data: saved },
+      );
       await client.invalidateQueries({ queryKey: ['programs'] });
 
       // Rebuilt from this attempt every time, so a `logo=failed` warning left in the URL by an

@@ -19,6 +19,7 @@ import { ReportContent } from './report-content';
 import {
   describeTime,
   formatUsdc,
+  reportReferenceAriaLabel,
   REPORT_STATUS_SUMMARY,
   SEVERITY_LABELS,
   shortReportId,
@@ -50,9 +51,11 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
   const { session } = useAuth();
   const viewer = useCurrentUser();
   const token = session?.access_token;
+  const principalId = session?.user.id ?? 'no-session';
 
   const query = useQuery({
-    queryKey: queryKeys.report(id),
+    queryKey: queryKeys.report(principalId, id),
+    enabled: session !== null,
     queryFn: () =>
       apiRequest(`/api/reports/${encodeURIComponent(id)}`, reportResponseSchema, { token }),
   });
@@ -107,7 +110,11 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
             </Link>
           </li>
           <li aria-hidden="true">/</li>
-          <li aria-current="page" className="font-mono text-text">
+          <li
+            aria-current="page"
+            aria-label={reportReferenceAriaLabel(report.id)}
+            className="font-mono text-text"
+          >
             {shortReportId(report.id)}
           </li>
         </ol>
@@ -129,7 +136,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
             <p className="flex flex-wrap items-center gap-sm text-body-sm text-text-muted">
               <Link
                 className="inline-flex min-h-11 items-center rounded-sm hover:text-text"
-                href={`/programs/${encodeURIComponent(report.programId)}`}
+                href={`/programs/${encodeURIComponent(report.programSlug)}`}
               >
                 {report.programName}
               </Link>
@@ -154,8 +161,9 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
       <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_338px] lg:items-start">
         <div className="flex min-w-0 flex-col gap-xl">
           <ReportContent report={report} token={token} />
-          <CommentThread
-            reportId={report.id}
+      <CommentThread
+        principalId={principalId}
+        reportId={report.id}
             researcherId={report.researcherId}
             token={token}
             viewerId={viewer.data?.id}
@@ -163,7 +171,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
         </div>
 
         <div className="flex flex-col gap-xl lg:sticky lg:top-xl">
-          <ReviewActions report={report} token={token} />
+          <ReviewActions principalId={principalId} report={report} token={token} />
 
           <Card className="h-fit gap-xl" padding="lg">
             <CardHeader>

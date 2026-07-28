@@ -9,8 +9,9 @@ import { useAuth } from '@/providers/auth-provider';
 
 export function useCurrentUser() {
   const { session } = useAuth();
+  const principalId = session?.user.id ?? 'no-session';
   return useQuery({
-    queryKey: queryKeys.me,
+    queryKey: queryKeys.me(principalId),
     enabled: session !== null,
     queryFn: async () =>
       (

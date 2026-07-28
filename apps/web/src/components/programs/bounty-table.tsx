@@ -187,7 +187,7 @@ function BountyTableRow({ program }: { readonly program: ProgramSummary }) {
             the row never contains a second interactive element. */}
         <Link
           className="inline-flex min-h-11 items-center justify-end gap-sm rounded-sm text-label-lg text-escrow after:absolute after:inset-0 after:rounded-sm after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-focus focus-visible:after:ring-inset"
-          href={`/programs/${program.id}`}
+          href={`/programs/${program.slug}`}
         >
           View bounty
           <span className="sr-only"> for {program.name}</span>

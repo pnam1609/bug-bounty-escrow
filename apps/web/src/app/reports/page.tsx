@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 
 import { ResearcherShell } from '@/components/programs/researcher-shell';
 import { ReportListView } from '@/components/reports/report-list-view';
-import { ReportListSkeleton } from '@/components/reports/report-states';
+import { ReportListPageSkeleton } from '@/components/reports/report-states';
 import { RoleGuard } from '@/components/role-guard';
 
 /*
@@ -24,7 +24,7 @@ export default function ReportsPage() {
     <RoleGuard allow={['researcher']}>
       <ResearcherShell showFooter width="table">
         {/* Filters live in the query string, so the view suspends until the client knows it. */}
-        <Suspense fallback={<ReportListSkeleton />}>
+        <Suspense fallback={<ReportListPageSkeleton />}>
           <ReportListView />
         </Suspense>
       </ResearcherShell>

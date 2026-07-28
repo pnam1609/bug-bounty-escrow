@@ -107,7 +107,7 @@ function RailBody({
       </p>
 
       <Link
-        href={`/programs/${program.id}`}
+        href={`/programs/${program.slug}`}
         className="inline-flex min-h-11 items-center gap-sm rounded-sm text-body-sm text-primary hover:underline"
       >
         Review full program scope

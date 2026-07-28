@@ -1,11 +1,11 @@
 'use client';
 
 /*
- * `/reports/new?programId=:id` — the researcher Submit Bug composer.
+ * `/reports/new?programSlug=:slug` — the researcher Submit Bug composer.
  *
  * The route itself only guards and routes: SR-12 wrong role and SR-13 session expiry come from
  * `RoleGuard` (which redirects to `/login` with a safe internal `returnTo`), SR-14 is the missing
- * `programId` case below, and everything from SR-00 onwards belongs to the composer.
+ * `programSlug` case below, and everything from SR-00 onwards belongs to the composer.
  */
 
 import { Button } from '@bug-bounty-escrow/ui';
@@ -53,14 +53,14 @@ function MissingProgram() {
 }
 
 function NewReportContent() {
-  const programId = useSearchParams().get('programId');
+  const programSlug = useSearchParams().get('programSlug');
 
-  if (programId === null || programId.trim() === '') return <MissingProgram />;
+  if (programSlug === null || programSlug.trim() === '') return <MissingProgram />;
 
-  // Keying on the program remounts the composer when `?programId=` changes: the route stays the
+  // Keying on the program remounts the composer when `?programSlug=` changes: the route stays the
   // same, so without this the step, the file and — worse — the previous program's local draft
   // would carry over and be autosaved under the new program's key.
-  return <SubmitBugComposer key={programId} programId={programId} />;
+  return <SubmitBugComposer key={programSlug} programSlug={programSlug} />;
 }
 
 export default function NewReportPage() {

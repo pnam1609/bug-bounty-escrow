@@ -61,6 +61,9 @@ export const API_ERROR_CODES = Object.freeze([
   'insufficient_available_pool',
   'reward_already_paid',
   'funding_amount_invalid',
+  'payout_wallet_not_required',
+  'wallet_address_invalid',
+  'wallet_change_confirmation_required',
 
   // Disclosure
   'disclosure_not_allowed_yet',

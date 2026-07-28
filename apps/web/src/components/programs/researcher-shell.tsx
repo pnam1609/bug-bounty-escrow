@@ -50,7 +50,7 @@ export type ResearcherContentWidth = keyof typeof RESEARCHER_CONTENT_WIDTHS;
 export const RESEARCHER_ACCOUNT_MENU_ITEMS = Object.freeze([
   { href: '/programs', label: 'Browse programs', disabled: false },
   { href: '/reports', label: 'My reports', disabled: false },
-  { href: '/rewards', label: 'Rewards · Future', disabled: true },
+  { href: '/rewards', label: 'Rewards', disabled: false },
   { href: ACCOUNT_SETTINGS_PATH, label: 'Account settings', disabled: false },
 ] as const);
 
@@ -193,11 +193,7 @@ export function ResearcherShell({
         </div>
       </main>
       {showFooter ? (
-        <SiteFooter
-          copyright={`© ${new Date().getFullYear()} BountyEscrow`}
-          variant="short"
-          width="frame"
-        />
+        <SiteFooter copyright={`© ${new Date().getFullYear()} BountyEscrow`} variant="short" />
       ) : null}
     </div>
   );

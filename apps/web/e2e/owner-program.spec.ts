@@ -114,13 +114,35 @@ test('QA-E2E-007 the owner wizard builds a program from structured fields and re
   });
 });
 
+test('program detail waits for the owner session before requesting a private draft', async ({
+  ownerPage: page,
+}) => {
+  const authorizationHeaders: Array<string | undefined> = [];
+
+  await page.route('**/api/programs/vault-rebuild-draft', async (route) => {
+    if (route.request().method() === 'GET') {
+      authorizationHeaders.push(route.request().headers()['authorization']);
+    }
+    await route.fallback();
+  });
+
+  await page.goto('/programs/vault-rebuild-draft');
+
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Vault Rebuild Draft' }),
+  ).toBeVisible();
+  expect(authorizationHeaders).toEqual(['Bearer owner-access-token']);
+});
+
 test('CP-11 deploy locks the workflow, preserves an errored receipt and retries the same payload', async ({
   ownerPage: page,
 }) => {
   const programPath = `/api/programs/${IDS.vaultDraft}`;
+  const ownerProgramPath = `/api/owner/programs/${IDS.vaultDraft}`;
   const initialResponsePromise = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === programPath && response.request().method() === 'GET',
+      new URL(response.url()).pathname === ownerProgramPath &&
+      response.request().method() === 'GET',
   );
 
   await page.goto(`/owner/programs/${IDS.vaultDraft}/edit`);
@@ -229,9 +251,11 @@ test('CP-12 funding locks navigation, retains an errored receipt and reaches fun
   ownerPage: page,
 }) => {
   const programPath = `/api/programs/${IDS.vaultDraft}`;
+  const ownerProgramPath = `/api/owner/programs/${IDS.vaultDraft}`;
   const initialResponsePromise = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === programPath && response.request().method() === 'GET',
+      new URL(response.url()).pathname === ownerProgramPath &&
+      response.request().method() === 'GET',
   );
 
   await page.goto(`/owner/programs/${IDS.vaultDraft}/edit`);

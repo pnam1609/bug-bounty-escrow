@@ -36,19 +36,26 @@ const MAX_COMMENT_LENGTH = 10_000;
 const PAGE_SIZE = 50;
 
 export interface CommentThreadProps {
+  readonly principalId: string;
   readonly reportId: string;
   readonly researcherId: string;
   readonly token: string | undefined;
   readonly viewerId: string | undefined;
 }
 
-export function CommentThread({ reportId, researcherId, token, viewerId }: CommentThreadProps) {
+export function CommentThread({
+  principalId,
+  reportId,
+  researcherId,
+  token,
+  viewerId,
+}: CommentThreadProps) {
   const client = useQueryClient();
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const query = useQuery({
-    queryKey: queryKeys.comments(reportId),
+    queryKey: queryKeys.comments(principalId, reportId),
     queryFn: () =>
       apiRequest(
         `/api/reports/${encodeURIComponent(reportId)}/comments?page=1&limit=${String(PAGE_SIZE)}`,
@@ -64,7 +71,8 @@ export function CommentThread({ reportId, researcherId, token, viewerId }: Comme
         createCommentResponseSchema,
         { method: 'POST', token, body: { body: value } },
       ),
-    onSuccess: async () => client.invalidateQueries({ queryKey: queryKeys.comments(reportId) }),
+    onSuccess: async () =>
+      client.invalidateQueries({ queryKey: queryKeys.comments(principalId, reportId) }),
   });
 
   function authorOf(authorId: string): string {

@@ -9,7 +9,7 @@ returns table (
   all_reports bigint,
   needs_information bigint,
   under_review bigint,
-  rewards_paid numeric(30, 6)
+  rewards_paid text
 )
 language plpgsql
 stable
@@ -34,7 +34,7 @@ begin
     coalesce(
       sum(reports.approved_reward) filter (where reports.status = 'paid'),
       0
-    )::numeric(30, 6)
+    )::numeric(30, 6)::text
   from public.reports
   where reports.researcher_id = actor_id;
 end;

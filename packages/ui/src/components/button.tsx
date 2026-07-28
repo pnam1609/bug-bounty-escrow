@@ -25,12 +25,12 @@ export type ButtonSize = (typeof BUTTON_SIZES)[number];
  */
 export const buttonVariants = cva(
   [
-    'relative inline-flex shrink-0 items-center justify-center gap-sm',
+    'relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-sm',
     'rounded-full text-label-lg font-semibold whitespace-nowrap',
     'transition-colors motion-reduce:transition-none',
     // Figma dims the whole disabled button to 42% rather than recolouring it.
-    'disabled:pointer-events-none disabled:opacity-[0.42]',
-    'aria-disabled:pointer-events-none aria-disabled:opacity-[0.42]',
+    'disabled:cursor-not-allowed disabled:opacity-[0.42]',
+    'aria-disabled:pointer-events-none aria-disabled:cursor-not-allowed aria-disabled:opacity-[0.42]',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0',
   ],
   {
@@ -59,8 +59,7 @@ const BUTTON_SPINNER_COLORS: Readonly<Record<ButtonVariant, string>> = Object.fr
 });
 
 export interface ButtonProps
-  extends ComponentPropsWithoutRef<'button'>,
-    VariantProps<typeof buttonVariants> {
+  extends ComponentPropsWithoutRef<'button'>, VariantProps<typeof buttonVariants> {
   /** Render the single child as the button — e.g. to wrap a Next `<Link>`. */
   asChild?: boolean | undefined;
   /** Disables the button and swaps the label for a spinner without changing its width. */

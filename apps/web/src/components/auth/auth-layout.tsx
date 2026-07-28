@@ -1,4 +1,4 @@
-import { Card, SiteBrand, SiteFooter } from '@bug-bounty-escrow/ui';
+import { Card, SiteBrand } from '@bug-bounty-escrow/ui';
 import type { ReactNode } from 'react';
 
 /**
@@ -64,19 +64,6 @@ export function AuthLayout({
           <div className={`flex w-full flex-col ${FORM_COLUMN_WIDTH}`}>{children}</div>
         </main>
       </div>
-
-      <SiteFooter
-        variant="short"
-        width="frame"
-        copyright="© 2026 BountyEscrow · Arc Testnet"
-        legal={
-          <>
-            <p className="text-label-sm text-text-muted">Privacy</p>
-            <p className="text-label-sm text-text-muted">Terms</p>
-          </>
-        }
-        status={<NetworkStatus />}
-      />
     </div>
   );
 }

@@ -126,7 +126,10 @@ export function ProgramLifecycle({
   const funded = Number(program.totalPool) > 0;
 
   function cacheProgram(saved: Program) {
-    client.setQueryData(queryKeys.program(saved.id), { success: true, data: saved });
+    client.setQueryData(
+      queryKeys.ownerProgram(session?.user.id ?? 'no-session', saved.id),
+      { success: true, data: saved },
+    );
     return client.invalidateQueries({ queryKey: ['programs'] });
   }
 
@@ -140,9 +143,11 @@ export function ProgramLifecycle({
 
       return recordEscrowDeployment(body, {
         loadProgram: async () => {
-          const response = await apiRequest(`/api/programs/${program.id}`, programResponseSchema, {
-            token: session?.access_token,
-          });
+          const response = await apiRequest(
+            `/api/owner/programs/${program.id}`,
+            programResponseSchema,
+            { token: session?.access_token },
+          );
           return response.data;
         },
         recordDeployment: async (input) => {
@@ -173,9 +178,11 @@ export function ProgramLifecycle({
 
       return recordProgramFunding(program.id, body, {
         loadProgram: async () => {
-          const response = await apiRequest(`/api/programs/${program.id}`, programResponseSchema, {
-            token: session?.access_token,
-          });
+          const response = await apiRequest(
+            `/api/owner/programs/${program.id}`,
+            programResponseSchema,
+            { token: session?.access_token },
+          );
           return response.data;
         },
         loadTransaction: async (transactionHash) => {

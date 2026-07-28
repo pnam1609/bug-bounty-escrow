@@ -155,7 +155,7 @@ export function SignUpForm() {
     >
       {unavailable ? <Callout variant="danger">{auth.error}</Callout> : null}
 
-      <AuthOauthAction />
+      <AuthOauthAction returnTo={safeReturnTo} />
       <AuthEmailDivider />
 
       <form className="flex w-full flex-col gap-2xl" noValidate onSubmit={(e) => void submit(e)}>

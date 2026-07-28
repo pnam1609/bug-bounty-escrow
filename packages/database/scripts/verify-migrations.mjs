@@ -41,6 +41,9 @@ const expectedMigrations = [
   '20260727110000_bt03_public_paid_sort_key.sql',
   '20260727163500_mr02_report_program_filter_options.sql',
   '20260727170000_mr01_researcher_report_summary.sql',
+  '20260727190000_rw02_researcher_rewards.sql',
+  '20260727200000_rw04_researcher_payout_wallet.sql',
+  '20260728090000_sr01_program_slug_immutable.sql',
 ];
 
 const tableMigrations = new Map([

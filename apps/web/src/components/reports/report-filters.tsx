@@ -1,6 +1,10 @@
 'use client';
 
-import type { Severity } from '@bug-bounty-escrow/shared';
+import {
+  uuidSchema,
+  type ReportProgramFilterOption,
+  type Severity,
+} from '@bug-bounty-escrow/shared';
 import {
   Button,
   Field,
@@ -22,10 +26,10 @@ import {
 } from './report-format';
 
 /*
- * No Figma source — the filter row above both report lists.
+ * Figma `282:4379` — the filter row above both report lists.
  *
- * `GET /api/reports` accepts one `status` and one `severity`, so the control is a pair of single
- * selects rather than a multi-select that would have to fake an OR the server cannot express.
+ * `GET /api/reports` accepts one program, one status and one severity, so every control is a single
+ * select rather than a multi-select that would have to fake an OR the server cannot express.
  *
  * Filters live in the URL the same way the bounty table's do: the query key changes with them, so
  * React Query discards the cached pages and restarts at page 1 without any extra bookkeeping, and
@@ -34,18 +38,29 @@ import {
 
 /** Radix reserves the empty string, so "no filter" needs a sentinel of its own. */
 const ANY = 'any';
+export const REPORT_PROGRAM_FILTER_OPTIONS_PATH = '/api/reports/filter-options/programs';
+export type ReportFilterKey = 'programId' | 'severity' | 'status';
 
 export interface ReportFilters {
-  readonly status: ReportStatus | undefined;
-  readonly severity: Severity | undefined;
+  readonly programId?: string | undefined;
+  readonly status?: ReportStatus | undefined;
+  readonly severity?: Severity | undefined;
 }
 
 export interface ReportFilterControls {
   readonly filters: ReportFilters;
   readonly isFiltered: boolean;
-  readonly setStatus: (value: string) => void;
-  readonly setSeverity: (value: string) => void;
-  readonly clearAll: () => void;
+  readonly page: number;
+  readonly setProgram: (value: string) => boolean;
+  readonly setStatus: (value: string) => boolean;
+  readonly setSeverity: (value: string) => boolean;
+  readonly setPage: (page: number) => boolean;
+  readonly clearAll: () => boolean;
+}
+
+function readProgramId(raw: string | null): string | undefined {
+  const parsed = uuidSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function readStatus(raw: string | null): ReportStatus | undefined {
@@ -56,43 +71,131 @@ function readSeverity(raw: string | null): Severity | undefined {
   return SEVERITY_OPTIONS.find((severity) => severity === raw);
 }
 
+function readPage(raw: string | null): number {
+  if (raw === null || !/^[1-9]\d*$/u.test(raw)) return 1;
+
+  const page = Number(raw);
+  return Number.isSafeInteger(page) ? page : 1;
+}
+
+function reportPath(pathname: string, params: URLSearchParams): string {
+  const query = params.toString();
+  return query === '' ? pathname : `${pathname}?${query}`;
+}
+
+export function reportFilterNavigation(
+  pathname: string,
+  current: URLSearchParams,
+  key: ReportFilterKey,
+  value: string,
+): string | null {
+  const allowed =
+    value === ANY ||
+    (key === 'programId'
+      ? uuidSchema.safeParse(value).success
+      : key === 'status'
+        ? readStatus(value) !== undefined
+        : readSeverity(value) !== undefined);
+  if (!allowed) return null;
+
+  const params = new URLSearchParams(current);
+  if (value === ANY) {
+    params.delete(key);
+  } else {
+    params.set(key, value);
+  }
+  params.delete('page');
+
+  return params.toString() === current.toString() ? null : reportPath(pathname, params);
+}
+
+export function reportPageNavigation(
+  pathname: string,
+  current: URLSearchParams,
+  nextPage: number,
+): string | null {
+  if (!Number.isSafeInteger(nextPage) || nextPage < 1) return null;
+
+  const params = new URLSearchParams(current);
+  if (nextPage === 1) {
+    params.delete('page');
+  } else {
+    params.set('page', String(nextPage));
+  }
+
+  return params.toString() === current.toString() ? null : reportPath(pathname, params);
+}
+
+export function reportResetNavigation(pathname: string, current: URLSearchParams): string | null {
+  return current.size === 0 ? null : pathname;
+}
+
+export function reportFilterState(params: Pick<URLSearchParams, 'get'>): {
+  readonly filters: ReportFilters;
+  readonly page: number;
+} {
+  return {
+    filters: {
+      programId: readProgramId(params.get('programId')),
+      status: readStatus(params.get('status')),
+      severity: readSeverity(params.get('severity')),
+    },
+    page: readPage(params.get('page')),
+  };
+}
+
 export function useReportFilters(): ReportFilterControls {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
 
-  const status = readStatus(searchParams.get('status'));
-  const severity = readSeverity(searchParams.get('severity'));
+  const state = reportFilterState(searchParams);
+  const { programId, severity, status } = state.filters;
+  const { page } = state;
+
+  const navigate = useCallback(
+    (href: string | null): boolean => {
+      if (href === null) return false;
+      router.replace(href, { scroll: false });
+      return true;
+    },
+    [router],
+  );
 
   const apply = useCallback(
-    (key: string, value: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-
-      if (value === ANY) {
-        params.delete(key);
-      } else {
-        params.set(key, value);
-      }
-
-      const query = params.toString();
-      router.replace(query === '' ? pathname : `${pathname}?${query}`, { scroll: false });
+    (key: ReportFilterKey, value: string) => {
+      return navigate(
+        reportFilterNavigation(pathname, new URLSearchParams(searchParams.toString()), key, value),
+      );
     },
-    [pathname, router, searchParams],
+    [navigate, pathname, searchParams],
   );
 
   const clearAll = useCallback(() => {
-    router.replace(pathname, { scroll: false });
-  }, [pathname, router]);
+    return navigate(reportResetNavigation(pathname, new URLSearchParams(searchParams.toString())));
+  }, [navigate, pathname, searchParams]);
+
+  const setPage = useCallback(
+    (nextPage: number) => {
+      return navigate(
+        reportPageNavigation(pathname, new URLSearchParams(searchParams.toString()), nextPage),
+      );
+    },
+    [navigate, pathname, searchParams],
+  );
 
   return useMemo(
     () => ({
-      filters: { status, severity },
-      isFiltered: status !== undefined || severity !== undefined,
+      filters: { programId, status, severity },
+      isFiltered: programId !== undefined || status !== undefined || severity !== undefined,
+      page,
+      setProgram: (value: string) => apply('programId', value),
       setStatus: (value: string) => apply('status', value),
       setSeverity: (value: string) => apply('severity', value),
+      setPage,
       clearAll,
     }),
-    [apply, clearAll, severity, status],
+    [apply, clearAll, page, programId, setPage, severity, status],
   );
 }
 
@@ -100,6 +203,7 @@ export function useReportFilters(): ReportFilterControls {
 export function toReportSearchParams(filters: ReportFilters, page: number, limit: number): string {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
 
+  if (filters.programId !== undefined) params.set('programId', filters.programId);
   if (filters.status !== undefined) params.set('status', filters.status);
   if (filters.severity !== undefined) params.set('severity', filters.severity);
 
@@ -110,27 +214,71 @@ export function toReportSearchParams(filters: ReportFilters, page: number, limit
 export function toReportQueryKey(
   filters: ReportFilters,
   scope: string,
+  page?: number,
 ): Readonly<Record<string, unknown>> {
-  return { scope, status: filters.status ?? null, severity: filters.severity ?? null };
+  return {
+    scope,
+    programId: filters.programId ?? null,
+    status: filters.status ?? null,
+    severity: filters.severity ?? null,
+    ...(page === undefined ? {} : { page }),
+  };
 }
 
-export function ReportFilterBar({ controls }: { readonly controls: ReportFilterControls }) {
-  const { clearAll, filters, isFiltered, setSeverity, setStatus } = controls;
+export function ReportFilterBar({
+  controls,
+  programOptions,
+  programOptionsUnavailable = false,
+}: {
+  readonly controls: ReportFilterControls;
+  readonly programOptions?: readonly ReportProgramFilterOption[];
+  readonly programOptionsUnavailable?: boolean;
+}) {
+  const { clearAll, filters, isFiltered, page, setProgram, setSeverity, setStatus } = controls;
   const prefix = useId();
   // A Radix Select root is not a DOM node, so `Field` cannot inject the id into it. The id is set
   // on the trigger instead and handed to `Field` as `htmlFor`, which is what the label points at.
+  const programId = `${prefix}-program`;
   const statusId = `${prefix}-status`;
   const severityId = `${prefix}-severity`;
+  const canReset = isFiltered || page !== 1;
 
   return (
     <div className="flex flex-col gap-lg sm:flex-row sm:items-end">
-      <Field className="sm:max-w-56" htmlFor={statusId} label="Status">
+      {programOptions === undefined ? null : (
+        <Field
+          className="sm:w-72"
+          disabled={programOptionsUnavailable}
+          htmlFor={programId}
+          label="Program"
+        >
+          <Select
+            disabled={programOptionsUnavailable}
+            onValueChange={setProgram}
+            value={filters.programId ?? ANY}
+          >
+            <SelectTrigger id={programId} size="lg">
+              <SelectValue placeholder="All programs" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ANY}>All programs</SelectItem>
+              {programOptions.map((program) => (
+                <SelectItem key={program.id} value={program.id}>
+                  {program.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      <Field className="sm:w-64" htmlFor={statusId} label="Status">
         <Select onValueChange={setStatus} value={filters.status ?? ANY}>
           <SelectTrigger id={statusId} size="lg">
-            <SelectValue placeholder="Any status" />
+            <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ANY}>Any status</SelectItem>
+            <SelectItem value={ANY}>All statuses</SelectItem>
             {REPORT_STATUS_OPTIONS.map((status) => (
               <SelectItem key={status} value={status}>
                 {REPORT_STATUS_LABELS[status]}
@@ -140,13 +288,13 @@ export function ReportFilterBar({ controls }: { readonly controls: ReportFilterC
         </Select>
       </Field>
 
-      <Field className="sm:max-w-56" htmlFor={severityId} label="Severity">
+      <Field className="sm:w-60" htmlFor={severityId} label="Severity">
         <Select onValueChange={setSeverity} value={filters.severity ?? ANY}>
           <SelectTrigger id={severityId} size="lg">
-            <SelectValue placeholder="Any severity" />
+            <SelectValue placeholder="All severities" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ANY}>Any severity</SelectItem>
+            <SelectItem value={ANY}>All severities</SelectItem>
             {SEVERITY_OPTIONS.map((severity) => (
               <SelectItem key={severity} value={severity}>
                 {SEVERITY_LABELS[severity]}
@@ -156,11 +304,15 @@ export function ReportFilterBar({ controls }: { readonly controls: ReportFilterC
         </Select>
       </Field>
 
-      {isFiltered ? (
-        <Button className="sm:mb-px" onClick={clearAll} size="lg" variant="ghost">
-          Clear filters
-        </Button>
-      ) : null}
+      <Button
+        className="sm:mb-px"
+        disabled={!canReset}
+        onClick={clearAll}
+        size="lg"
+        variant="ghost"
+      >
+        Reset filters
+      </Button>
     </div>
   );
 }

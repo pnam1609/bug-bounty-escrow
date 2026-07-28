@@ -209,11 +209,36 @@ export class ProgramRepository {
   }
 
   public async findAccessible(id: string, principal?: RequestPrincipal): Promise<Program | null> {
-    const { data, error } = await this.client
+    return this.findAccessibleBy('id', id, principal);
+  }
+
+  public async findOwned(id: string, principal: RequestPrincipal): Promise<Program | null> {
+    return this.findAccessibleBy('id', id, principal, principal.userId);
+  }
+
+  public async findAccessibleBySlug(
+    slug: string,
+    principal?: RequestPrincipal,
+  ): Promise<Program | null> {
+    return this.findAccessibleBy('slug', slug, principal);
+  }
+
+  private async findAccessibleBy(
+    column: 'id' | 'slug',
+    value: string,
+    principal?: RequestPrincipal,
+    requiredOwnerId?: string,
+  ): Promise<Program | null> {
+    let request = this.client
       .from('programs')
       .select(PROGRAM_DETAIL_PROJECTION)
-      .eq('id', id)
-      .maybeSingle();
+      .eq(column, value);
+
+    if (requiredOwnerId !== undefined) {
+      request = request.eq('owner_id', requiredOwnerId);
+    }
+
+    const { data, error } = await request.maybeSingle();
 
     if (error !== null) {
       throw normalizeDatabaseError(error);
@@ -226,7 +251,7 @@ export class ProgramRepository {
     }
 
     const isOwner = row.owner_id === principal?.userId;
-    const isReviewer = isOwner ? false : await this.isAssignedReviewer(id, principal);
+    const isReviewer = isOwner ? false : await this.isAssignedReviewer(row.id, principal);
 
     if (row.public_status === null && !isOwner && !isReviewer) {
       // Do not distinguish "not found" from "not permitted".
@@ -236,7 +261,7 @@ export class ProgramRepository {
     return mapProgramDetail(row, {
       revealTotalPaid: isOwner || isReviewer,
       resolveLogoUrl: this.resolveLogoUrl,
-      medianResolutionSeconds: await this.medianResolutionSeconds(id),
+      medianResolutionSeconds: await this.medianResolutionSeconds(row.id),
     });
   }
 

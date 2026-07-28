@@ -1,4 +1,4 @@
-import { IDS, expect, test } from './fixtures';
+import { AEGIS_SUMMARY, IDS, expect, test } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /*
@@ -37,7 +37,7 @@ test('QA-E2E-005 the composer walks four steps and blocks a severity mismatch un
   researcherPage: page,
   api,
 }) => {
-  await page.goto(`/reports/new?programId=${IDS.aegis}`);
+  await page.goto(`/reports/new?programSlug=${AEGIS_SUMMARY.slug}`);
 
   await chooseAssetAndImpact(page);
 
@@ -88,7 +88,7 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
 }) => {
   api.failAttachmentUpload();
 
-  await page.goto(`/reports/new?programId=${IDS.aegis}`);
+  await page.goto(`/reports/new?programSlug=${AEGIS_SUMMARY.slug}`);
 
   await chooseAssetAndImpact(page);
 

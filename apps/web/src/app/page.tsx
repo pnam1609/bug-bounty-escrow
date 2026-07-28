@@ -15,12 +15,11 @@ import { LandingWhyBountyEscrow } from '@/components/landing/why-bounty-escrow';
  * component of its own. The interactive pieces it does use (Button, the app-shell chrome) carry
  * their own `'use client'` inside the library.
  *
- * The 1440px cap and the min-height column mirror `WorkspaceShell`, so the marketing page and the
- * app frame agree on where the page edge is.
+ * The page chrome is full-bleed while each landing section owns its readable content width.
  */
 export default function HomePage(): ReactNode {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col bg-background">
+    <div className="flex min-h-screen w-full flex-col bg-background">
       <LandingHeader />
       <main className="flex-1">
         <LandingHero />

@@ -404,6 +404,29 @@
         "tags": ["OwnerProgram"]
       }
     },
+    "/owner/programs/{id}": {
+      "get": {
+        "operationId": "OwnerProgramController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": ["OwnerProgram"]
+      }
+    },
     "/programs": {
       "get": {
         "operationId": "ProgramController_list",
@@ -535,7 +558,235 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "deadline": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "inScopeAssetTypes": {
+                            "items": {
+                              "enum": [
+                                "smart_contract",
+                                "website",
+                                "api",
+                                "mobile"
+                              ],
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "logoUrl": {
+                            "type": "string"
+                          },
+                          "maxBounty": {
+                            "maxLength": 100,
+                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "paidReportCount": {
+                            "anyOf": [
+                              {
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "publicStatus": {
+                            "anyOf": [
+                              {
+                                "enum": ["active", "ended"],
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "publishedAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "remainingPool": {
+                            "maxLength": 100,
+                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                            "type": "string"
+                          },
+                          "reservedPool": {
+                            "maxLength": 100,
+                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                            "type": "string"
+                          },
+                          "rewardSeverities": {
+                            "items": {
+                              "enum": [
+                                "critical",
+                                "high",
+                                "medium",
+                                "low",
+                                "informational"
+                              ],
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "shortSummary": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "draft",
+                              "awaiting_funding",
+                              "active",
+                              "paused",
+                              "expired",
+                              "closed"
+                            ],
+                            "type": "string"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "totalPaid": {
+                            "anyOf": [
+                              {
+                                "maxLength": 100,
+                                "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "totalPaidVisibility": {
+                            "enum": ["public", "private"],
+                            "type": "string"
+                          },
+                          "totalPool": {
+                            "maxLength": 100,
+                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "slug",
+                          "shortSummary",
+                          "status",
+                          "publicStatus",
+                          "tags",
+                          "totalPool",
+                          "reservedPool",
+                          "remainingPool",
+                          "totalPaid",
+                          "totalPaidVisibility",
+                          "paidReportCount",
+                          "maxBounty",
+                          "inScopeAssetTypes",
+                          "rewardSeverities",
+                          "updatedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "metadata": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "hasNextPage": {
+                          "type": "boolean"
+                        },
+                        "hasPreviousPage": {
+                          "type": "boolean"
+                        },
+                        "limit": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "page": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "totalItems": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "totalPages": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "page",
+                        "limit",
+                        "totalItems",
+                        "totalPages",
+                        "hasNextPage",
+                        "hasPreviousPage"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data", "metadata"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Public programs with active programs ordered before ended programs",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "security": [{}],
@@ -891,28 +1142,6 @@
       }
     },
     "/programs/{id}": {
-      "get": {
-        "operationId": "ProgramController_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [{}],
-        "tags": ["Program"]
-      },
       "patch": {
         "operationId": "ProgramController_update",
         "parameters": [
@@ -1795,6 +2024,31 @@
             "description": ""
           }
         },
+        "tags": ["Program"]
+      }
+    },
+    "/programs/{slug}": {
+      "get": {
+        "operationId": "ProgramController_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [{}],
         "tags": ["Program"]
       }
     },
@@ -2767,6 +3021,411 @@
           }
         },
         "tags": ["ReportSummary"]
+      }
+    },
+    "/rewards": {
+      "get": {
+        "operationId": "RewardController_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                }
+              ],
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": ["reward_approved", "payment_pending", "paid"],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "approvedReward": {
+                            "maxLength": 100,
+                            "pattern": "^(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+                            "type": "string"
+                          },
+                          "finalSeverity": {
+                            "enum": [
+                              "critical",
+                              "high",
+                              "medium",
+                              "low",
+                              "informational"
+                            ],
+                            "type": "string"
+                          },
+                          "paidAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "payment": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "chainId": {
+                                "pattern": "^[1-9]\\d*$",
+                                "type": "string"
+                              },
+                              "confirmations": {
+                                "maximum": 9007199254740991,
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "confirmedAt": {
+                                "format": "date-time",
+                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": ["pending", "confirmed", "failed"],
+                                "type": "string"
+                              },
+                              "tokenAddress": {
+                                "pattern": "^0x[a-fA-F0-9]{40}$",
+                                "type": "string"
+                              },
+                              "transactionHash": {
+                                "pattern": "^0x[a-fA-F0-9]{64}$",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "chainId",
+                              "tokenAddress",
+                              "transactionHash",
+                              "status"
+                            ],
+                            "type": "object"
+                          },
+                          "programId": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "programName": {
+                            "type": "string"
+                          },
+                          "reportId": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "reportTitle": {
+                            "type": "string"
+                          },
+                          "rewardApprovedAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "reward_approved",
+                              "payment_pending",
+                              "paid"
+                            ],
+                            "type": "string"
+                          },
+                          "submittedAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reportId",
+                          "programId",
+                          "programName",
+                          "reportTitle",
+                          "finalSeverity",
+                          "status",
+                          "approvedReward",
+                          "submittedAt",
+                          "rewardApprovedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "metadata": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "hasNextPage": {
+                          "type": "boolean"
+                        },
+                        "hasPreviousPage": {
+                          "type": "boolean"
+                        },
+                        "limit": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 100,
+                          "type": "integer"
+                        },
+                        "page": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "totalItems": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "totalPages": {
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "page",
+                        "limit",
+                        "totalItems",
+                        "totalPages",
+                        "hasNextPage",
+                        "hasPreviousPage"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data", "metadata"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Paginated settlement activity for the authenticated researcher",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
+      }
+    },
+    "/rewards/payout-wallet": {
+      "get": {
+        "operationId": "RewardController_getPayoutWallet",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "address": {
+                          "pattern": "^0x[a-fA-F0-9]{40}$",
+                          "type": "string"
+                        },
+                        "canUpdate": {
+                          "type": "boolean"
+                        },
+                        "changeConfirmationRequired": {
+                          "type": "boolean"
+                        },
+                        "hasActiveRewards": {
+                          "type": "boolean"
+                        },
+                        "maskedAddress": {
+                          "pattern": "^0x[a-f0-9]{4}…[a-f0-9]{4}$",
+                          "type": "string"
+                        },
+                        "network": {
+                          "const": "Arc",
+                          "type": "string"
+                        },
+                        "token": {
+                          "const": "USDC",
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "network",
+                        "token",
+                        "hasActiveRewards",
+                        "canUpdate",
+                        "changeConfirmationRequired"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Payout destination and active-reward requirement for the authenticated researcher",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
+      },
+      "put": {
+        "operationId": "RewardController_updatePayoutWallet",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "address": {
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "type": "string"
+                  },
+                  "confirmActiveRewardChange": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["address"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "address": {
+                          "pattern": "^0x[a-fA-F0-9]{40}$",
+                          "type": "string"
+                        },
+                        "canUpdate": {
+                          "type": "boolean"
+                        },
+                        "changeConfirmationRequired": {
+                          "type": "boolean"
+                        },
+                        "hasActiveRewards": {
+                          "type": "boolean"
+                        },
+                        "maskedAddress": {
+                          "pattern": "^0x[a-f0-9]{4}…[a-f0-9]{4}$",
+                          "type": "string"
+                        },
+                        "network": {
+                          "const": "Arc",
+                          "type": "string"
+                        },
+                        "token": {
+                          "const": "USDC",
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "network",
+                        "token",
+                        "hasActiveRewards",
+                        "canUpdate",
+                        "changeConfirmationRequired"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Saved Arc USDC payout destination for the authenticated researcher",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
       }
     },
     "/transactions/{hash}": {

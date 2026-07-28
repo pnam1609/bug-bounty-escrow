@@ -14,7 +14,7 @@ import {
   SEARCH_MAX_LENGTH,
   STATUS_OPTIONS,
   describeAppliedFilters,
-  describeOrdering,
+  statusSelectionForControls,
   type ProgramFilterState,
 } from './program-filters';
 
@@ -35,10 +35,12 @@ export interface ProgramFilterToolbarProps {
   /** Commits without a history entry — used while the search field is being typed into. */
   readonly onApplyQuietly: (next: ProgramFilterState) => void;
   readonly onClearAll: () => void;
+  readonly isRefreshing?: boolean;
 }
 
 export function ProgramFilterToolbar({
   filters,
+  isRefreshing = false,
   onApply,
   onApplyQuietly,
   onClearAll,
@@ -81,10 +83,10 @@ export function ProgramFilterToolbar({
   }
 
   return (
-    <div className="flex flex-col gap-lg">
+    <div className="relative flex flex-col gap-lg">
       <div className="flex flex-col gap-lg md:flex-row md:items-end md:justify-between">
         <form
-          className="order-1 flex flex-col gap-sm md:order-2 md:w-[392px]"
+          className="order-1 flex flex-col gap-sm md:order-2 md:w-96"
           onSubmit={submitSearch}
           role="search"
         >
@@ -112,10 +114,13 @@ export function ProgramFilterToolbar({
         <div className="order-2 md:order-1">
           <div className="hidden flex-wrap items-center gap-md md:flex">
             <MultiFilterPopover
+              appliedCount={filters.status.length}
               label="Status"
               onApply={(status) => onApply({ ...filters, status })}
               options={STATUS_OPTIONS}
-              selected={filters.status}
+              searchLabel="Search values"
+              searchPlaceholder="Search statuses"
+              selected={statusSelectionForControls(filters.status)}
             />
             <MultiFilterPopover
               label="Asset type"
@@ -154,16 +159,18 @@ export function ProgramFilterToolbar({
         </div>
       </div>
 
-      {chips.length === 0 ? (
-        <p className="text-label-md text-text-muted">{describeOrdering(filters)}</p>
-      ) : (
-        <FilterChips
-          chips={chips}
-          filters={filters}
-          onChange={onApply}
-          onClearAll={onClearAll}
-        />
+      {chips.length === 0 ? null : (
+        <FilterChips chips={chips} filters={filters} onChange={onApply} onClearAll={onClearAll} />
       )}
+
+      {isRefreshing ? (
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-0 -bottom-sm h-0.5 overflow-hidden rounded-full bg-surface-raised"
+        >
+          <span className="block h-full w-1/3 rounded-full bg-primary motion-safe:animate-pulse" />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -205,6 +205,8 @@ Supported AI configuration modes are `mock`, `gemini`, and `disabled`.
 ## Documentation
 
 - [Project context](PROJECT_CONTEXT.md) — product vision, domain, and roadmap.
+- [Production deployment](deploy/README.md) — Docker, self-hosted GitHub Actions
+  on a VPS, migrations, and reverse-proxy setup.
 - [User flows](docs/flow/) — detailed requirements for each product flow.
 - [API contracts](docs/api-contracts.md) — REST contracts and error conventions.
 - [Database ERD](docs/database-erd.md) — data model.

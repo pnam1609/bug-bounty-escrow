@@ -8,6 +8,7 @@ import {
   Sheet,
   SheetBody,
   SheetContent,
+  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -26,7 +27,8 @@ import {
   REWARD_OPTIONS,
   SEVERITY_OPTIONS,
   STATUS_OPTIONS,
-  countAppliedFilters,
+  countAdvancedFilters,
+  statusSelectionForControls,
   toQueryKeyFilters,
   toUrlSearchParams,
   type ClosingFilter,
@@ -51,15 +53,39 @@ export interface ProgramFilterSheetProps {
   readonly onApply: (next: ProgramFilterState) => void;
 }
 
+export function mobileFilterPreviewParams(filters: ProgramFilterState): URLSearchParams {
+  const params = toUrlSearchParams(filters);
+  params.set('page', '1');
+  params.set('limit', '1');
+
+  return params;
+}
+
+export function mobileFilterShowLabel(matchCount: number | undefined): string {
+  return matchCount === undefined
+    ? 'Show bounties'
+    : `Show ${matchCount} ${matchCount === 1 ? 'bounty' : 'bounties'}`;
+}
+
+export function clearMobileFilterDraft(filters: ProgramFilterState): ProgramFilterState {
+  return {
+    ...filters,
+    search: '',
+    status: [],
+    assetType: [],
+    severity: [],
+    minMaxReward: null,
+    closing: null,
+    funded: false,
+  };
+}
+
 export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ProgramFilterState>(filters);
-  const appliedCount = countAppliedFilters(filters);
-  const draftCount = countAppliedFilters(draft);
-
-  const previewParams = toUrlSearchParams(draft);
-  previewParams.set('page', '1');
-  previewParams.set('limit', '1');
+  const appliedCount = countAdvancedFilters(filters);
+  const draftCount = countAdvancedFilters(draft);
+  const previewParams = mobileFilterPreviewParams(draft);
 
   const preview = useQuery({
     queryKey: queryKeys.programs({ ...toQueryKeyFilters(draft), preview: true }),
@@ -69,10 +95,7 @@ export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps
   });
 
   const matchCount = preview.data?.metadata.totalItems;
-  const showLabel =
-    matchCount === undefined
-      ? 'Show bounties'
-      : `Show ${matchCount} ${matchCount === 1 ? 'bounty' : 'bounties'}`;
+  const showLabel = mobileFilterShowLabel(matchCount);
 
   function update(patch: Partial<ProgramFilterState>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -95,7 +118,10 @@ export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps
           <SlidersHorizontal aria-hidden="true" className="size-4" />
           Filters
           {appliedCount === 0 ? null : (
-            <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-sm py-xs text-label-sm font-semibold text-primary-contrast">
+            <span
+              aria-hidden="true"
+              className="inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-sm py-xs text-label-sm font-semibold text-primary-contrast"
+            >
               {appliedCount}
             </span>
           )}
@@ -108,6 +134,9 @@ export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps
         {/* `pr-14` keeps the active-count clear of the absolutely positioned close button. */}
         <SheetHeader className="flex-row items-center justify-between gap-md pr-14">
           <SheetTitle>Filters</SheetTitle>
+          <SheetDescription className="sr-only">
+            Choose program filters, then apply them once with the Show bounties button.
+          </SheetDescription>
           <p className="text-label-md text-escrow">
             {draftCount === 0 ? 'None active' : `${draftCount} active`}
           </p>
@@ -117,7 +146,7 @@ export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps
             legend="Status"
             onChange={(status) => update({ status })}
             options={STATUS_OPTIONS}
-            selected={draft.status}
+            selected={statusSelectionForControls(draft.status)}
           />
           <Separator />
           <OptionCheckList
@@ -159,18 +188,7 @@ export function ProgramFilterSheet({ filters, onApply }: ProgramFilterSheetProps
         <SheetFooter className="flex-row items-center justify-between gap-md sm:justify-between">
           <Button
             className="flex-1"
-            onClick={() =>
-              setDraft((current) => ({
-                ...current,
-                search: '',
-                status: [],
-                assetType: [],
-                severity: [],
-                minMaxReward: null,
-                closing: null,
-                funded: false,
-              }))
-            }
+            onClick={() => setDraft(clearMobileFilterDraft)}
             variant="secondary"
           >
             Clear all

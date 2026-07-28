@@ -102,7 +102,7 @@ export function decideRouteAccess(input: RouteAccessInput): RouteAccessDecision 
   }
   if (!hasSession) {
     // Anonymous: sign in first, carrying the full internal location (path + query) so e.g.
-    // `/reports/new?programId=…` survives the round trip (§6.9).
+    // `/reports/new?programSlug=…` survives the round trip (§6.9).
     return {
       kind: 'redirect-login',
       href: withReturnTo('/login', location),

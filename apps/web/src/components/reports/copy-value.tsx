@@ -3,7 +3,7 @@
 import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { shortReportId } from './report-format';
+import { reportReferenceAriaLabel, shortReportId } from './report-format';
 
 /*
  * No Figma source for the button itself — SR-07 `151:198` draws the line as
@@ -81,10 +81,13 @@ export function ReportIdCopy({ id }: ReportIdCopyProps) {
   return (
     <p className="flex flex-wrap items-center gap-sm">
       <span className="text-label-md text-text-muted">Report ID</span>
-      <span className="font-mono text-label-md text-text" title={id}>
+      <span
+        aria-label={reportReferenceAriaLabel(id)}
+        className="font-mono text-label-md text-text"
+        title={id}
+      >
         {shortReportId(id)}
         <span aria-hidden="true">…</span>
-        <span className="sr-only">{` (full id ${id})`}</span>
       </span>
       <CopyButton value={id} what="report id" />
     </p>

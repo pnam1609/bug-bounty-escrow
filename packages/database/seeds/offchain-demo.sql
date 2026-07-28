@@ -149,13 +149,15 @@ select
   1
 from demo_programs;
 
+-- Catalog UUID mapping: the fourth group is 8000 + program series (program 1 -> 8001,
+-- program 10 -> 8010). This preserves deterministic IDs while keeping the RFC variant nibble 8.
 insert into public.program_impacts (
   id, program_id, asset_type, severity, title, description, source, enabled, sort_order
 )
 select
   (
     '32200000-0000-4000-' ||
-    lpad(demo_programs.series::text, 4, '0') || '-' ||
+    lpad((8000 + demo_programs.series)::text, 4, '0') || '-' ||
     lpad(severity_number::text, 12, '0')
   )::uuid,
   program_id,
@@ -175,7 +177,7 @@ insert into public.program_reward_tiers (
 select
   (
     '32100000-0000-4000-' ||
-    lpad(demo_programs.series::text, 4, '0') || '-' ||
+    lpad((8000 + demo_programs.series)::text, 4, '0') || '-' ||
     lpad(severity_number::text, 12, '0')
   )::uuid,
   program_id,

@@ -7,7 +7,7 @@ Mỗi table migration và mỗi nhóm security policy là một task độc lậ
 | ID | Outcome | Depends on | Acceptance criteria |
 |---|---|---|---|
 | DB-001 | Migration cho `profiles` | FND-004 | PK liên kết Supabase user; role và wallet fields có constraint; timestamps tồn tại |
-| DB-002 | Migration cho `programs` | DB-001 | Owner FK, unique slug, status, pool amounts, deadline và contract address đúng domain model |
+| DB-002 | Migration cho `programs` | DB-001 | Owner FK, slug lowercase unique và immutable sau create, status, pool amounts, deadline và contract address đúng domain model |
 | DB-003 | Migration cho `program_scopes` | DB-002 | Program FK, asset type, address/URL và in-scope flag có constraint |
 | DB-004 | Migration cho `program_reward_tiers` | DB-002 | Unique severity mỗi program; min/max reward hợp lệ và non-negative |
 | DB-005 | Migration cho `reports` | DB-001, DB-002, DB-003 | Researcher/program/scope FK, status, severity, content hash và reward fields đúng domain model |

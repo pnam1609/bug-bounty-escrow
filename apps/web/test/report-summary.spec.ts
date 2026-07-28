@@ -45,6 +45,18 @@ describe('MR-04 My reports shell and summary metrics', () => {
     expect(markup).toContain('>12,500.5<');
   });
 
+  it('formats high-precision USDC without converting through JavaScript Number', () => {
+    const highPrecision = researcherReportSummarySchema.parse({
+      ...summary,
+      rewardsPaid: '9007199254740993.123456',
+    });
+    const markup = renderToStaticMarkup(
+      createElement(ReportSummaryMetrics, { summary: highPrecision }),
+    );
+
+    expect(markup).toContain('>9,007,199,254,740,993.123456<');
+  });
+
   it('announces a metric loading state without displaying placeholder numbers', () => {
     const markup = renderToStaticMarkup(createElement(ReportSummarySkeleton));
 

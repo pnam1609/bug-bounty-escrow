@@ -11,6 +11,46 @@ import type { ReactNode } from 'react';
  * here ever prints a response body or a technical error code.
  */
 
+export type BountyListState = 'loading' | 'error' | 'empty-initial' | 'empty-filtered' | 'ready';
+
+/**
+ * A failed filter/search request may still carry placeholder rows from the previous query.
+ * Classifying primary errors independently from row count prevents those stale rows from hiding
+ * the Retry state. A load-more failure is different: it deliberately keeps the loaded rows.
+ */
+export function resolveBountyListState({
+  isError,
+  isFetchNextPageError,
+  isFiltered,
+  isPending,
+  programCount,
+}: {
+  readonly isError: boolean;
+  readonly isFetchNextPageError: boolean;
+  readonly isFiltered: boolean;
+  readonly isPending: boolean;
+  readonly programCount: number;
+}): BountyListState {
+  if (isPending) {
+    return 'loading';
+  }
+
+  if (isError && !isFetchNextPageError) {
+    return 'error';
+  }
+
+  if (programCount === 0) {
+    return isFiltered ? 'empty-filtered' : 'empty-initial';
+  }
+
+  return 'ready';
+}
+
+/** Sentinel copy belongs only to a populated table, never to loading, empty or primary-error UI. */
+export function shouldShowBountyInfiniteStatus(state: BountyListState): boolean {
+  return state === 'ready';
+}
+
 function StateBlock({
   action,
   detail,
@@ -27,7 +67,7 @@ function StateBlock({
       className={
         tone === 'error'
           ? 'mx-auto flex max-w-md flex-col items-center gap-md rounded-md border border-error bg-surface-raised px-xl py-2xl text-center'
-          : 'mx-auto flex max-w-md flex-col items-center gap-md px-xl py-2xl text-center'
+          : 'mx-auto flex max-w-md flex-col items-center gap-md px-xl py-2xl text-center md:min-h-96 md:justify-center'
       }
       role={tone === 'error' ? 'alert' : undefined}
     >
@@ -67,5 +107,16 @@ export function BountyLoadError({ onRetry }: { readonly onRetry: () => void }) {
       title={'We couldn’t load bounties'}
       tone="error"
     />
+  );
+}
+
+export const BOUNTY_SAFETY_NOTE =
+  'Reward pools are shown in USDC. Always review the complete in-scope assets and exclusions before testing or submitting a report.';
+
+export function BountySafetyNote() {
+  return (
+    <p className="border-t border-border pt-lg text-label-md text-text-muted">
+      {BOUNTY_SAFETY_NOTE}
+    </p>
   );
 }

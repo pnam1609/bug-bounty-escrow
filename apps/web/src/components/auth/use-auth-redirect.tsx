@@ -29,6 +29,7 @@ const ROLE_LANDING: Readonly<Record<ApplicationRole, string>> = Object.freeze({
 const GUARDED_PREFIXES: readonly (readonly [string, readonly ApplicationRole[]])[] = Object.freeze([
   ['/owner', Object.freeze(['owner'] as const)],
   ['/reports', Object.freeze(['researcher'] as const)],
+  ['/rewards', Object.freeze(['researcher'] as const)],
   ['/review', Object.freeze(['owner', 'reviewer'] as const)],
 ]);
 
@@ -93,7 +94,7 @@ export function useAuthRedirect(): AuthRedirect {
         throw error;
       }
 
-      queryClient.setQueryData(queryKeys.me, profile);
+      queryClient.setQueryData(queryKeys.me(profile.id), profile);
 
       if (!profile.onboardingComplete) {
         // Keep the journey alive through onboarding: a researcher who was heading to the

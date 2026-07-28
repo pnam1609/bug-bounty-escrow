@@ -38,7 +38,7 @@ const shellContainerVariants = cva('mx-auto w-full px-xl', {
     width: {
       content: 'max-w-[1200px]',
       frame: 'max-w-[1440px]',
-      full: 'max-w-none',
+      full: null,
     },
   },
   defaultVariants: {
@@ -131,7 +131,6 @@ export interface SiteHeaderProps extends ComponentPropsWithoutRef<'header'> {
   /** Anything below the bar — a sub-nav, a breadcrumb strip, a banner. */
   children?: ReactNode;
   nav?: ReactNode;
-  width?: ShellWidth;
 }
 
 /**
@@ -140,11 +139,11 @@ export interface SiteHeaderProps extends ComponentPropsWithoutRef<'header'> {
  * variants in Figma (Public / Researcher / Owner) are the same bar with different `nav` and
  * `actions` slots, so they are the caller's business.
  *
- * The bar is full-bleed across the frame — in the owner frames it is 1440 wide while the content
- * beneath it starts at the 240px rail — hence `width` defaults to `frame`, not `content`.
+ * The bar and its content are full-bleed. Responsive horizontal padding keeps controls away from
+ * the viewport edge without wrapping them in a max-width container.
  */
 export const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(function SiteHeader(
-  { actions, brand = <SiteBrand />, children, className, nav, width = 'frame', ...headerProps },
+  { actions, brand = <SiteBrand />, children, className, nav, ...headerProps },
   ref,
 ) {
   return (
@@ -153,7 +152,9 @@ export const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(function Site
       ref={ref}
       className={cn('w-full border-b border-border bg-surface', className)}
     >
-      <div className={cn(shellContainerVariants({ width }), 'flex h-20 items-center gap-2xl')}>
+      <div
+        className={cn(shellContainerVariants({ width: 'full' }), 'flex h-20 items-center gap-2xl')}
+      >
         {brand}
         {nav}
         <div className="flex-1" />
@@ -224,13 +225,12 @@ export interface SiteFooterProps extends ComponentPropsWithoutRef<'footer'> {
   legal?: ReactNode;
   /** Right-hand status line, e.g. network state. Both variants. */
   status?: ReactNode;
-  width?: ShellWidth;
 }
 
 /**
- * Node 165:159. `full` is the four-region marketing footer; `short` is the single 88px bar every
- * in-app screen uses. Omit the footer entirely on infinite-scroll data views — that call belongs
- * to the layout, not to this component.
+ * Node 165:159. Both variants use the full viewport width with responsive edge padding. `full` is
+ * the four-region marketing footer; `short` is the single 88px bar every in-app screen uses. Omit
+ * the footer entirely on infinite-scroll data views — that call belongs to the layout.
  */
 export const SiteFooter = forwardRef<HTMLElement, SiteFooterProps>(function SiteFooter(
   {
@@ -242,7 +242,6 @@ export const SiteFooter = forwardRef<HTMLElement, SiteFooterProps>(function Site
     legal,
     status,
     variant = 'full',
-    width = 'content',
     ...footerProps
   },
   ref,
@@ -259,7 +258,7 @@ export const SiteFooter = forwardRef<HTMLElement, SiteFooterProps>(function Site
       {isShort ? (
         <div
           className={cn(
-            shellContainerVariants({ width }),
+            shellContainerVariants({ width: 'full' }),
             'flex min-h-22 flex-wrap items-center gap-xl py-lg',
           )}
         >
@@ -271,7 +270,10 @@ export const SiteFooter = forwardRef<HTMLElement, SiteFooterProps>(function Site
         </div>
       ) : (
         <div
-          className={cn(shellContainerVariants({ width }), 'flex flex-col gap-2xl pt-3xl pb-2xl')}
+          className={cn(
+            shellContainerVariants({ width: 'full' }),
+            'flex flex-col gap-2xl pt-3xl pb-2xl',
+          )}
         >
           {brand || columns ? (
             <div className="flex flex-col gap-2xl md:flex-row md:items-start md:justify-between">
@@ -379,8 +381,8 @@ export interface WorkspaceShellProps extends ComponentPropsWithoutRef<'div'> {
 
 /**
  * Header + optional 240px rail + main, filling at least the viewport so the footer never floats
- * up on a short page. The shell is capped at the 1440px frame and main takes the remaining
- * 1200px beside the rail. With no rail, the content column simply centres in the frame.
+ * up on a short page. The shell chrome spans the viewport; the main content keeps its own width
+ * constraint so wide screens gain breathing room without stretching readable content.
  */
 export const WorkspaceShell = forwardRef<HTMLDivElement, WorkspaceShellProps>(
   function WorkspaceShell(
@@ -401,10 +403,7 @@ export const WorkspaceShell = forwardRef<HTMLDivElement, WorkspaceShellProps>(
       <div
         {...shellProps}
         ref={ref}
-        className={cn(
-          'mx-auto flex min-h-screen w-full max-w-[1440px] flex-col bg-background',
-          className,
-        )}
+        className={cn('flex min-h-screen w-full flex-col bg-background', className)}
       >
         {header}
         <div className="flex w-full flex-1">

@@ -25,6 +25,7 @@ import {
 import { describeDeadline, formatUsdcFull, programMonogram } from './program-format';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import { useAuth } from '@/providers/auth-provider';
 
 /*
  * Program detail — submit-bug flow §8 `PG-DETAIL`, the entry point of the Submit Bug flow.
@@ -53,20 +54,27 @@ function readTab(raw: string | null): TabValue {
 /**
  * Tabs that also carry a same-named element id, so a URL hash can land inside the page. `scope`
  * is the published anchor contract: the composer's SR-01 `View impact definitions` link points at
- * `/programs/:id#scope` (submit-bug flow §8 — "mở đúng section của program detail").
+ * `/programs/:slug#scope` (submit-bug flow §8 — "mở đúng section của program detail").
  */
 const ANCHORED_TABS: readonly TabValue[] = ['scope'];
 
-export function ProgramDetailView({ id }: { readonly id: string }) {
+export function ProgramDetailView({ slug }: { readonly slug: string }) {
+  const { loading, session } = useAuth();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
   const activeTab = readTab(searchParams.get('tab'));
 
   const query = useQuery({
-    queryKey: queryKeys.program(id),
+    enabled: !loading,
+    queryKey:
+      session === null
+        ? queryKeys.publicProgram(slug)
+        : queryKeys.privateProgramDetail(session.user.id, slug),
     queryFn: () =>
-      apiRequest(`/api/programs/${encodeURIComponent(id)}`, programResponseSchema),
+      apiRequest(`/api/programs/${encodeURIComponent(slug)}`, programResponseSchema, {
+        token: session?.access_token,
+      }),
   });
 
   const openTab = useCallback(
@@ -149,9 +157,7 @@ export function ProgramDetailView({ id }: { readonly id: string }) {
             : 'Try again in a moment.'}
         </p>
         <div className="flex flex-wrap gap-md">
-          {notFound ? null : (
-            <Button onClick={() => void query.refetch()}>Try again</Button>
-          )}
+          {notFound ? null : <Button onClick={() => void query.refetch()}>Try again</Button>}
           <Button asChild variant="secondary">
             <Link href="/programs">Back to bounties</Link>
           </Button>
@@ -171,7 +177,9 @@ export function ProgramDetailView({ id }: { readonly id: string }) {
   const isAcceptingReports = program.status === 'active';
   const deadline = describeDeadline(program);
   const deadlineText =
-    program.deadline === undefined ? deadline.primary : `${deadline.primary} · ${deadline.secondary}`;
+    program.deadline === undefined
+      ? deadline.primary
+      : `${deadline.primary} · ${deadline.secondary}`;
 
   return (
     <div className="flex flex-col gap-xl">
@@ -261,7 +269,7 @@ export function ProgramDetailView({ id }: { readonly id: string }) {
         <div className="flex shrink-0 flex-col items-start gap-sm md:items-end">
           {isAcceptingReports ? (
             <Button asChild size="lg">
-              <Link href={`/reports/new?programId=${encodeURIComponent(program.id)}`}>
+              <Link href={`/reports/new?programSlug=${encodeURIComponent(program.slug)}`}>
                 Submit a private report
               </Link>
             </Button>
@@ -294,7 +302,7 @@ export function ProgramDetailView({ id }: { readonly id: string }) {
         </TabsContent>
         <TabsContent value="scope">
           {/* `id="scope"` is the anchor behind the composer's `View impact definitions` link
-              (`/programs/:id#scope`). Keep the id stable — SR-01 depends on it. */}
+              (`/programs/:slug#scope`). Keep the slug stable — SR-01 depends on it. */}
           <div className="scroll-mt-2xl" id="scope">
             <ScopePanel onOpenInformation={() => openTab('information')} program={program} />
           </div>

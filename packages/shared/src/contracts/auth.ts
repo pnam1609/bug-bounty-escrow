@@ -1,7 +1,11 @@
 import { USER_ROLES } from '@bug-bounty-escrow/domain';
 import { z } from 'zod';
 
-import { nonEmptyTrimmedTextSchema, uuidSchema } from '../schemas/primitives.js';
+import {
+  evmAddressSchema,
+  nonEmptyTrimmedTextSchema,
+  uuidSchema,
+} from '../schemas/primitives.js';
 
 export const applicationRoleSchema = z.enum(USER_ROLES);
 export const selfAssignableRoleSchema = z.enum(['owner', 'researcher']);
@@ -25,7 +29,7 @@ export const currentUserSchema = z
     email: z.string().email(),
     role: applicationRoleSchema,
     displayName: nonEmptyTrimmedTextSchema,
-    walletAddress: z.string().optional(),
+    walletAddress: evmAddressSchema.optional(),
     avatarUrl: z.string().url().optional(),
     onboardingComplete: z.boolean(),
   })

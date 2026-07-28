@@ -4,7 +4,7 @@
 
 Tài liệu này định nghĩa user flow để **Security researcher gửi một vulnerability report riêng tư cho một active bug bounty program** trong BountyEscrow.
 
-Flow bắt đầu từ trang chi tiết program tại `/programs/:id`, đi qua report composer tại `/reports/new?programId=:id`, và kết thúc tại report detail `/reports/:reportId` sau khi server tạo report ở trạng thái `submitted`.
+Flow bắt đầu từ trang chi tiết program tại `/programs/:slug`, đi qua report composer tại `/reports/new?programSlug=:slug`, và kết thúc tại report detail `/reports/:reportId` sau khi server tạo report ở trạng thái `submitted`. Composer resolve public detail bằng slug rồi chỉ dùng UUID server trả về để submit report.
 
 Phạm vi gồm:
 
@@ -25,15 +25,15 @@ Review, triage, request-information, reward approval và payout là các flow k�
 | Mục đích | Route |
 | --- | --- |
 | Browse active programs | `/programs` |
-| Program detail | `/programs/:id` |
-| Submit report | `/reports/new?programId=:id` |
+| Program detail | `/programs/:slug` |
+| Submit report | `/reports/new?programSlug=:slug` |
 | Report detail sau submit | `/reports/:reportId` |
 | My reports | `/reports` |
 
 ### API
 
 ```text
-GET  /api/programs/:id
+GET  /api/programs/:slug
 POST /api/programs/:id/reports
 POST /api/reports/:id/attachments/upload-url
 GET  /api/reports/:id
@@ -67,7 +67,7 @@ Report được tạo trước attachment. Vì vậy attachment upload error là
 Draft trước submit chỉ được lưu trong `localStorage` theo program:
 
 ```text
-offchain-report-draft:<programId>
+offchain-report-draft:<programSlug>
 ```
 
 Server không tạo report `draft` trong flow hiện tại. `POST /api/programs/:id/reports` tạo trực tiếp:
@@ -338,7 +338,7 @@ flowchart LR
 
 | ID | Screen | Route/state | Mục đích |
 | --- | --- | --- | --- |
-| PG-DETAIL | Program entry | `/programs/:id` | Đọc scope/reward và mở composer |
+| PG-DETAIL | Program entry | `/programs/:slug` | Đọc scope/reward và mở composer |
 | SR-00 | Loading program | Composer loading | Chờ program và eligible scopes |
 | SR-01 | Assets & Impact | Step 1 | Chọn affected in-scope asset và 1+ program impacts phù hợp asset type |
 | SR-01V | Assets & Impact validation | Client state | Thiếu/invalid asset, impact hoặc custom impact không được phép |
@@ -819,7 +819,7 @@ Primary: `Sign in again`, với safe internal `returnTo` quay lại đúng compo
 
 ### SR-14 — Missing program
 
-Khi URL thiếu `programId`:
+Khi URL thiếu `programSlug`:
 
 ```text
 Choose a program before starting a report.

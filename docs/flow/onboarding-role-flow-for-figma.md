@@ -314,8 +314,8 @@ Success routing:
 Ví dụ anonymous chọn `Submit report`:
 
 ```text
-/reports/new?programId=123
-  → /login?returnTo=%2Freports%2Fnew%3FprogramId%3D123
+/reports/new?programSlug=aegis-protocol
+  → /login?returnTo=%2Freports%2Fnew%3FprogramSlug%3Daegis-protocol
   → /onboarding (nếu chưa hoàn tất)
   → kiểm tra role
   → researcher: quay lại report form

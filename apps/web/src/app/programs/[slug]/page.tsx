@@ -17,15 +17,15 @@ export const metadata: Metadata = {
 export default async function ProgramPage({
   params,
 }: {
-  readonly params: Promise<{ id: string }>;
+  readonly params: Promise<{ slug: string }>;
 }) {
-  const { id } = await params;
+  const { slug } = await params;
 
   return (
     <ResearcherShell showFooter width="detail">
       {/* The selected tab lives in `?tab=`, so the view reads the query string on the client. */}
       <Suspense fallback={<p className="text-body-sm text-text-muted">Loading program…</p>}>
-        <ProgramDetailView id={id} />
+        <ProgramDetailView slug={slug} />
       </Suspense>
     </ResearcherShell>
   );

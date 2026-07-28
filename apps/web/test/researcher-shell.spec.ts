@@ -82,7 +82,7 @@ describe('researcher header', () => {
     expect(RESEARCHER_ACCOUNT_MENU_ITEMS).toEqual([
       { href: '/programs', label: 'Browse programs', disabled: false },
       { href: '/reports', label: 'My reports', disabled: false },
-      { href: '/rewards', label: 'Rewards · Future', disabled: true },
+      { href: '/rewards', label: 'Rewards', disabled: false },
       { href: '/account/settings', label: 'Account settings', disabled: false },
     ]);
     expect(RESEARCHER_LOGOUT_LABEL).toBe('Log out');

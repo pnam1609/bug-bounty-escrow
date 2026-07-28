@@ -276,6 +276,12 @@ function assertAssetTypeCoverage(
   }
 }
 
+export const programSlugSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+
 export const createProgramRequestSchema = z
   .object({
     name: nonEmptyTrimmedTextSchema.max(200),
@@ -378,6 +384,7 @@ export const updateProgramRequestSchema = z
 // -------------------------------------------------------------------------------- queries
 
 export const programIdParamsSchema = z.object({ id: uuidSchema }).strict();
+export const programSlugParamsSchema = z.object({ slug: programSlugSchema }).strict();
 
 /** Repeatable query values arrive either as `?a=1&a=2`, `?a=1,2`, or a single value. */
 function enumListQuerySchema<T extends readonly [string, ...string[]]>(values: T) {
@@ -575,7 +582,7 @@ export const programSummarySchema = z
   .object({
     id: uuidSchema,
     name: z.string(),
-    slug: z.string(),
+    slug: programSlugSchema,
     shortSummary: z.string(),
     status: programStatusSchema,
     publicStatus: publicProgramStatusSchema.nullable(),
@@ -709,6 +716,7 @@ export const signedLogoUploadResponseSchema = z
 export type ProgramListQuery = z.output<typeof programListQuerySchema>;
 export type OwnerProgramListQuery = z.output<typeof ownerProgramListQuerySchema>;
 export type ProgramIdParams = z.output<typeof programIdParamsSchema>;
+export type ProgramSlugParams = z.output<typeof programSlugParamsSchema>;
 export type ProgramReviewerParams = z.output<typeof programReviewerParamsSchema>;
 export type TransactionHashParams = z.output<typeof transactionHashParamsSchema>;
 export type CreateProgramRequest = z.output<typeof createProgramRequestSchema>;

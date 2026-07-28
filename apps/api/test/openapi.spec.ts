@@ -48,6 +48,118 @@ describe('OpenAPI generation', () => {
         },
       },
     });
+    expect(document.paths['/programs']?.get?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'status',
+          schema: {
+            items: { enum: ['active', 'ended'], type: 'string' },
+            minItems: 1,
+            type: 'array',
+          },
+        }),
+      ]),
+    );
+    expect(document.paths['/programs']?.get).toMatchObject({
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: expect.objectContaining({
+                type: 'object',
+                required: ['success', 'data', 'metadata'],
+              }),
+            },
+          },
+        },
+      },
+    });
+    expect(document.paths['/programs/{slug}']?.get).toMatchObject({
+      operationId: 'ProgramController_get',
+      parameters: [
+        {
+          in: 'path',
+          name: 'slug',
+          required: true,
+          schema: {
+            maxLength: 120,
+            minLength: 1,
+            pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+            type: 'string',
+          },
+        },
+      ],
+    });
+    expect(document.paths['/programs/{id}']?.get).toBeUndefined();
+    expect(document.paths['/programs/{id}']?.patch).toBeDefined();
+    expect(document.paths['/owner/programs/{id}']?.get).toMatchObject({
+      operationId: 'OwnerProgramController_get',
+      parameters: [
+        expect.objectContaining({
+          in: 'path',
+          name: 'id',
+          required: true,
+          schema: expect.objectContaining({ format: 'uuid' }),
+        }),
+      ],
+    });
+    expect(document.paths['/rewards']?.get).toMatchObject({
+      operationId: 'RewardController_list',
+      parameters: expect.arrayContaining([
+        expect.objectContaining({ name: 'page', in: 'query' }),
+        expect.objectContaining({ name: 'limit', in: 'query' }),
+        expect.objectContaining({ name: 'status', in: 'query' }),
+      ]),
+      responses: {
+        200: {
+          content: {
+            'application/json': {
+              schema: expect.objectContaining({
+                type: 'object',
+                required: ['success', 'data', 'metadata'],
+              }),
+            },
+          },
+        },
+      },
+    });
+    expect(document.paths['/rewards/payout-wallet']).toMatchObject({
+      get: {
+        operationId: 'RewardController_getPayoutWallet',
+        responses: {
+          200: {
+            content: {
+              'application/json': {
+                schema: {
+                  properties: {
+                    data: {
+                      properties: {
+                        network: { const: 'Arc', type: 'string' },
+                        token: { const: 'USDC', type: 'string' },
+                        maskedAddress: expect.objectContaining({ type: 'string' }),
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      put: {
+        operationId: 'RewardController_updatePayoutWallet',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: expect.objectContaining({
+                additionalProperties: false,
+                required: ['address'],
+              }),
+            },
+          },
+        },
+      },
+    });
     expect(document.components?.schemas?.['ApiErrorResponse']).toBeDefined();
     expect(document.components?.headers?.['CorrelationId']).toBeDefined();
   });

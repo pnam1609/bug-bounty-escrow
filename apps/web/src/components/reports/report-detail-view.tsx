@@ -11,24 +11,27 @@ import {
   SeverityBadge,
   StatusBadge,
 } from '@bug-bounty-escrow/ui';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, type ReactNode } from 'react';
 
 import { CommentThread } from './comment-thread';
 import { ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
+import { getReportAccessFailure, REPORTS_LOGIN_HREF } from './report-access';
 import { safeReportListReturnTo } from './report-detail-model';
 import {
   describeTime,
   formatTimestamp,
+  reportReferenceAriaLabel,
   REPORT_STATUS_SUMMARY,
   SEVERITY_LABELS,
   shortReportId,
 } from './report-format';
 import { ReportDetailSkeleton, ReportStateBlock } from './report-states';
+import { ResubmitReportAction } from './resubmit-report-action';
 import { ReportTimeline } from './report-timeline';
 import { ASSET_TYPE_LABELS } from '@/components/programs/program-format';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -106,7 +109,7 @@ function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
             <span>{`${report.affectedScope.name} · ${ASSET_TYPE_LABELS[report.affectedScope.assetType]}`}</span>
             <Link
               className="inline-flex min-h-11 items-center rounded-sm text-label-md text-low hover:underline"
-              href={`/programs/${encodeURIComponent(report.programId)}?tab=scope`}
+              href={`/programs/${encodeURIComponent(report.programSlug)}?tab=scope`}
             >
               View scope
             </Link>
@@ -147,7 +150,13 @@ function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
   );
 }
 
-export function InformationRequestCallout({ report }: { readonly report: ReportDetail }) {
+export function InformationRequestCallout({
+  action,
+  report,
+}: {
+  readonly action?: ReactNode;
+  readonly report: ReportDetail;
+}) {
   if (report.status !== 'needs_information') return null;
 
   return (
@@ -168,15 +177,7 @@ export function InformationRequestCallout({ report }: { readonly report: ReportD
           </blockquote>
         )}
         <p>Answer in the private discussion below to keep the follow-up with this report.</p>
-        {report.capabilities.canResubmit ? (
-          <Button asChild variant="secondary">
-            <Link
-              href={`/reports/new?programId=${encodeURIComponent(report.programId)}&reportId=${encodeURIComponent(report.id)}`}
-            >
-              Edit and resubmit
-            </Link>
-          </Button>
-        ) : null}
+        {report.capabilities.canResubmit ? action : null}
       </div>
     </Callout>
   );
@@ -188,16 +189,28 @@ export interface ReportDetailViewProps {
 
 export function ReportDetailView({ id }: ReportDetailViewProps) {
   const { session } = useAuth();
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const viewer = useCurrentUser();
   const searchParams = useSearchParams();
   const token = session?.access_token;
+  const principalId = session?.user.id ?? 'no-session';
   const reportsHref = safeReportListReturnTo(searchParams.get('returnTo'));
 
   const query = useQuery({
-    queryKey: queryKeys.report(id),
+    queryKey: queryKeys.report(principalId, id),
+    enabled: session !== null,
     queryFn: () =>
       apiRequest(`/api/reports/${encodeURIComponent(id)}`, reportResponseSchema, { token }),
   });
+  const accessFailure = getReportAccessFailure(query.error);
+
+  useEffect(() => {
+    if (accessFailure !== 'unauthorized') return;
+    void queryClient.cancelQueries({ queryKey: queryKeys.private });
+    queryClient.removeQueries({ queryKey: queryKeys.private });
+    router.replace(REPORTS_LOGIN_HREF);
+  }, [accessFailure, queryClient, router]);
 
   if (query.isPending) {
     return (
@@ -211,6 +224,16 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
   }
 
   if (query.isError) {
+    if (accessFailure === 'unauthorized') {
+      return (
+        <ReportStateBlock
+          detail="Redirecting you to sign in again."
+          title="Your session has ended"
+          tone="error"
+        />
+      );
+    }
+
     const missing =
       query.error instanceof ApiClientError &&
       (query.error.status === 404 || query.error.status === 403);
@@ -253,7 +276,11 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
             </Link>
           </li>
           <li aria-hidden="true">/</li>
-          <li aria-current="page" className="font-mono text-text">
+          <li
+            aria-current="page"
+            aria-label={reportReferenceAriaLabel(report.id)}
+            className="font-mono text-text"
+          >
             {shortReportId(report.id)}
           </li>
         </ol>
@@ -272,7 +299,7 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
             <p className="flex flex-wrap items-center gap-sm text-body-sm text-text-muted">
               <Link
                 className="inline-flex min-h-11 items-center rounded-sm hover:text-text"
-                href={`/programs/${encodeURIComponent(report.programId)}`}
+                href={`/programs/${encodeURIComponent(report.programSlug)}`}
               >
                 {report.programName}
               </Link>
@@ -294,7 +321,10 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
         </div>
       </header>
 
-      <InformationRequestCallout report={report} />
+      <InformationRequestCallout
+        action={<ResubmitReportAction reportId={report.id} />}
+        report={report}
+      />
 
       <div className="grid gap-xl lg:grid-cols-3 lg:items-start">
         <Card className="gap-xl lg:col-span-2" padding="lg">
@@ -326,7 +356,7 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
             </Button>
             {/* Flow §8 SR-07 lists this third action; the raster only draws the first two. */}
             <Button asChild size="lg" variant="secondary">
-              <Link href={`/programs/${encodeURIComponent(report.programId)}`}>
+              <Link href={`/programs/${encodeURIComponent(report.programSlug)}`}>
                 Back to program
               </Link>
             </Button>
@@ -339,6 +369,7 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
       <ReportContent report={report} token={token} />
 
       <CommentThread
+        principalId={principalId}
         reportId={report.id}
         researcherId={report.researcherId}
         token={token}

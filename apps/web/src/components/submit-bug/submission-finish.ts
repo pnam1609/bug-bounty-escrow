@@ -13,7 +13,8 @@ export interface SubmissionRouter {
 }
 
 export interface FinishSubmittedReportInput {
-  readonly programId: string;
+  readonly principalId: string;
+  readonly draftKey: string;
   readonly queryClient: SubmissionQueryCache;
   readonly report: ReportResponse;
   readonly router: SubmissionRouter;
@@ -27,15 +28,16 @@ export interface FinishSubmittedReportInput {
  * component makes the no-optimistic-redirect contract directly testable.
  */
 export async function finishSubmittedReport({
-  programId,
+  principalId,
+  draftKey,
   queryClient,
   report,
   router,
 }: FinishSubmittedReportInput): Promise<void> {
   const reportId = report.data.id;
 
-  clearDraft(programId);
-  queryClient.setQueryData(queryKeys.report(reportId), report);
-  await queryClient.invalidateQueries({ queryKey: ['reports'] });
+  clearDraft(draftKey);
+  queryClient.setQueryData(queryKeys.report(principalId, reportId), report);
+  await queryClient.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) });
   router.replace(`/reports/${reportId}`);
 }

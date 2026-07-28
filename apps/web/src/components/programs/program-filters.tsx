@@ -64,6 +64,16 @@ export const STATUS_OPTIONS: readonly FilterOption<PublicProgramStatus>[] = Obje
   { value: 'ended', label: 'Ended' },
 ]);
 
+/**
+ * The clean URL omits `status`, while the control must still present Active and Ended as checked.
+ * Keeping this translation at the view boundary avoids serialising a fake "active only" default.
+ */
+export function statusSelectionForControls(
+  status: readonly PublicProgramStatus[],
+): readonly PublicProgramStatus[] {
+  return status.length === 0 ? STATUS_VALUES : status;
+}
+
 export const ASSET_TYPE_OPTIONS: readonly FilterOption<AssetType>[] = Object.freeze(
   ASSET_TYPE_VALUES.map((value) => ({ value, label: ASSET_TYPE_LABELS[value] })),
 );
@@ -275,6 +285,11 @@ export function countAppliedFilters(filters: ProgramFilterState): number {
   );
 }
 
+/** Count shown on the mobile `Filters` trigger; search has its own visible control. */
+export function countAdvancedFilters(filters: ProgramFilterState): number {
+  return countAppliedFilters(filters) - (filters.search === '' ? 0 : 1);
+}
+
 /** Advanced filters only — used to tell "no programs yet" apart from "nothing matches". */
 export function hasNarrowingFilters(filters: ProgramFilterState): boolean {
   return countAppliedFilters(filters) > 0;
@@ -344,9 +359,7 @@ export interface AppliedFilterChip {
   readonly remove: (filters: ProgramFilterState) => ProgramFilterState;
 }
 
-export function describeAppliedFilters(
-  filters: ProgramFilterState,
-): readonly AppliedFilterChip[] {
+export function describeAppliedFilters(filters: ProgramFilterState): readonly AppliedFilterChip[] {
   const chips: AppliedFilterChip[] = [];
 
   if (filters.search !== '') {

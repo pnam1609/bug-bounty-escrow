@@ -1,8 +1,13 @@
-import { reportDetailSchema, type ReportDetail } from '@bug-bounty-escrow/shared';
+import {
+  reportDetailSchema,
+  type ReportDetail,
+  type ReportResponse,
+} from '@bug-bounty-escrow/shared';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { NeedsInformationAlert } from '@/components/reports/needs-information-alert';
 import { ReportContent } from '@/components/reports/report-content';
 import {
   InformationRequestCallout,
@@ -16,6 +21,11 @@ import {
   reportListHref,
   safeReportListReturnTo,
 } from '@/components/reports/report-detail-model';
+import {
+  finishResubmittedReport,
+  RESUBMIT_REPORT_BODY,
+  resubmitReportPath,
+} from '@/components/reports/resubmit-report-action';
 
 const report: ReportDetail = reportDetailSchema.parse({
   id: '10000000-0000-4000-8000-000000000010',
@@ -95,17 +105,75 @@ describe('SR-12 report detail', () => {
   });
 
   it('highlights the latest reviewer request and obeys the server resubmit capability', () => {
-    const enabled = renderToStaticMarkup(createElement(InformationRequestCallout, { report }));
+    const action = createElement('span', null, 'Resubmit report');
+    const enabled = renderToStaticMarkup(
+      createElement(InformationRequestCallout, { action, report }),
+    );
     const disabled = renderToStaticMarkup(
       createElement(InformationRequestCallout, {
+        action,
         report: { ...report, capabilities: { canEdit: false, canResubmit: false } },
       }),
     );
 
     expect(enabled).toContain('Latest reviewer request');
     expect(enabled).toContain('Include the exact block number and failing transaction.');
-    expect(enabled).toContain('Edit and resubmit');
-    expect(disabled).not.toContain('Edit and resubmit');
+    expect(enabled).toContain('Resubmit report');
+    expect(disabled).not.toContain('Resubmit report');
+  });
+
+  it('renders a quiet action-required notice only for the exact needs-information filtered state', () => {
+    const markup = renderToStaticMarkup(
+      createElement(NeedsInformationAlert, {
+        reports: [report],
+        status: 'needs_information',
+      }),
+    );
+
+    expect(markup).toContain('role="note"');
+    expect(markup).toContain('Action required');
+    expect(markup).toContain(
+      'The program team needs more information before it can continue reviewing these reports.',
+    );
+    expect(markup).not.toContain('aria-live');
+    expect(markup).not.toContain('Include the exact block number and failing transaction.');
+    expect(
+      renderToStaticMarkup(
+        createElement(NeedsInformationAlert, {
+          reports: [report],
+          status: 'submitted',
+        }),
+      ),
+    ).toBe('');
+  });
+
+  it('uses the exact resubmit contract, refreshes report lists and replaces the detail cache', async () => {
+    expect(resubmitReportPath(report.id)).toBe(`/api/reports/${report.id}`);
+    expect(RESUBMIT_REPORT_BODY).toEqual({ resubmit: true });
+
+    const response = {
+      success: true,
+      data: { ...report, status: 'submitted' },
+    } satisfies ReportResponse;
+    const events: string[] = [];
+    const invalidateQueries = vi.fn(async ({ queryKey }: { queryKey: readonly unknown[] }) => {
+      events.push(`invalidate:${queryKey.join('/')}`);
+    });
+    const setQueryData = vi.fn((queryKey: readonly unknown[], value: ReportResponse) => {
+      expect(value.data.status).toBe('submitted');
+      events.push(`cache:${queryKey.join('/')}`);
+    });
+
+    await finishResubmittedReport(
+      { invalidateQueries, setQueryData },
+      report.researcherId,
+      response,
+    );
+
+    expect(events).toEqual([
+      `cache:private/${report.researcherId}/report/${report.id}`,
+      `invalidate:private/${report.researcherId}/reports`,
+    ]);
   });
 
   it('round-trips filtered My Reports links and rejects unsafe return destinations', () => {

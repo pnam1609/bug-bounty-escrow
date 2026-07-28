@@ -53,9 +53,9 @@ Nội dung report là dữ liệu riêng tư. My Reports không phải trang pub
 | --- | --- |
 | My Reports | `/reports` |
 | Private report detail | `/reports/:id` |
-| Submit report | `/reports/new?programId=:programId` |
+| Submit report | `/reports/new?programSlug=:programSlug` |
 | Browse Programs | `/programs` |
-| Program detail | `/programs/:id` |
+| Program detail | `/programs/:slug` |
 
 ### API
 
@@ -225,7 +225,7 @@ Researcher navigation
   │    ├─ Filters
   │    ├─ Pagination
   │    └─ Report row → /reports/:id
-  └─ Submit report → /reports/new?programId=:programId
+  └─ Submit report → /reports/new?programSlug=:programSlug
 ```
 
 Account menu:
@@ -306,7 +306,7 @@ Columns:
 | Column | Data | Quy tắc |
 | --- | --- | --- |
 | Report | Reference + `title` | Title tối đa 2 dòng; không lộ description |
-| Program | `programName` | Có thể link tới `/programs/:programId` nếu route hỗ trợ ID |
+| Program | `programName` | Link tới `/programs/:programSlug` |
 | Severity | `finalSeverity ?? proposedSeverity` | Badge có label accessible |
 | Status | `status` | Dùng mapping ở mục 6 |
 | Reward | `approvedReward` | USDC hoặc `—` |
@@ -755,4 +755,3 @@ Khi dùng tài liệu này để generate frontend:
    - Có hơn 20 report.
    - Filter không có kết quả.
    - Session hết hạn giữa lúc pagination.
-

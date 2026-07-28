@@ -52,7 +52,7 @@ export function LandingHeader(): ReactNode {
           <SiteBrand />
         </Link>
       }
-      className="[&>div]:max-w-[1344px] [&>div]:px-xl sm:[&>div]:px-2xl lg:[&>div]:px-3xl"
+      className="[&>div]:px-xl sm:[&>div]:px-2xl lg:[&>div]:px-3xl"
       nav={
         // Brand + four nav items + two actions need ~870px on one row, so the nav appears at
         // `lg`; between `sm` and `lg` the bar is brand plus actions and never forces a scroll.
@@ -64,7 +64,6 @@ export function LandingHeader(): ReactNode {
           ))}
         </SiteNav>
       }
-      width="full"
     />
   );
 }
@@ -118,7 +117,7 @@ export function LandingFooter(): ReactNode {
           </p>
         </div>
       }
-      className="[&>div]:max-w-[1344px] [&>div]:px-xl sm:[&>div]:px-2xl lg:[&>div]:px-3xl"
+      className="[&>div]:px-xl sm:[&>div]:px-2xl lg:[&>div]:px-3xl"
       columns={FOOTER_COLUMNS.map((column) => (
         <SiteFooterColumn key={column.title} title={column.title}>
           {column.links.map((link) => (
@@ -136,7 +135,6 @@ export function LandingFooter(): ReactNode {
         </p>
       }
       variant="full"
-      width="full"
     />
   );
 }

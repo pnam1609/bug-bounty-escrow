@@ -133,6 +133,78 @@ save-error state và giữ nguyên payload để retry (CP-07).
 
 ---
 
+## GET /api/programs/:slug — canonical program detail (SR-01)
+
+Public program URL và public detail lookup dùng slug:
+
+```text
+/programs/aegis-protocol
+GET /api/programs/aegis-protocol
+```
+
+- Path param dùng canonical lowercase kebab-case, 1–120 ký tự. Path không được silently trim;
+  non-canonical input trả `400 validation_error`.
+- Repository luôn query `programs.slug`; không fallback sang `programs.id`. Một chuỗi trông giống
+  UUID nhưng không tồn tại dưới dạng slug vì vậy trả `404`.
+- Anonymous chỉ đọc program có `public_status` khác null. Owner và assigned reviewer có thể đọc
+  non-public program theo policy hiện hành; unknown và unauthorized đều trả `404` để không tạo
+  enumeration oracle.
+- `programs_slug_key` enforce unique toàn hệ thống. Trigger `programs_slug_immutable` chặn đổi slug
+  sau create bằng detail code `program_slug_immutable`.
+- Duplicate slug lúc create tiếp tục map `23505` thành stable `409 database_unique_violation`.
+
+Owner editor đọc bằng protected `GET /api/owner/programs/:id`. PATCH/deploy/fund/publish/status,
+report submission, foreign key và authorization nội bộ tiếp tục dùng UUID; không đổi chúng sang
+slug.
+
+Report composer canonical là `/reports/new?programSlug=:slug`: client GET detail bằng slug, sau đó
+dùng `data.id` server trả về cho `POST /api/programs/:id/reports`.
+
+---
+
+## GET /api/reports/summary — researcher report metrics (MR-01)
+
+Trả một snapshot aggregate trên **toàn bộ** report mà researcher hiện tại sở hữu; kết quả không
+phụ thuộc pagination hoặc filter của `GET /api/reports`.
+
+### Quyền truy cập và privacy
+
+- Bearer JWT hợp lệ; thiếu/hết hạn nhận `401 unauthorized`.
+- Chỉ role `researcher`; role khác nhận `403 forbidden`.
+- Principal lấy từ session đã verify. Endpoint không nhận `researcherId` từ query hoặc body.
+- RPC chỉ cấp `EXECUTE` cho `service_role`, xác nhận profile vẫn là researcher và luôn lọc
+  `reports.researcher_id = principal.userId`.
+
+### Response — `researcherReportSummaryResponseSchema`
+
+```json
+{
+  "success": true,
+  "data": {
+    "allReports": 12,
+    "needsInformation": 2,
+    "underReview": 5,
+    "rewardsPaid": "48500.000000",
+    "paymentToken": "USDC",
+    "calculatedAt": "2026-07-27T10:00:00.000Z"
+  }
+}
+```
+
+- `allReports`: count mọi status.
+- `needsInformation`: count `status = needs_information`.
+- `underReview`: count `status in (submitted, triaged)`.
+- `rewardsPaid`: `SUM(approved_reward)` chỉ với `status = paid`; PostgreSQL tính bằng `numeric`
+  rồi serialize thẳng thành decimal string, không đi qua JavaScript floating point.
+- `paymentToken` cố định là `USDC`.
+- `calculatedAt` là ISO date-time lúc API tạo response.
+
+Aggregate chạy trong một query và dùng index `reports_researcher_status_submitted_at_idx`. Client
+có thể cache ngắn theo query key `['reports', 'summary']`; mọi mutation report invalidate prefix
+`['reports']`, bao gồm cả list và summary.
+
+---
+
 ## GET /api/reports/filter-options/programs — program filter options (MR-02)
 
 Trả toàn bộ program được đại diện trong dataset report riêng của researcher hiện tại. Endpoint
@@ -173,3 +245,75 @@ Mỗi option tuân theo `ReportProgramFilterOption`:
 
 Danh sách distinct được sắp xếp ổn định theo tên không phân biệt hoa thường, sau đó tên gốc và
 program UUID. Researcher chưa có report nhận `200 { success: true, data: [] }`.
+
+---
+
+## Report reference presentation — short UUID (MR-03)
+
+Canonical report identifier vẫn là UUID bất biến trong field `id`; API và database không thêm
+`referenceCode` hoặc `displayId`. UI được phép hiển thị 8 ký tự đầu của UUID kèm dấu ellipsis,
+nhưng đây chỉ là presentation:
+
+- Accessible name của mọi short UUID phải chứa full UUID, và copy action luôn copy full UUID.
+- URL, API request, cache key và đối chiếu report luôn dùng full UUID.
+- Client không được sinh mã `BBE-YYYY-NNNN`, không suy ra sequence từ pagination và không coi short
+  UUID là unique identifier.
+- Analytics không được nhận full UUID, short UUID hay bất kỳ report reference nào; event chỉ dùng
+  các enum/filter/page/result-count đã cho phép trong flow My Reports.
+
+Chọn hướng này vì UUID server-issued đã là canonical contract, không cần migration/rollback, không
+tạo một namespace identifier thứ hai, và không công khai sequence có thể làm lộ volume report hoặc
+hỗ trợ enumeration. Copy Figma `BBE-2026-0142` vì vậy được reconcile thành short UUID trước QA.
+
+---
+
+## GET /api/rewards — researcher reward activity (RW-02)
+
+Read model phân trang dành riêng cho authenticated researcher. Server lấy actor từ session; query
+chỉ nhận `page`, `limit` và optional `status = reward_approved|payment_pending|paid`.
+`researcherId` và mọi query key lạ bị `400 validation_error`.
+
+Mỗi `ResearcherRewardSummary` chỉ gồm:
+
+- `reportId`, `programId`, `programName`, `reportTitle`, `finalSeverity`.
+- `status`, `approvedReward`, `submittedAt`, `rewardApprovedAt`, optional `paidAt`.
+- Optional `payment`: `chainId` dạng decimal string, `tokenAddress`, `transactionHash`,
+  `status = pending|confirmed|failed`, optional `confirmations`, optional `confirmedAt`.
+
+`approvedReward` đi từ PostgreSQL `numeric` sang decimal string, không qua JavaScript floating
+point. `paidAt` bắt buộc khi `status = paid`. Payment chỉ được tạo từ payout transaction thật có
+`report_id` trùng report researcher sở hữu; `reverted|timeout` được project thành `failed`.
+
+Database RPC `researcher_rewards`:
+
+- Double-check profile role `researcher`.
+- Lọc `reports.researcher_id = principal.userId` trước pagination.
+- Chỉ được `service_role` execute.
+- Không trả description, reproduction steps, impact, attachment, comment hoặc private report body.
+
+`GET /api/programs/:id/transactions` và `GET /api/transactions/:hash` vẫn là program-side endpoint,
+được gate `owner|reviewer` và tiếp tục kiểm tra owner/assignment theo program. Researcher đọc payout
+của mình qua `/api/rewards`, không probe transaction của report khác.
+
+Settlement mutation `approve-reward`, `pay`, `confirm-payment` vẫn chỉ cho `owner|reviewer`; database
+RPC kiểm tra lại quyền review. AI triage rows là dữ liệu hỗ trợ thụ động và không có trigger hoặc
+code path nào gọi settlement transition.
+
+---
+
+## GET/PUT /api/rewards/payout-wallet — payout destination (RW-04)
+
+Dedicated contract dành cho authenticated researcher; `PATCH /api/me` không nhận wallet. Server
+lấy actor từ session và chỉ nhận body strict `{ address, confirmActiveRewardChange? }`. Address phải
+là EVM address khác zero address, được normalize lowercase; mọi identity override, private key,
+seed phrase, signature, connected-wallet field hoặc field lạ bị reject.
+
+Response cố định `network = Arc`, `token = USDC`; summary UI chỉ hiện `maskedAddress`, còn full
+`address` chỉ cấp cho thao tác Copy rõ ràng. Wallet chỉ có thể set/change khi researcher có report
+`reward_approved` hoặc `payment_pending`. Đổi một wallet đã lưu trong trạng thái đó cần confirmation
+rõ ràng; server trả stable conflict `wallet_change_confirmation_required` nếu UI state bị race.
+
+Database RPC khóa profile và toàn bộ report set của researcher trước khi kiểm tra lifecycle, nên
+wallet write serialize với approve/start/confirm payment. Write và redacted audit event nằm trong
+cùng transaction; retry cùng address không update timestamp và không tạo audit mới. Audit metadata
+không chứa wallet address. Cả read/write RPC chỉ cấp execute cho `service_role`.

@@ -6,7 +6,7 @@ const METRICS = Object.freeze([
   {
     key: 'allReports',
     label: 'All reports',
-    dotClassName: 'bg-primary',
+    dotClassName: 'bg-informational',
   },
   {
     key: 'needsInformation',
@@ -16,7 +16,7 @@ const METRICS = Object.freeze([
   {
     key: 'underReview',
     label: 'Under review',
-    dotClassName: 'bg-informational',
+    dotClassName: 'bg-primary',
   },
   {
     key: 'rewardsPaid',
@@ -26,13 +26,14 @@ const METRICS = Object.freeze([
 ] as const);
 
 function formatRewardsPaid(value: string): string {
-  const amount = Number(value);
-  return Number.isFinite(amount)
-    ? amount.toLocaleString('en-US', { maximumFractionDigits: 2 })
-    : value;
+  const [whole = '0', fraction = ''] = value.split('.');
+  const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const visibleFraction = fraction.replace(/0+$/, '');
+
+  return visibleFraction === '' ? groupedWhole : `${groupedWhole}.${visibleFraction}`;
 }
 
-export function ReportPageHeader() {
+export function ReportPageHeader({ onBrowsePrograms }: { readonly onBrowsePrograms?: () => void }) {
   return (
     <header className="flex flex-col gap-lg md:flex-row md:items-end md:justify-between">
       <div className="flex max-w-3xl flex-col gap-sm">
@@ -42,8 +43,13 @@ export function ReportPageHeader() {
           Track private submissions, reviewer decisions, and reward progress.
         </p>
       </div>
-      <Button asChild className="w-fit" variant="secondary">
-        <Link href="/programs">Browse programs</Link>
+      <Button asChild className="w-fit">
+        <Link
+          href="/programs"
+          {...(onBrowsePrograms === undefined ? {} : { onClick: onBrowsePrograms })}
+        >
+          Browse programs
+        </Link>
       </Button>
     </header>
   );
@@ -64,17 +70,17 @@ export function ReportSummaryMetrics({ summary }: { readonly summary: Researcher
     >
       {METRICS.map((metric) => (
         <div
-          className="flex min-w-0 flex-col gap-lg rounded-lg border border-border bg-surface p-lg shadow-subtle"
+          className="flex min-w-0 flex-col gap-sm rounded-lg border border-border bg-surface-raised p-lg shadow-subtle"
           key={metric.key}
         >
-          <dt className="flex items-center gap-sm text-label-sm uppercase text-text-muted">
+          <dt className="order-2 text-body-sm text-text-muted">{metric.label}</dt>
+          <dd className="order-1 flex items-center gap-sm text-h2 text-text">
             <span
               aria-hidden="true"
               className={`size-2 shrink-0 rounded-full ${metric.dotClassName}`}
             />
-            {metric.label}
-          </dt>
-          <dd className="text-h2 text-text">{values[metric.key]}</dd>
+            {values[metric.key]}
+          </dd>
         </div>
       ))}
     </dl>
@@ -91,11 +97,11 @@ export function ReportSummarySkeleton() {
       {METRICS.map((metric) => (
         <div
           aria-hidden="true"
-          className="flex flex-col gap-lg rounded-lg border border-border bg-surface p-lg"
+          className="flex flex-col gap-sm rounded-lg border border-border bg-surface-raised p-lg"
           key={metric.key}
         >
-          <span className="h-4 w-32 animate-pulse rounded-sm bg-surface-raised motion-reduce:animate-none" />
-          <span className="h-8 w-20 animate-pulse rounded-sm bg-surface-raised motion-reduce:animate-none" />
+          <span className="h-4 w-32 animate-pulse rounded-sm bg-ambient motion-reduce:animate-none" />
+          <span className="h-8 w-20 animate-pulse rounded-sm bg-ambient motion-reduce:animate-none" />
         </div>
       ))}
     </div>

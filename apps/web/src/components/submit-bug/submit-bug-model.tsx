@@ -106,13 +106,13 @@ const draftSchema = z
   })
   .strict();
 
-export function draftStorageKey(programId: string): string {
-  return `offchain-report-draft:${programId}`;
+export function draftStorageKey(programKey: string): string {
+  return `offchain-report-draft:${programKey}`;
 }
 
-export function readDraft(programId: string): ReportDraft | null {
+export function readDraft(programKey: string): ReportDraft | null {
   try {
-    const stored = window.localStorage.getItem(draftStorageKey(programId));
+    const stored = window.localStorage.getItem(draftStorageKey(programKey));
     if (stored === null) return null;
 
     const parsed = draftSchema.safeParse(JSON.parse(stored));
@@ -123,17 +123,17 @@ export function readDraft(programId: string): ReportDraft | null {
   }
 }
 
-export function writeDraft(programId: string, draft: ReportDraft): void {
+export function writeDraft(programKey: string, draft: ReportDraft): void {
   try {
-    window.localStorage.setItem(draftStorageKey(programId), JSON.stringify(draft));
+    window.localStorage.setItem(draftStorageKey(programKey), JSON.stringify(draft));
   } catch {
     // Private-mode or quota failures degrade to "no autosave", never to a thrown render.
   }
 }
 
-export function clearDraft(programId: string): void {
+export function clearDraft(programKey: string): void {
   try {
-    window.localStorage.removeItem(draftStorageKey(programId));
+    window.localStorage.removeItem(draftStorageKey(programKey));
   } catch {
     /* nothing to clean up */
   }

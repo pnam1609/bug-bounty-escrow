@@ -310,7 +310,7 @@ bug-bounty-escrow/
 │   │   ├── app/
 │   │   │   ├── (public)/
 │   │   │   │   ├── programs/
-│   │   │   │   └── programs/[id]/
+│   │   │   │   └── programs/[slug]/
 │   │   │   ├── owner/
 │   │   │   │   ├── programs/
 │   │   │   │   ├── reports/
@@ -791,7 +791,7 @@ POST   /api/me/notifications/read
 
 ```text
 GET    /api/programs
-GET    /api/programs/:id
+GET    /api/programs/:slug
 GET    /api/programs/:id/disclosures
 ```
 
@@ -801,11 +801,14 @@ GET    /api/programs/:id/disclosures
 và `funded`. Active luôn được xếp trước ended.
 
 `GET /api/programs/:id/disclosures` là Known Issues: chỉ đọc `report_disclosures` đã published.
+`GET /api/programs/:slug` là canonical public detail lookup. Slug unique và immutable sau create;
+UUID vẫn dùng cho owner mutations, report submission, foreign key và authorization nội bộ.
 
 ### Programs — owner
 
 ```text
 GET    /api/owner/programs
+GET    /api/owner/programs/:id
 POST   /api/programs
 PATCH  /api/programs/:id
 POST   /api/programs/:id/logo/upload-url

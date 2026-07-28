@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-import { BrandLockup, ShortFooter } from './onboarding-shell';
+import { BrandLockup } from './onboarding-shell';
 import { ROLE_LANDING_PATHS, ROLE_WORKSPACE_LABELS, SUPPORT_HREF } from './role-options';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { FORBIDDEN_TITLE, forbiddenMessageForPath } from '@/components/role-guard-model';
@@ -24,7 +24,7 @@ import { useAuth } from '@/providers/auth-provider';
 
 function ForbiddenFrame({ children }: { readonly children: ReactNode }) {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col bg-background">
+    <div className="flex min-h-screen w-full flex-col bg-background">
       <div className="px-2xl py-xl">
         <Link href="/" className="inline-flex rounded-md">
           <BrandLockup />
@@ -34,7 +34,6 @@ function ForbiddenFrame({ children }: { readonly children: ReactNode }) {
         {/* 620px content column, node 82:415. */}
         <div className="w-full max-w-[620px]">{children}</div>
       </div>
-      <ShortFooter />
     </div>
   );
 }

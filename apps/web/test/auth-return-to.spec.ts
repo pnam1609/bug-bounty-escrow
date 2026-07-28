@@ -9,13 +9,13 @@ import {
 
 /*
  * PG-DETAIL §8: an anonymous `Submit a private report` click must survive the sign-in (and, for
- * a new account, onboarding) round trip and land back on `/reports/new?programId=…` — but only
+ * a new account, onboarding) round trip and land back on `/reports/new?programSlug=…` — but only
  * for a researcher. These are the pure rules that journey rides on.
  */
 describe('submit CTA sign-in round trip', () => {
-  const composer = '/reports/new?programId=3f8a1f6e-1111-4222-8333-944445555666';
+  const composer = '/reports/new?programSlug=aegis-protocol';
 
-  it('keeps the composer path together with its programId query', () => {
+  it('keeps the composer path together with its programSlug query', () => {
     expect(readSafeReturnTo(composer)).toBe(composer);
   });
 
@@ -46,7 +46,7 @@ describe('submit CTA sign-in round trip', () => {
  * to a bare `/onboarding` that severs the journey (flow doc §6.2 step 5, §6.8).
  */
 describe('session-expired sign-in link', () => {
-  const composer = '/reports/new?programId=3f8a1f6e-1111-4222-8333-944445555666';
+  const composer = '/reports/new?programSlug=aegis-protocol';
 
   it('falls back to plain onboarding when nothing rides on the URL', () => {
     expect(buildSessionExpiredLoginHref('')).toBe('/login?returnTo=%2Fonboarding');

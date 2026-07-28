@@ -8,8 +8,8 @@ import { withReturnTo } from '../auth/use-auth-redirect';
 import { ComposerStatusCard } from './composer-frame';
 import { composerReturnTo } from './recovery-actions';
 
-export function SessionExpired({ programId }: { readonly programId: string }) {
-  const returnTo = composerReturnTo(programId);
+export function SessionExpired({ programSlug }: { readonly programSlug: string }) {
+  const returnTo = composerReturnTo(programSlug);
 
   return (
     <ComposerStatusCard>

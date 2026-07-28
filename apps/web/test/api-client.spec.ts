@@ -2,7 +2,7 @@ import { programListResponseSchema } from '@bug-bounty-escrow/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiRequest, safeReturnPath } from '../src/lib/api-client';
-import { queryKeys } from '../src/lib/query-keys';
+import { queryKeys, shouldPurgePrivateQueryCache } from '../src/lib/query-keys';
 
 beforeEach(() => {
   Object.assign(process.env, {
@@ -68,7 +68,47 @@ describe('typed web platform', () => {
   });
 
   it('uses stable, resource-scoped query keys', () => {
-    expect(queryKeys.report('report-a')).toEqual(['report', 'report-a']);
-    expect(queryKeys.comments('report-a')).toEqual(['report', 'report-a', 'comments']);
+    expect(queryKeys.report('researcher-a', 'report-a')).toEqual([
+      'private',
+      'researcher-a',
+      'report',
+      'report-a',
+    ]);
+    expect(queryKeys.comments('researcher-a', 'report-a')).toEqual([
+      'private',
+      'researcher-a',
+      'report',
+      'report-a',
+      'comments',
+    ]);
+    expect(queryKeys.report('researcher-b', 'report-a')).not.toEqual(
+      queryKeys.report('researcher-a', 'report-a'),
+    );
+    expect(queryKeys.publicProgram('aegis-protocol')).toEqual([
+      'programs',
+      'detail',
+      'aegis-protocol',
+    ]);
+    expect(queryKeys.privateProgramDetail('owner-a', 'aegis-protocol')).toEqual([
+      'private',
+      'owner-a',
+      'programs',
+      'detail',
+      'aegis-protocol',
+    ]);
+    expect(queryKeys.ownerProgram('owner-a', 'program-a')).toEqual([
+      'private',
+      'owner-a',
+      'owner',
+      'program',
+      'program-a',
+    ]);
+  });
+
+  it('purges private caches on session loss or principal switch, not token refresh', () => {
+    expect(shouldPurgePrivateQueryCache(undefined, 'researcher-a')).toBe(false);
+    expect(shouldPurgePrivateQueryCache('researcher-a', 'researcher-a')).toBe(false);
+    expect(shouldPurgePrivateQueryCache('researcher-a', 'researcher-b')).toBe(true);
+    expect(shouldPurgePrivateQueryCache('researcher-a', null)).toBe(true);
   });
 });

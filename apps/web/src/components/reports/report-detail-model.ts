@@ -2,10 +2,12 @@ import type { ReportFilters } from './report-filters';
 
 const REPORTS_PATH = '/reports';
 
-export function reportListHref(filters: ReportFilters): string {
+export function reportListHref(filters: ReportFilters, page = 1): string {
   const params = new URLSearchParams();
+  if (filters.programId !== undefined) params.set('programId', filters.programId);
   if (filters.status !== undefined) params.set('status', filters.status);
   if (filters.severity !== undefined) params.set('severity', filters.severity);
+  if (page > 1) params.set('page', String(page));
 
   const query = params.toString();
   return query === '' ? REPORTS_PATH : `${REPORTS_PATH}?${query}`;

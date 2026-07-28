@@ -113,7 +113,7 @@ export function SignInForm() {
     >
       {unavailable ? <Callout variant="danger">{auth.error}</Callout> : null}
 
-      <AuthOauthAction />
+      <AuthOauthAction returnTo={safeReturnTo} />
       <AuthEmailDivider />
 
       <form className="flex w-full flex-col gap-2xl" noValidate onSubmit={(e) => void submit(e)}>
@@ -163,7 +163,7 @@ export function SignInForm() {
             label="Keep me signed in"
           />
           {/* Placeholder, marked out of MVP scope in §6.2: there is no recovery route yet. */}
-          <Button disabled size="md" variant="ghost">
+          <Button size="md" variant="ghost" className="text-primary">
             Forgot password?
           </Button>
         </div>

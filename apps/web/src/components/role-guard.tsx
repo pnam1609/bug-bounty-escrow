@@ -12,7 +12,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { useAuth } from '@/providers/auth-provider';
 
 /**
- * `usePathname` drops the query string, but e.g. `/reports/new?programId=…` must survive the
+ * `usePathname` drops the query string, but e.g. `/reports/new?programSlug=…` must survive the
  * sign-in round trip — the anonymous `Submit a private report` CTA has to come back to the same
  * composer (submit-bug flow §2, onboarding flow §8). Reading `window.location.search` is safe
  * here: callers only run this after mount, never during server rendering.

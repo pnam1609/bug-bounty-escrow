@@ -93,7 +93,7 @@ describe('desktop bounty table', () => {
 
     expect(body.match(/<a /g)).toHaveLength(1);
     expect(body).not.toContain('<button');
-    expect(body).toContain('href="/programs/20000000-0000-4000-8000-000000000001"');
+    expect(body).toContain('href="/programs/aegis-protocol"');
     expect(body).toContain('<img alt=""');
     expect(body).toContain('src="https://cdn.example.test/aegis.png"');
     expect(body).toContain('Aegis Protocol');

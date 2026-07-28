@@ -5,12 +5,7 @@ import { Card, Separator } from '@bug-bounty-escrow/ui';
 import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 
-import {
-  describeDeadline,
-  formatMoney,
-  formatTotalPaid,
-  programMonogram,
-} from './program-format';
+import { describeDeadline, formatMoney, formatTotalPaid, programMonogram } from './program-format';
 
 /*
  * `Bounty Vertical Row` (Figma `171:1267`) — the sub-768px representation of a table row.
@@ -20,13 +15,9 @@ import {
  * full-width action (§10). Same data, same formatters as the desktop table.
  */
 
-export function BountyVerticalList({
-  programs,
-}: {
-  readonly programs: readonly ProgramSummary[];
-}) {
+export function BountyVerticalList({ programs }: { readonly programs: readonly ProgramSummary[] }) {
   return (
-    <ul className="flex flex-col gap-lg">
+    <ul aria-label="Bounty programs" className="flex flex-col gap-lg">
       {programs.map((program) => (
         <li key={program.id}>
           <BountyVerticalRow program={program} />
@@ -36,7 +27,7 @@ export function BountyVerticalList({
   );
 }
 
-function BountyVerticalRow({ program }: { readonly program: ProgramSummary }) {
+export function BountyVerticalRow({ program }: { readonly program: ProgramSummary }) {
   const maxBounty = formatMoney(program.maxBounty, 'maximum bounty');
   const publicTotalPaid = program.totalPaidVisibility === 'public' ? program.totalPaid : null;
   const totalPaid = formatTotalPaid(publicTotalPaid);
@@ -45,12 +36,23 @@ function BountyVerticalRow({ program }: { readonly program: ProgramSummary }) {
   return (
     <Card className="relative gap-md" padding="md">
       <div className="flex items-center gap-md">
-        <span
-          aria-hidden="true"
-          className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-h3 text-primary-contrast"
-        >
-          {programMonogram(program.name)}
-        </span>
+        {program.logoUrl === undefined ? (
+          <span
+            aria-hidden="true"
+            className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary text-h3 text-primary-contrast"
+          >
+            {programMonogram(program.name)}
+          </span>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element -- public API logo, decorative here
+          <img
+            alt=""
+            className="size-10 shrink-0 rounded-md object-cover"
+            height={40}
+            src={program.logoUrl}
+            width={40}
+          />
+        )}
         <h3 className="min-w-0 truncate text-h3 text-text">{program.name}</h3>
       </div>
 
@@ -78,9 +80,7 @@ function BountyVerticalRow({ program }: { readonly program: ProgramSummary }) {
         <div className="flex items-baseline justify-between gap-md">
           <dt className="text-body-sm text-text-muted">Deadline</dt>
           <dd
-            className={
-              deadline.ended ? 'text-body-sm text-text-muted' : 'text-body-sm text-text'
-            }
+            className={deadline.ended ? 'text-body-sm text-text-muted' : 'text-body-sm text-text'}
           >
             <span aria-hidden="true">{deadline.primary}</span>
             <span className="sr-only">{deadline.label}</span>
@@ -90,8 +90,8 @@ function BountyVerticalRow({ program }: { readonly program: ProgramSummary }) {
 
       {/* One stretched link per card: the whole block is tappable without nesting controls. */}
       <Link
-        className="inline-flex min-h-11 items-center justify-center gap-sm rounded-full border border-border bg-surface-raised text-label-lg font-semibold text-text after:absolute after:inset-0 after:content-['']"
-        href={`/programs/${program.id}`}
+        className="inline-flex min-h-11 w-full items-center justify-center gap-sm rounded-full border border-border bg-surface-raised text-label-lg font-semibold text-text after:absolute after:inset-0 after:content-['']"
+        href={`/programs/${program.slug}`}
       >
         View bounty
         <span className="sr-only"> for {program.name}</span>

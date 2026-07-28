@@ -9,7 +9,7 @@
  *
  * Two rules shape the whole state machine:
  *  1. No API write happens before Review. The pre-submit draft is browser-only, under
- *     `offchain-report-draft:<programId>`, because the API has no draft report state — the create
+ *     `offchain-report-draft:<programSlug>`, because the API has no draft report state — the create
  *     call produces a `submitted` report straight away.
  *  2. The attachment is a second, separate transaction. Once the report exists, an upload failure
  *     is a partial success: the composer moves to the recovery state bound to that report id and
@@ -140,7 +140,7 @@ function ComposerSkeleton() {
   );
 }
 
-export function SubmitBugComposer({ programId }: { readonly programId: string }) {
+export function SubmitBugComposer({ programSlug }: { readonly programSlug: string }) {
   const { session } = useAuth();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -166,25 +166,26 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
   const failedCreatePayloadRef = useRef<CreateReportRequest | null>(null);
 
   const programQuery = useQuery({
-    queryKey: queryKeys.program(programId),
-    queryFn: () => apiRequest(`/api/programs/${programId}`, programResponseSchema),
+    queryKey: queryKeys.publicProgram(programSlug),
+    queryFn: () =>
+      apiRequest(`/api/programs/${encodeURIComponent(programSlug)}`, programResponseSchema),
   });
 
   useEffect(() => {
-    const stored = readDraft(programId);
+    const stored = readDraft(programSlug);
     // Everything but the mismatch acknowledgement is restored: see `restoredDraft`.
     if (stored !== null) setDraft(restoredDraft(stored));
     setHydrated(true);
-  }, [programId]);
+  }, [programSlug]);
 
   // Autosave is browser-only and only exists while there is something to save, so an untouched
   // composer never leaves a stray key behind.
   useEffect(() => {
     if (!hydrated) return;
 
-    if (isDraftDirty(draft, false)) writeDraft(programId, draft);
-    else clearDraft(programId);
-  }, [draft, hydrated, programId]);
+    if (isDraftDirty(draft, false)) writeDraft(programSlug, draft);
+    else clearDraft(programSlug);
+  }, [draft, hydrated, programSlug]);
 
   const dirty = hydrated && phase.kind === 'composing' && isDraftDirty(draft, file !== null);
 
@@ -503,12 +504,12 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
 
   const handleCancel = useCallback(() => {
     if (isDraftDirty(draft, file !== null)) {
-      setPendingLeaveHref(`/programs/${encodeURIComponent(programId)}`);
+      setPendingLeaveHref(`/programs/${encodeURIComponent(programSlug)}`);
       setDiscardOpen(true);
       return;
     }
-    router.push(`/programs/${encodeURIComponent(programId)}`);
-  }, [draft, file, programId, router]);
+    router.push(`/programs/${encodeURIComponent(programSlug)}`);
+  }, [draft, file, programSlug, router]);
 
   const handleDiscard = useCallback(() => {
     setDraft(EMPTY_DRAFT);
@@ -516,11 +517,11 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
     setDiscardOpen(false);
     discardLocalReportDraft({
       navigate: (href) => router.push(href),
-      programId,
+      programSlug,
       ...(pendingLeaveHref === null ? {} : { returnTo: pendingLeaveHref }),
     });
     setPendingLeaveHref(null);
-  }, [pendingLeaveHref, programId, router]);
+  }, [pendingLeaveHref, programSlug, router]);
 
   /* ── Submit ───────────────────────────────────────────────────────────────────────────── */
 
@@ -532,13 +533,14 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
       if (created === null) return;
 
       await finishSubmittedReport({
-        programId,
+        principalId: session?.user.id ?? 'no-session',
+        draftKey: programSlug,
         queryClient,
         report: created,
         router,
       });
     },
-    [programId, queryClient, router],
+    [programSlug, queryClient, router, session?.user.id],
   );
 
   const uploadAttachment = useCallback(
@@ -637,7 +639,7 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
 
     let response: ReportResponse;
     try {
-      response = await apiRequest(`/api/programs/${programId}/reports`, reportResponseSchema, {
+      response = await apiRequest(`/api/programs/${program.id}/reports`, reportResponseSchema, {
         method: 'POST',
         token: session?.access_token,
         body: payload,
@@ -689,7 +691,6 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
     markAttempted,
     proofRequired,
     program,
-    programId,
     scopes,
     session?.access_token,
     suggestedSeverity,
@@ -726,7 +727,7 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
         ? loadingProgram
           ? [{ label: 'Program', pending: true }]
           : []
-        : [{ href: `/programs/${program.id}`, label: program.name }]),
+        : [{ href: `/programs/${program.slug}`, label: program.name }]),
       { label: 'Submit report' },
     ],
     [loadingProgram, program],
@@ -767,7 +768,7 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
   if (phase.kind === 'program-closed' || program.status !== 'active') {
     return (
       <ComposerFrame breadcrumbs={breadcrumbs}>
-        <ProgramClosed draftSummary={draftSummary} programId={program.id} />
+        <ProgramClosed draftSummary={draftSummary} programSlug={program.slug} />
       </ComposerFrame>
     );
   }
@@ -818,7 +819,7 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
   if (phase.kind === 'session-expired') {
     return (
       <ComposerFrame breadcrumbs={breadcrumbs}>
-        <SessionExpired programId={programId} />
+        <SessionExpired programSlug={programSlug} />
       </ComposerFrame>
     );
   }
@@ -878,7 +879,7 @@ export function SubmitBugComposer({ programId }: { readonly programId: string })
                 onRemoveStaleImpacts={handleRemoveStaleImpacts}
                 onSelectScope={handleSelectScope}
                 onToggleImpact={handleToggleImpact}
-                programId={program.id}
+                programSlug={program.slug}
                 scope={scope}
                 scopes={scopes}
                 staleImpactCount={staleImpacts.length}

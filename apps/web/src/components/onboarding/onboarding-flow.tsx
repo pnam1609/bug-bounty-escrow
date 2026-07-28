@@ -172,7 +172,7 @@ export function OnboardingFlow() {
       });
       // No `router.replace` here: seeding the cache is what tells the effect above that a real
       // profile exists, and the effect routes by the role that profile carries.
-      queryClient.setQueryData(queryKeys.me, response.data);
+      queryClient.setQueryData(queryKeys.me(response.data.id), response.data);
     } catch (error) {
       if (!(error instanceof ApiClientError)) {
         setPhase('network-error');

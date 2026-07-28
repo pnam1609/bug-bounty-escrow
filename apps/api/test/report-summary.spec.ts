@@ -14,7 +14,7 @@ function repositoryFor(row: {
   readonly all_reports: string | number;
   readonly needs_information: string | number;
   readonly under_review: string | number;
-  readonly rewards_paid: string | number;
+  readonly rewards_paid: string;
 }) {
   const rpc = vi.fn().mockResolvedValue({ data: [row], error: null });
 
@@ -41,12 +41,27 @@ describe('MR-01 researcher report summary dependency', () => {
     });
   });
 
+  it('preserves paid totals above JavaScript safe-integer precision as decimal strings', async () => {
+    const fixture = repositoryFor({
+      all_reports: '1',
+      needs_information: '0',
+      under_review: '0',
+      rewards_paid: '9007199254740993.123456',
+    });
+
+    await expect(
+      fixture.repository.summarizeForResearcher(researcher.userId),
+    ).resolves.toMatchObject({
+      rewardsPaid: '9007199254740993.123456',
+    });
+  });
+
   it('derives the privacy boundary from the authenticated principal only', async () => {
     const fixture = repositoryFor({
       all_reports: 0,
       needs_information: 0,
       under_review: 0,
-      rewards_paid: 0,
+      rewards_paid: '0',
     });
     const service = new ReportSummaryService(fixture.repository);
 

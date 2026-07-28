@@ -64,6 +64,8 @@ export {
   ownerProgramListQuerySchema,
   pocPolicySchema,
   programIdParamsSchema,
+  programSlugParamsSchema,
+  programSlugSchema,
   programImpactInputSchema,
   programImpactSchema,
   programImpactSourceSchema,
@@ -120,6 +122,7 @@ export type {
   ProgramReviewerParams,
   ProgramScopeInput,
   ProgramStatusChangeRequest,
+  ProgramSlugParams,
   ProgramSummary,
   RewardTierInput,
   SignedLogoUploadResponse,
@@ -218,6 +221,33 @@ export type {
   ResearcherReportSummary,
   ResearcherReportSummaryResponse,
 } from './contracts/report-summary.js';
+export {
+  payoutWalletAddressSchema,
+  payoutWalletNetworkSchema,
+  payoutWalletResponseSchema,
+  payoutWalletSchema,
+  payoutWalletTokenSchema,
+  researcherRewardListQuerySchema,
+  researcherRewardListResponseSchema,
+  researcherRewardPaymentSchema,
+  researcherRewardPaymentStatusSchema,
+  researcherRewardStatusSchema,
+  researcherRewardSummarySchema,
+  updatePayoutWalletRequestSchema,
+  updatePayoutWalletResponseSchema,
+} from './contracts/reward.js';
+export type {
+  PayoutWallet,
+  PayoutWalletResponse,
+  ResearcherRewardListQuery,
+  ResearcherRewardListResponse,
+  ResearcherRewardPayment,
+  ResearcherRewardPaymentStatus,
+  ResearcherRewardStatus,
+  ResearcherRewardSummary,
+  UpdatePayoutWalletRequest,
+  UpdatePayoutWalletResponse,
+} from './contracts/reward.js';
 export { apiEnvironmentSchema, parseApiEnvironment } from './env/api.js';
 export type { AiProvider, ApiEnvironment, LogLevel, RuntimeMode } from './env/api.js';
 export { EnvironmentValidationError } from './env/validation-error.js';

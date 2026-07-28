@@ -74,6 +74,27 @@ export class ProgramService {
     return program;
   }
 
+  public async getBySlug(slug: string, principal?: RequestPrincipal): Promise<Program> {
+    const program = await this.repository.findAccessibleBySlug(slug, principal);
+
+    if (program === null) {
+      throw new NotFoundException();
+    }
+
+    return program;
+  }
+
+  public async getOwned(principal: RequestPrincipal, id: string): Promise<Program> {
+    this.requireOwner(principal);
+    const program = await this.repository.findOwned(id, principal);
+
+    if (program === null) {
+      throw new NotFoundException();
+    }
+
+    return program;
+  }
+
   public async create(principal: RequestPrincipal, input: CreateProgramRequest): Promise<Program> {
     this.requireOwner(principal);
 

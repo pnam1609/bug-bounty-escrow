@@ -1,4 +1,4 @@
-import { Card, SiteFooter, SiteFooterLink } from '@bug-bounty-escrow/ui';
+import { Card } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
 import type { ReactNode, Ref } from 'react';
 
@@ -43,35 +43,6 @@ export function BrandLockup() {
       </span>
       <span className="text-h3 text-text">BountyEscrow</span>
     </span>
-  );
-}
-
-/**
- * The short footer every authentication, onboarding and in-app screen carries — the selection rule
- * documented on Figma's Footer / Desktop component (165:159).
- */
-export function ShortFooter() {
-  return (
-    <SiteFooter
-      variant="short"
-      width="frame"
-      copyright="© 2026 BountyEscrow · Arc Testnet"
-      legal={
-        <>
-          <SiteFooterLink asChild>
-            <Link href="/privacy">Privacy</Link>
-          </SiteFooterLink>
-          <SiteFooterLink asChild>
-            <Link href="/terms">Terms</Link>
-          </SiteFooterLink>
-        </>
-      }
-      status={
-        <p className="text-label-sm font-semibold uppercase text-escrow">
-          <span aria-hidden="true">●</span> Arc testnet operational
-        </p>
-      }
-    />
   );
 }
 
@@ -158,7 +129,7 @@ export function OnboardingShell({
   readonly currentStep: number;
 }) {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col bg-background">
+    <div className="flex min-h-screen w-full flex-col bg-background">
       <div className="flex flex-1 flex-col lg:flex-row">
         <ProgressRail currentStep={currentStep} />
 
@@ -180,8 +151,6 @@ export function OnboardingShell({
           </div>
         </div>
       </div>
-
-      <ShortFooter />
     </div>
   );
 }

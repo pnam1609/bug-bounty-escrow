@@ -54,7 +54,7 @@ function FilterPopoverShell({
   open,
 }: FilterPopoverShellProps) {
   return (
-    <Popover onOpenChange={onOpenChange} open={open}>
+    <Popover modal onOpenChange={onOpenChange} open={open}>
       <PopoverTrigger asChild>
         <Button
           aria-label={
@@ -93,6 +93,8 @@ function FilterPopoverShell({
 }
 
 export interface MultiFilterPopoverProps<TValue extends string> {
+  /** Defaults such as Active + Ended stay checked without being presented as applied filters. */
+  readonly appliedCount?: number | undefined;
   readonly label: string;
   readonly options: readonly FilterOption<TValue>[];
   readonly searchLabel?: string | undefined;
@@ -102,6 +104,7 @@ export interface MultiFilterPopoverProps<TValue extends string> {
 }
 
 export function MultiFilterPopover<TValue extends string>({
+  appliedCount,
   label,
   options,
   searchLabel,
@@ -111,10 +114,11 @@ export function MultiFilterPopover<TValue extends string>({
 }: MultiFilterPopoverProps<TValue>) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<readonly TValue[]>(selected);
+  const triggerCount = appliedCount ?? selected.length;
 
   return (
     <FilterPopoverShell
-      appliedCount={selected.length}
+      appliedCount={triggerCount}
       draftCount={draft.length}
       label={label}
       onApply={() => {
@@ -233,6 +237,8 @@ export function MoreFiltersPopover({ value, onApply }: MoreFiltersPopoverProps) 
           legend="Severity"
           onChange={(severity) => setDraft((current) => ({ ...current, severity }))}
           options={SEVERITY_OPTIONS}
+          searchLabel="Search values"
+          searchPlaceholder="Search severities"
           selected={draft.severity}
         />
         <OptionRadioList

@@ -142,7 +142,8 @@ fresh databases.
 | PATCH  | `/api/me/onboarding`                                      | Verified user; owner/researcher input only          |
 | GET    | `/api/programs`                                           | Public active programs; optional owner context      |
 | POST   | `/api/programs`                                           | Owner                                               |
-| GET    | `/api/programs/:id`                                       | Public active or authorized owner/reviewer          |
+| GET    | `/api/programs/:slug`                                     | Public active or authorized owner/reviewer          |
+| GET    | `/api/owner/programs/:id`                                 | Owning owner                                        |
 | PATCH  | `/api/programs/:id`                                       | Owning owner                                        |
 | GET    | `/api/reports`                                            | Researcher own or owner/reviewer permitted programs |
 | POST   | `/api/programs/:id/reports`                               | Researcher                                          |
@@ -167,7 +168,7 @@ change the key. Health remains unaffected.
 | Route                       | Outcome                                                         |
 | --------------------------- | --------------------------------------------------------------- |
 | `/programs`                 | Public URL-synchronized browse/search/sort/pagination           |
-| `/programs/[id]`            | Public scopes, tiers, pool, deadline, and report CTA            |
+| `/programs/[slug]`          | Public scopes, tiers, pool, deadline, and report CTA            |
 | `/login`                    | Supabase email/password login with safe return URL              |
 | `/register`                 | Supabase registration                                           |
 | `/onboarding`               | Owner/researcher selection; reviewer omitted                    |

@@ -140,6 +140,18 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* Native buttons are interactive by default across the product, including the few lightweight
+     controls that do not use the shared Button component. Disabled controls keep an explicit
+     non-interactive cursor. */
+  button:not(:disabled):not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  button[aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+
   /* One focus treatment everywhere, at the token colour, so keyboard users never lose their
      place regardless of which control they are on. */
   :focus-visible {

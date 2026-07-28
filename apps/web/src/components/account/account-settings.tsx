@@ -119,7 +119,7 @@ function AccountShell({
           {children}
         </div>
       </main>
-      <SiteFooter copyright="© 2026 BountyEscrow" variant="short" width="frame" />
+      <SiteFooter copyright="© 2026 BountyEscrow" variant="short" />
     </div>
   );
 }
@@ -402,8 +402,9 @@ function ProfileInformationCard({ user }: { readonly user: CurrentUser }) {
        * so the server reconciles the entry afterwards. Nothing is optimistic — this only happens
        * once the PATCH has returned (§4.5).
        */
-      client.setQueryData(queryKeys.me, updated);
-      void client.invalidateQueries({ queryKey: queryKeys.me });
+      const principalId = session?.user.id ?? updated.id;
+      client.setQueryData(queryKeys.me(principalId), updated);
+      void client.invalidateQueries({ queryKey: queryKeys.me(principalId) });
       setDraft(null);
       setSaved(true);
     },

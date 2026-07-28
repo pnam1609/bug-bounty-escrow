@@ -6,6 +6,7 @@ import {
   createProgramRequestSchema,
   createReportRequestSchema,
   onboardingRequestSchema,
+  programSlugParamsSchema,
   reportDetailSchema,
   updateProfileRequestSchema,
 } from '../src/index.js';
@@ -63,6 +64,19 @@ function validCreateProgram() {
 }
 
 describe('off-chain shared contracts', () => {
+  it('accepts canonical program slugs and rejects the legacy id parameter shape', () => {
+    expect(programSlugParamsSchema.parse({ slug: 'aegis-protocol' })).toEqual({
+      slug: 'aegis-protocol',
+    });
+    expect(
+      programSlugParamsSchema.safeParse({
+        id: '31000000-0000-4000-8000-000000000001',
+      }).success,
+    ).toBe(false);
+    expect(programSlugParamsSchema.safeParse({ slug: 'Aegis_Protocol' }).success).toBe(false);
+    expect(programSlugParamsSchema.safeParse({ slug: ' aegis-protocol' }).success).toBe(false);
+  });
+
   it('prevents reviewer self-assignment and unknown onboarding fields', () => {
     expect(
       onboardingRequestSchema.safeParse({
@@ -203,6 +217,7 @@ describe('off-chain shared contracts', () => {
 
   it('accepts an omitted deadline as an open-ended program', () => {
     const { deadline: _deadline, ...openEnded } = validCreateProgram();
+    void _deadline;
 
     expect(createProgramRequestSchema.safeParse(openEnded).success).toBe(true);
   });
@@ -272,7 +287,7 @@ describe('off-chain shared contracts', () => {
     ],
     [
       'a range tier whose minimum exceeds its maximum',
-      (_program: ReturnType<typeof validCreateProgram>) => ({
+      () => ({
         rewardTiers: [
           { assetType: 'smart_contract', severity: 'critical', calculationType: 'range', minReward: '100', maxReward: '10' },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
@@ -281,7 +296,7 @@ describe('off-chain shared contracts', () => {
     ],
     [
       'a flat tier without a positive amount',
-      (_program: ReturnType<typeof validCreateProgram>) => ({
+      () => ({
         rewardTiers: [
           { assetType: 'smart_contract', severity: 'critical', calculationType: 'flat', flatAmount: '0' },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
@@ -290,7 +305,7 @@ describe('off-chain shared contracts', () => {
     ],
     [
       'a percentage tier with out-of-range basis points',
-      (_program: ReturnType<typeof validCreateProgram>) => ({
+      () => ({
         rewardTiers: [
           { assetType: 'smart_contract', severity: 'critical', calculationType: 'percentage', percentageBps: 10_001, maxRewardCap: '1000' },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
@@ -299,7 +314,7 @@ describe('off-chain shared contracts', () => {
     ],
     [
       'a percentage tier without a cap',
-      (_program: ReturnType<typeof validCreateProgram>) => ({
+      () => ({
         rewardTiers: [
           { assetType: 'smart_contract', severity: 'critical', calculationType: 'percentage', percentageBps: 1_000 },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },

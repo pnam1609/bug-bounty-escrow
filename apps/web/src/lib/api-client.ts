@@ -15,7 +15,7 @@ export class ApiClientError extends Error {
 
 export interface ApiRequestOptions {
   readonly body?: unknown | undefined;
-  readonly method?: 'DELETE' | 'GET' | 'PATCH' | 'POST' | undefined;
+  readonly method?: 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT' | undefined;
   readonly token?: string | undefined;
 }
 

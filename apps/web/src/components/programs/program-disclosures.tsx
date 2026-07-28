@@ -25,7 +25,7 @@ const DECISION_LABELS = {
 
 export function DisclosuresPanel({ programId }: { readonly programId: string }) {
   const query = useQuery({
-    queryKey: [...queryKeys.program(programId), 'disclosures'],
+    queryKey: queryKeys.programDisclosures(programId),
     queryFn: () =>
       apiRequest(
         `/api/programs/${encodeURIComponent(programId)}/disclosures?page=1&limit=${DISCLOSURE_PAGE_SIZE}`,

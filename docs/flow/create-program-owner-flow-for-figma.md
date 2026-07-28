@@ -67,6 +67,8 @@ router.replace(/owner/programs/:id/edit)
 | Deadline | Không | ISO date-time khi có giá trị |
 
 Slug có thể được gợi ý từ Name nhưng phải cho phép owner chỉnh sửa trước khi lưu.
+Slug là canonical public URL key: PostgreSQL enforce unique toàn hệ thống và không cho đổi sau khi
+program đã được tạo. Owner edit route vẫn dùng UUID nội bộ.
 
 `liveSince`, `lastUpdated`, `maximumBounty`, `totalPaid`, `paidReportCount`, `medianResolutionTime` và `totalAssetsInScope` là derived values. Owner không nhập trực tiếp các field này.
 

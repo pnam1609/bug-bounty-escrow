@@ -1,12 +1,23 @@
 'use client';
 
 import { programListResponseSchema } from '@bug-bounty-escrow/shared';
-import { Button } from '@bug-bounty-escrow/ui';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { ChevronDown, LoaderCircle } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
-import { BountyEmptyFiltered, BountyEmptyInitial, BountyLoadError } from './bounty-states';
+import { getNextProgramPageParam, useBountyInfiniteScroll } from './bounty-infinite-scroll';
+import {
+  BountyFilterSkeleton,
+  BountyHeadingMetaSkeleton,
+  BountyInfiniteStatus,
+} from './bounty-infinite-states';
+import {
+  BountyEmptyFiltered,
+  BountyEmptyInitial,
+  BountyLoadError,
+  BountySafetyNote,
+  resolveBountyListState,
+  shouldShowBountyInfiniteStatus,
+} from './bounty-states';
 import { BountyTable, BountyTableSkeletonBody } from './bounty-table';
 import { BountyVerticalList, BountyVerticalSkeleton } from './bounty-vertical-list';
 import { ProgramFilterToolbar } from './filter-toolbar';
@@ -34,9 +45,6 @@ import { queryKeys } from '@/lib/query-keys';
  * progress indicator instead of flashing an empty table (§9).
  */
 
-/** Distance ahead of the viewport at which the next page starts loading. */
-const SENTINEL_ROOT_MARGIN = '240px';
-
 export function BountyTableView() {
   const { filters, apply, applyQuietly, clearAll } = useProgramFilters();
 
@@ -48,8 +56,7 @@ export function BountyTableView() {
         programListResponseSchema,
       ),
     initialPageParam: 1,
-    getNextPageParam: (lastPage) =>
-      lastPage.metadata.hasNextPage ? lastPage.metadata.page + 1 : undefined,
+    getNextPageParam: getNextProgramPageParam,
     placeholderData: keepPreviousData,
   });
 
@@ -58,64 +65,24 @@ export function BountyTableView() {
   const totalItems = pages[0]?.metadata.totalItems;
   const isFiltered = hasNarrowingFilters(filters);
   const isRefreshing = query.isPlaceholderData;
-  /* A failed *first* page replaces the table; a failed load-more keeps the rows already read. */
-  const isInitialError = query.isError && programs.length === 0;
-  const isLoadMoreError = query.isError && programs.length > 0;
+  const listState = resolveBountyListState({
+    isError: query.isError,
+    isFetchNextPageError: query.isFetchNextPageError,
+    isFiltered,
+    isPending: query.isPending,
+    programCount: programs.length,
+  });
+  /* A failed first/filter request replaces the table; load-more keeps the rows already read. */
+  const isLoadMoreError = query.isFetchNextPageError && programs.length > 0;
 
   /* ── Infinite scroll ─────────────────────────────────────────────────────────────────── */
 
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const isIntersecting = useRef(false);
-  const latest = useRef(query);
-
-  // Declared first so the effect below always reads the state from this same commit.
-  useEffect(() => {
-    latest.current = query;
+  const sentinelRef = useBountyInfiniteScroll({
+    fetchNextPage: () => query.fetchNextPage({ cancelRefetch: false }),
+    hasNextPage: query.hasNextPage,
+    isError: query.isFetchNextPageError,
+    isFetching: query.isFetching,
   });
-
-  useEffect(() => {
-    const node = sentinelRef.current;
-
-    if (node === null || typeof IntersectionObserver === 'undefined') {
-      return undefined;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        isIntersecting.current = entries.some((entry) => entry.isIntersecting);
-
-        if (isIntersecting.current) {
-          requestNextPage();
-        }
-      },
-      { rootMargin: SENTINEL_ROOT_MARGIN },
-    );
-
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, []);
-
-  /*
-   * Appending a page does not always push the sentinel back out of view, and no second
-   * intersection event is fired while it stays inside the root. Re-checking once the in-flight
-   * request settles is what keeps a short page from stalling the list.
-   */
-  useEffect(() => {
-    if (isIntersecting.current) {
-      requestNextPage();
-    }
-  }, [query.isFetching, query.hasNextPage, query.isError]);
-
-  function requestNextPage() {
-    const current = latest.current;
-
-    // `isFetching` covers the initial load and the refetch as well as load-more, so this is also
-    // the guarantee that only one request is ever in flight.
-    if (current.hasNextPage && !current.isFetching && !current.isError) {
-      void current.fetchNextPage();
-    }
-  }
 
   /* ── Results announcement ────────────────────────────────────────────────────────────── */
 
@@ -149,16 +116,20 @@ export function BountyTableView() {
   /* ── Body selection ──────────────────────────────────────────────────────────────────── */
 
   function stateBody(skeleton: ReactNode): ReactNode | undefined {
-    if (query.isPending) {
+    if (listState === 'loading') {
       return skeleton;
     }
 
-    if (isInitialError) {
+    if (listState === 'error') {
       return <BountyLoadError onRetry={() => void query.refetch()} />;
     }
 
-    if (programs.length === 0) {
-      return isFiltered ? <BountyEmptyFiltered onClearAll={clearAll} /> : <BountyEmptyInitial />;
+    if (listState === 'empty-filtered') {
+      return <BountyEmptyFiltered onClearAll={clearAll} />;
+    }
+
+    if (listState === 'empty-initial') {
+      return <BountyEmptyInitial />;
     }
 
     return undefined;
@@ -169,46 +140,47 @@ export function BountyTableView() {
   }
 
   const resultsLabel =
-    totalItems === undefined
-      ? 'Loading bounty programs'
-      : isFiltered
-        ? `${totalItems} matching ${totalItems === 1 ? 'program' : 'programs'}`
-        : `${totalItems} bounty ${totalItems === 1 ? 'program' : 'programs'}`;
+    listState === 'error'
+      ? 'Programs unavailable'
+      : totalItems === undefined
+        ? 'Loading bounty programs'
+        : isFiltered
+          ? `${totalItems} matching ${totalItems === 1 ? 'program' : 'programs'}`
+          : `${totalItems} bounty ${totalItems === 1 ? 'program' : 'programs'}`;
 
   const desktopBody = stateBody(<BountyTableSkeletonBody />);
-  const mobileBody = stateBody(<BountyVerticalSkeleton />);
+  const mobileBody = stateBody(<BountyVerticalSkeleton rows={6} />);
 
   return (
     <div className="flex flex-col gap-2xl">
       <DiscoveryHero />
 
-      <ProgramFilterToolbar
-        filters={filters}
-        onApply={apply}
-        onApplyQuietly={applyQuietly}
-        onClearAll={clearAll}
-      />
+      {query.isPending ? (
+        <BountyFilterSkeleton />
+      ) : (
+        <ProgramFilterToolbar
+          filters={filters}
+          isRefreshing={isRefreshing}
+          onApply={apply}
+          onApplyQuietly={applyQuietly}
+          onClearAll={clearAll}
+        />
+      )}
 
-      <div className="flex flex-col gap-md">
-        <div className="flex flex-wrap items-baseline justify-between gap-md">
-          <p className="text-h3 text-text">{isRefreshing ? 'Updating results…' : resultsLabel}</p>
-          <p className="text-label-md text-text-muted">
-            {isRefreshing ? 'Keeping current results visible' : describeSortOrder(filters)}
+      {query.isPending ? (
+        <BountyHeadingMetaSkeleton />
+      ) : (
+        <div className="flex flex-col gap-md">
+          <div className="flex flex-wrap items-baseline justify-between gap-md">
+            <p className="text-h3 text-text">{resultsLabel}</p>
+            <p className="text-label-md text-text-muted">{describeSortOrder(filters)}</p>
+          </div>
+          {/* Only this region speaks, and only once a request has settled. */}
+          <p aria-live="polite" className="sr-only" role="status">
+            {announcement}
           </p>
         </div>
-        {isRefreshing ? (
-          <div
-            aria-hidden="true"
-            className="h-0.5 w-full overflow-hidden rounded-full bg-surface-raised"
-          >
-            <span className="block h-full w-1/3 rounded-full bg-primary motion-safe:animate-pulse" />
-          </div>
-        ) : null}
-        {/* Only this region speaks, and only once a request has settled. */}
-        <p aria-live="polite" className="sr-only" role="status">
-          {announcement}
-        </p>
-      </div>
+      )}
 
       {/* One data source, two representations. `hidden` keeps the inactive one out of the
           accessibility tree as well as out of the layout, so nothing is read twice. */}
@@ -221,43 +193,21 @@ export function BountyTableView() {
           sortState={{ sort: filters.sort, direction: filters.sortDirection }}
         />
       </div>
-      <div className="md:hidden">
-        {mobileBody ?? <BountyVerticalList programs={programs} />}
-      </div>
+      <div className="md:hidden">{mobileBody ?? <BountyVerticalList programs={programs} />}</div>
 
       <div className="flex flex-col gap-lg" ref={sentinelRef}>
-        {isLoadMoreError ? (
-          <div
-            className="flex flex-wrap items-center gap-md text-body-sm text-text"
-            role="alert"
-          >
-            <span>Couldn&rsquo;t load more</span>
-            <Button onClick={() => void query.fetchNextPage()} variant="secondary">
-              Try again
-            </Button>
-          </div>
-        ) : query.isFetchingNextPage ? (
-          <p className="flex items-center gap-sm text-body-sm text-text-muted">
-            <LoaderCircle
-              aria-hidden="true"
-              className="size-4 motion-safe:animate-spin"
-            />
-            Loading more bounties…
-          </p>
-        ) : query.hasNextPage ? (
-          <p className="flex items-center gap-sm text-body-sm text-text-muted">
-            <ChevronDown aria-hidden="true" className="size-4" />
-            Scroll to load more bounties
-          </p>
-        ) : programs.length > 0 ? (
-          <p className="text-body-sm text-text-muted">You&rsquo;ve reached the end</p>
+        {shouldShowBountyInfiniteStatus(listState) ? (
+          <BountyInfiniteStatus
+            hasNextPage={query.hasNextPage}
+            hasPrograms={programs.length > 0}
+            isLoadMoreError={isLoadMoreError}
+            isLoadingMore={query.isFetchingNextPage}
+            onRetry={() => void query.fetchNextPage({ cancelRefetch: false })}
+          />
         ) : null}
       </div>
 
-      <p className="border-t border-border pt-lg text-label-md text-text-muted">
-        Reward pools are shown in USDC. Always review the complete in-scope assets and exclusions
-        before testing or submitting a report.
-      </p>
+      <BountySafetyNote />
     </div>
   );
 }
@@ -270,11 +220,13 @@ export function BountyTableViewFallback() {
   return (
     <div className="flex flex-col gap-2xl">
       <DiscoveryHero />
+      <BountyFilterSkeleton />
+      <BountyHeadingMetaSkeleton />
       <div className="hidden md:block">
         <BountyTableSkeletonBody />
       </div>
       <div className="md:hidden">
-        <BountyVerticalSkeleton />
+        <BountyVerticalSkeleton rows={6} />
       </div>
       <p className="sr-only" role="status">
         Loading bounty programs
@@ -294,7 +246,7 @@ export function DiscoveryHero() {
         </p>
       </div>
       {/* Two verifiable facts. Escrow makes the money visible; it does not guarantee a payout. */}
-      <ul className="flex shrink-0 flex-col gap-sm rounded-lg border border-border bg-surface px-lg py-md">
+      <ul className="hidden shrink-0 flex-col gap-sm rounded-lg border border-border bg-surface px-lg py-md md:flex">
         <li className="flex items-center gap-sm text-label-lg text-usdc">
           <span aria-hidden="true" className="size-2 rounded-full bg-usdc" />
           Escrow balance visible

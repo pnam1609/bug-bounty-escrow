@@ -251,7 +251,7 @@ Header row có padding ngang 24px; mỗi `TableHead` có padding ngang 16–24px
 
 - Row cao khoảng 76–80px.
 - Hover dùng `component/table/row/bg-hover` và border brand nhẹ.
-- Click row hoặc `View bounty` đi tới `/programs/:id`.
+- Click row hoặc `View bounty` đi tới canonical URL `/programs/:slug`.
 - Có visible focus ring cho keyboard user.
 - Không đặt nested interactive controls trong toàn bộ clickable row; implementation nên dùng một stretched link hoặc action cell với semantics hợp lệ.
 - `Program`, `Max bounty`, `Total paid` và `Deadline` là sortable header buttons. Click lần đầu sort ascending, lần hai descending; header đang active dùng mũi tên `↑`/`↓`, header chưa active dùng indicator trung tính.

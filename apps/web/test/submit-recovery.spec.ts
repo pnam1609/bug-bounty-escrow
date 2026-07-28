@@ -107,7 +107,7 @@ describe('SR-11 discard and terminal states', () => {
 
     discardLocalReportDraft({
       navigate: (href) => visited.push(href),
-      programId: 'program-a',
+      programSlug: 'program-a',
       returnTo: '/programs/program-a',
     });
 
@@ -119,7 +119,7 @@ describe('SR-11 discard and terminal states', () => {
     );
   });
 
-  it('encodes the program id in the default discard destination', () => {
+  it('encodes the program slug in the default discard destination', () => {
     const visited: string[] = [];
     vi.stubGlobal('window', {
       localStorage: { removeItem: vi.fn() },
@@ -127,7 +127,7 @@ describe('SR-11 discard and terminal states', () => {
 
     discardLocalReportDraft({
       navigate: (href) => visited.push(href),
-      programId: 'program/a?unsafe=true',
+      programSlug: 'program/a?unsafe=true',
     });
 
     expect(visited).toEqual(['/programs/program%2Fa%3Funsafe%3Dtrue']);
@@ -137,7 +137,7 @@ describe('SR-11 discard and terminal states', () => {
     const markup = renderToStaticMarkup(
       createElement(ProgramClosed, {
         draftSummary: '2 impacts selected · saved in this browser',
-        programId: 'program-a',
+        programSlug: 'program-a',
       }),
     );
 
@@ -146,7 +146,7 @@ describe('SR-11 discard and terminal states', () => {
       'The program changed while you were preparing this disclosure. Your local draft is still available in this browser.',
     );
     expect(markup).toContain('View program');
-    expect(markup).not.toContain('/reports/new?programId=');
+    expect(markup).not.toContain('/reports/new?programSlug=');
   });
 
   it('keeps wrong-role copy exact and researcher-specific', () => {
@@ -162,7 +162,7 @@ describe('SR-11 discard and terminal states', () => {
 
   it('renders Session expired with an encoded internal composer returnTo', () => {
     const markup = renderToStaticMarkup(
-      createElement(SessionExpired, { programId: 'program/a?unsafe=true' }),
+      createElement(SessionExpired, { programSlug: 'program/a?unsafe=true' }),
     );
 
     expect(markup).toContain('Your session expired before the report was submitted.');
@@ -171,10 +171,10 @@ describe('SR-11 discard and terminal states', () => {
     );
     expect(markup).toContain('Sign in again');
     expect(composerReturnTo('program/a?unsafe=true')).toBe(
-      '/reports/new?programId=program%2Fa%3Funsafe%3Dtrue',
+      '/reports/new?programSlug=program%2Fa%3Funsafe%3Dtrue',
     );
     expect(markup).toContain(
-      'href="/login?returnTo=%2Freports%2Fnew%3FprogramId%3Dprogram%252Fa%253Funsafe%253Dtrue"',
+      'href="/login?returnTo=%2Freports%2Fnew%3FprogramSlug%3Dprogram%252Fa%253Funsafe%253Dtrue"',
     );
     expect(markup).not.toContain('https://');
   });

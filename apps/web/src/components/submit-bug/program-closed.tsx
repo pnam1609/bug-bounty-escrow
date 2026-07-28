@@ -18,10 +18,10 @@ import { ComposerStatusCard } from './composer-frame';
 
 export interface ProgramClosedProps {
   readonly draftSummary: string;
-  readonly programId: string;
+  readonly programSlug: string;
 }
 
-export function ProgramClosed({ draftSummary, programId }: ProgramClosedProps) {
+export function ProgramClosed({ draftSummary, programSlug }: ProgramClosedProps) {
   return (
     <ComposerStatusCard>
       <span
@@ -48,7 +48,7 @@ export function ProgramClosed({ draftSummary, programId }: ProgramClosedProps) {
 
       <div className="flex flex-wrap items-center justify-center gap-md">
         <Button asChild>
-          <Link href={`/programs/${programId}`}>View program</Link>
+          <Link href={`/programs/${programSlug}`}>View program</Link>
         </Button>
         <Button asChild variant="secondary">
           <Link href="/programs">Back to programs</Link>

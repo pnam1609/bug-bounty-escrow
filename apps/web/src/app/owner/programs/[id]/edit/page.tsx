@@ -33,10 +33,12 @@ function EditProgramWorkspace({
   const [editDraft, setEditDraft] = useState<ProgramDraft | null>(null);
 
   const query = useQuery({
-    queryKey: queryKeys.program(id),
+    queryKey: queryKeys.ownerProgram(session?.user.id ?? 'no-session', id),
     enabled: session !== null,
     queryFn: () =>
-      apiRequest(`/api/programs/${id}`, programResponseSchema, { token: session?.access_token }),
+      apiRequest(`/api/owner/programs/${id}`, programResponseSchema, {
+        token: session?.access_token,
+      }),
   });
 
   if (query.isLoading || query.data === undefined) {

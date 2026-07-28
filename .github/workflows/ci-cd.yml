@@ -1,0 +1,147 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Verify, build, and deploy on VPS
+    runs-on:
+      - self-hosted
+      - linux
+      - bbe-production
+    timeout-minutes: 60
+    environment:
+      name: production
+    env:
+      APP_DIR: /opt/bounty-escrow
+      IMAGE_NAMESPACE: bbe-local
+      PUBLIC_ENV_FILE: /opt/bounty-escrow/public-build.env
+      PRODUCTION_ENV_FILE: /opt/bounty-escrow/.env.production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate VPS toolchain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker version
+          docker compose version
+          test -r "${PUBLIC_ENV_FILE}"
+          test -r "${PRODUCTION_ENV_FILE}"
+          test -w "${APP_DIR}"
+
+      - name: Load browser-public production configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set -a
+          # This file contains NEXT_PUBLIC values only. Never put server secrets in it.
+          source "${PUBLIC_ENV_FILE}"
+          set +a
+
+          required=(
+            NEXT_PUBLIC_API_BASE_URL
+            NEXT_PUBLIC_SUPABASE_URL
+            NEXT_PUBLIC_SUPABASE_ANON_KEY
+            NEXT_PUBLIC_ARC_RPC_URL
+            NEXT_PUBLIC_ARC_EXPLORER_URL
+            NEXT_PUBLIC_ARC_CHAIN_ID
+            NEXT_PUBLIC_USDC_ADDRESS
+          )
+
+          for name in "${required[@]}"; do
+            value="${!name:-}"
+            if [[ \
+              -z "${value}" ||
+              "${value}" == *".invalid"* ||
+              "${value}" == *"example.com"* ||
+              "${value}" == *"your-project"* ||
+              "${value}" == replace-with-* \
+            ]]; then
+              printf '%s is missing or still a placeholder in %s\n' "${name}" "${PUBLIC_ENV_FILE}" >&2
+              exit 1
+            fi
+            printf '%s=%s\n' "${name}" "${value}" >>"${GITHUB_ENV}"
+          done
+
+          demo_mode="${NEXT_PUBLIC_DEMO_MODE:-false}"
+          if [[ "${demo_mode}" != 'true' && "${demo_mode}" != 'false' ]]; then
+            printf 'NEXT_PUBLIC_DEMO_MODE must be true or false in %s\n' "${PUBLIC_ENV_FILE}" >&2
+            exit 1
+          fi
+          printf 'NEXT_PUBLIC_DEMO_MODE=%s\n' "${demo_mode}" >>"${GITHUB_ENV}"
+
+      - name: Verify source in Docker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker build \
+            --target quality \
+            --tag "${IMAGE_NAMESPACE}/bug-bounty-escrow-quality:${GITHUB_SHA}" \
+            .
+
+      - name: Build production images on VPS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          docker build \
+            --target web \
+            --tag "${IMAGE_NAMESPACE}/bug-bounty-escrow-web:${GITHUB_SHA}" \
+            --build-arg "NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}" \
+            --build-arg "NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}" \
+            --build-arg "NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}" \
+            --build-arg "NEXT_PUBLIC_ARC_RPC_URL=${NEXT_PUBLIC_ARC_RPC_URL}" \
+            --build-arg "NEXT_PUBLIC_ARC_EXPLORER_URL=${NEXT_PUBLIC_ARC_EXPLORER_URL}" \
+            --build-arg "NEXT_PUBLIC_ARC_CHAIN_ID=${NEXT_PUBLIC_ARC_CHAIN_ID}" \
+            --build-arg "NEXT_PUBLIC_USDC_ADDRESS=${NEXT_PUBLIC_USDC_ADDRESS}" \
+            --build-arg "NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE}" \
+            .
+
+          docker build \
+            --target api \
+            --tag "${IMAGE_NAMESPACE}/bug-bounty-escrow-api:${GITHUB_SHA}" \
+            .
+
+          docker build \
+            --target migrations \
+            --tag "${IMAGE_NAMESPACE}/bug-bounty-escrow-migrations:${GITHUB_SHA}" \
+            .
+
+      - name: Install deployment files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 640 docker-compose.production.yml "${APP_DIR}/docker-compose.production.yml"
+          install -m 750 deploy/deploy.sh "${APP_DIR}/deploy.sh"
+
+      - name: Apply migrations and deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APP_DIR="${APP_DIR}" \
+          ENV_FILE="${PRODUCTION_ENV_FILE}" \
+          IMAGE_NAMESPACE="${IMAGE_NAMESPACE}" \
+          IMAGE_TAG="${GITHUB_SHA}" \
+          PULL_IMAGES=false \
+            "${APP_DIR}/deploy.sh"
+
+      - name: Remove temporary quality image tag
+        if: always()
+        shell: bash
+        run: |
+          docker image rm \
+            "${IMAGE_NAMESPACE}/bug-bounty-escrow-quality:${GITHUB_SHA}" \
+            >/dev/null 2>&1 || true

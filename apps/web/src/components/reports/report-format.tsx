@@ -19,8 +19,6 @@ import { ApiClientError } from '@/lib/api-client';
 /** `ReportStatus` lives in `@bug-bounty-escrow/domain`, which the web app does not depend on. */
 export type ReportStatus = ReportSummary['status'];
 
-const USDC = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
-
 const ABSOLUTE_TIMESTAMP = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short',
@@ -32,9 +30,11 @@ const ABSOLUTE_TIMESTAMP = new Intl.DateTimeFormat('en-US', {
 const RELATIVE = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' });
 
 export function formatUsdc(value: string): string {
-  const amount = Number(value);
+  const [whole = '0', fraction = ''] = value.split('.');
+  const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const visibleFraction = fraction.replace(/0+$/, '');
 
-  return `${USDC.format(Number.isFinite(amount) ? amount : 0)} USDC`;
+  return `${visibleFraction === '' ? groupedWhole : `${groupedWhole}.${visibleFraction}`} USDC`;
 }
 
 export function formatTimestamp(iso: string): string {
@@ -43,16 +43,18 @@ export function formatTimestamp(iso: string): string {
   return Number.isNaN(date.getTime()) ? 'Unknown date' : ABSOLUTE_TIMESTAMP.format(date);
 }
 
-const RELATIVE_DIVISIONS: readonly { readonly amount: number; readonly unit: Intl.RelativeTimeFormatUnit }[] =
-  Object.freeze([
-    { amount: 60, unit: 'second' },
-    { amount: 60, unit: 'minute' },
-    { amount: 24, unit: 'hour' },
-    { amount: 7, unit: 'day' },
-    { amount: 4.34524, unit: 'week' },
-    { amount: 12, unit: 'month' },
-    { amount: Number.POSITIVE_INFINITY, unit: 'year' },
-  ]);
+const RELATIVE_DIVISIONS: readonly {
+  readonly amount: number;
+  readonly unit: Intl.RelativeTimeFormatUnit;
+}[] = Object.freeze([
+  { amount: 60, unit: 'second' },
+  { amount: 60, unit: 'minute' },
+  { amount: 24, unit: 'hour' },
+  { amount: 7, unit: 'day' },
+  { amount: 4.34524, unit: 'week' },
+  { amount: 12, unit: 'month' },
+  { amount: Number.POSITIVE_INFINITY, unit: 'year' },
+]);
 
 /** Under 45 seconds reads as "just now" — the wording the SR-07 frame uses on a fresh report. */
 export function formatRelativeTime(iso: string, now: number = Date.now()): string {
@@ -92,6 +94,14 @@ export function shortReportId(id: string): string {
   return id.slice(0, 8);
 }
 
+/**
+ * A shortened UUID is presentation only. Assistive technology always receives the canonical
+ * server-issued UUID so two visually similar references remain unambiguous.
+ */
+export function reportReferenceAriaLabel(id: string): string {
+  return `Full report ID ${id}`;
+}
+
 /* ── Review timeline ──────────────────────────────────────────────────────────────────────── */
 
 export interface TimelineStage {
@@ -104,7 +114,11 @@ export interface TimelineStage {
 export const REPORT_TIMELINE: readonly TimelineStage[] = Object.freeze([
   { id: 'submitted', label: 'Submitted', detail: 'Private report received' },
   { id: 'triage', label: 'Triage', detail: 'Completeness and scope assessment' },
-  { id: 'decision', label: 'Review decision', detail: 'Validate, reject, duplicate or request info' },
+  {
+    id: 'decision',
+    label: 'Review decision',
+    detail: 'Validate, reject, duplicate or request info',
+  },
   { id: 'reward', label: 'Reward approval', detail: 'Final severity and USDC amount' },
   { id: 'payment', label: 'Payment', detail: 'Escrow releases USDC' },
 ]);
