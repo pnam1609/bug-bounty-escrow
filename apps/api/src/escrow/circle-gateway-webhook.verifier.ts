@@ -39,9 +39,6 @@ export class CircleGatewayWebhookVerifier {
     keyId: string | undefined,
     signature: string | undefined,
   ): Promise<void> {
-    if (!this.config.CIRCLE_GATEWAY_WEBHOOKS_ENABLED) {
-      throw new ServiceUnavailableException('circle_gateway_webhooks_disabled');
-    }
     if (
       keyId === undefined ||
       signature === undefined ||

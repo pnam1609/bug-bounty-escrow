@@ -11,13 +11,18 @@ import {
   Post,
   RawBodyRequest,
   Req,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ApiHeader } from '@nestjs/swagger';
-import { circleGatewayDepositFinalizedWebhookSchema } from '@bug-bounty-escrow/shared';
+import {
+  circleGatewayDepositFinalizedWebhookSchema,
+  type ApiEnvironment,
+} from '@bug-bounty-escrow/shared';
 import { z } from 'zod';
 
 import { Public } from '../common/decorators/public.decorator.js';
 import { RateLimit } from '../common/decorators/rate-limit.decorator.js';
+import { API_CONFIG } from '../config/api-config.module.js';
 import { CircleGatewayWebhookVerifier } from './circle-gateway-webhook.verifier.js';
 import { EscrowService } from './escrow.service.js';
 import { GatewaySubscriptionLifecycleService } from './gateway-subscription-lifecycle.service.js';
@@ -38,6 +43,7 @@ export class CircleGatewayWebhookController {
     @Inject(EscrowService) private readonly service: EscrowService,
     @Inject(GatewaySubscriptionLifecycleService)
     private readonly subscriptionLifecycle: GatewaySubscriptionLifecycleService,
+    @Inject(API_CONFIG) private readonly config: ApiEnvironment,
   ) {}
 
   @Head('gateway')
@@ -59,11 +65,16 @@ export class CircleGatewayWebhookController {
     await this.verifier.verify(request.rawBody, keyId, signature);
     const test = circleWebhookTestSchema.safeParse(body);
     if (test.success) {
-      await this.subscriptionLifecycle.recordSignedTest(
-        test.data.subscriptionId,
-        test.data.notificationId,
-      );
+      if (this.config.CIRCLE_GATEWAY_WEBHOOKS_ENABLED) {
+        await this.subscriptionLifecycle.recordSignedTest(
+          test.data.subscriptionId,
+          test.data.notificationId,
+        );
+      }
       return { success: true };
+    }
+    if (!this.config.CIRCLE_GATEWAY_WEBHOOKS_ENABLED) {
+      throw new ServiceUnavailableException('circle_gateway_webhooks_disabled');
     }
     const parsed = circleGatewayDepositFinalizedWebhookSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException('circle_webhook_payload_invalid');

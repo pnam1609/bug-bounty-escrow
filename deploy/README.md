@@ -108,9 +108,8 @@ the environment file.
 ### Bootstrap Circle Contracts and Gateway webhooks
 
 Use this two-phase bootstrap only for Arc Testnet. It avoids a circular
-dependency: Circle needs a public webhook endpoint before a subscription can be
-created, while this API refuses signed webhook traffic until exactly one
-subscription ID is allow-listed.
+dependency: Circle sends a signed `webhooks.test` callback while creating the
+subscription, before its new subscription ID is known.
 
 Circle's Gateway webhook limits are 20 subscriptions and 50 registered
 addresses per developer account. This application deliberately uses **one
@@ -132,13 +131,15 @@ The supported testnet domain mapping is:
 #### Phase 1: publish the endpoint with Circle disabled
 
 Keep both feature flags disabled in
-`/opt/bounty-escrow/.env.production`. Credentials may already be present, but
-must not be printed:
+`/opt/bounty-escrow/.env.production`. The API key is required so the endpoint
+can fetch Circle's public key and cryptographically verify the creation
+callback. It must not be printed:
 
 ```dotenv
 CIRCLE_CONTRACTS_ENABLED=false
 CIRCLE_GATEWAY_WEBHOOKS_ENABLED=false
 CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS=
+CIRCLE_API_KEY=replace-with-circle-api-key
 ```
 
 Deploy the new application image through the CI/CD workflow, then verify the
@@ -149,10 +150,11 @@ curl --fail --head https://bountyescrow.xyz/api/webhooks/circle/gateway
 curl --fail http://127.0.0.1:7831/api/health
 ```
 
-`HEAD /api/webhooks/circle/gateway` must return `200`. A signed test notification
-cannot pass yet: while webhooks are disabled, the signed `POST` endpoint
-intentionally returns `503`; after webhooks are enabled it also requires the
-subscription ID to be allow-listed.
+`HEAD /api/webhooks/circle/gateway` must return `200`. During this phase the
+`POST` endpoint still verifies Circle's signature. It returns 2xx only for a
+valid signed `webhooks.test` and does not persist or trust its not-yet-known
+subscription ID. Deposit and all other business notifications remain disabled
+and return `503`, even when correctly signed.
 
 #### Create exactly one TEST subscription
 
@@ -231,6 +233,10 @@ CREATE_RESPONSE="$(
     --data "${CREATE_PAYLOAD}"
 )"
 
+# Circle sends a signed webhooks.test callback while processing this request.
+# Creation fails if the signature cannot be verified or the endpoint does not
+# return 2xx.
+
 CIRCLE_SUBSCRIPTION_ID="$(
   printf '%s' "${CREATE_RESPONSE}" |
   python3 -c '
@@ -263,8 +269,10 @@ print("Circle testConnection: 200")
 '
 ```
 
-Do not send the signed test notification during phase 1; the application is
-still fail-closed.
+An explicit signed test is optional during phase 1. It is verified and returns
+2xx but is deliberately not persisted. After phase 2 it is persisted only for
+the exact allow-listed subscription and becomes part of source-deposit
+readiness.
 
 #### Phase 2: allow-list, enable, and recreate the API
 

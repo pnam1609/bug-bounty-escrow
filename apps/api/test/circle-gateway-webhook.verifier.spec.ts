@@ -7,7 +7,7 @@ import { CircleGatewayWebhookVerifier } from '../src/escrow/circle-gateway-webho
 
 const KEY_ID = '31000000-0000-4000-8000-000000000001';
 
-function config() {
+function config(webhooksEnabled = true) {
   return parseApiEnvironment({
     NODE_ENV: 'test',
     WEB_APP_ORIGIN: 'https://web.example.test',
@@ -17,7 +17,7 @@ function config() {
     ARC_RPC_URL: 'https://rpc.example.test',
     ARC_CHAIN_ID: '5042002',
     USDC_ADDRESS: '0x3600000000000000000000000000000000000000',
-    CIRCLE_GATEWAY_WEBHOOKS_ENABLED: 'true',
+    CIRCLE_GATEWAY_WEBHOOKS_ENABLED: String(webhooksEnabled),
     CIRCLE_API_KEY: 'api-key',
     CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: KEY_ID,
     AI_PROVIDER: 'disabled',
@@ -63,6 +63,37 @@ describe('CircleGatewayWebhookVerifier', () => {
     await expect(verifier.verify(Buffer.from('{}'), 'not-a-key', 'bad')).rejects.toMatchObject({
       status: 401,
     });
+  });
+
+  it('still verifies the exact Circle signature while business webhooks are disabled', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: KEY_ID,
+              algorithm: 'ECDSA_SHA_256',
+              publicKey: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const exact = Buffer.from('{"notificationType":"webhooks.test"}');
+    const signature = sign('sha256', exact, privateKey).toString('base64');
+    const verifier = new CircleGatewayWebhookVerifier(config(false));
+
+    await expect(verifier.verify(exact, KEY_ID, signature)).resolves.toBeUndefined();
+    await expect(
+      verifier.verify(
+        Buffer.from('{"notificationType":"gateway.deposit.finalized"}'),
+        KEY_ID,
+        signature,
+      ),
+    ).rejects.toMatchObject({ status: 401 });
   });
 
   it.each([400, 404])(

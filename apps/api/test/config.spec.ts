@@ -123,4 +123,19 @@ describe('API configuration', () => {
       }),
     );
   });
+
+  it('supports disabled webhook bootstrap with an API key and no known subscription id', () => {
+    const bootstrap = parseApiEnvironment({
+      ...config,
+      CIRCLE_GATEWAY_WEBHOOKS_ENABLED: false,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+      CIRCLE_API_KEY: 'circle-api-key',
+    });
+
+    expect(bootstrap).toMatchObject({
+      CIRCLE_GATEWAY_WEBHOOKS_ENABLED: false,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: [],
+      CIRCLE_API_KEY: 'circle-api-key',
+    });
+  });
 });
