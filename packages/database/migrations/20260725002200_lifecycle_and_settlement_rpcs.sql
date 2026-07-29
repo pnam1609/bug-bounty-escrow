@@ -216,6 +216,10 @@ begin
     perform public.reject_business('program_escrow_not_deployed');
   end if;
 
+  if program_record.deadline is null or program_record.deadline <= now() then
+    perform public.reject_business('program_deadline_invalid');
+  end if;
+
   -- A published program promises a funded reward pool; publishing an empty one is misleading.
   if program_record.available_pool <= 0 then
     perform public.reject_business('program_not_ready_to_publish');

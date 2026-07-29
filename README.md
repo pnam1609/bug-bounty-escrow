@@ -122,6 +122,10 @@ pnpm build
 pnpm dev
 ```
 
+Run `pnpm dev` once from the repository root. The web development command is pinned to port
+`3000` and the API reads port `3001` from `apps/api/.env`; if either port is already occupied,
+stop the stale process instead of letting another service use the other application's port.
+
 Local services:
 
 | Service           | URL                                |
@@ -164,6 +168,11 @@ These accounts and credentials are for local and demo environments only.
 | `pnpm --filter @bug-bounty-escrow/web test:e2e`      | Run Playwright E2E tests                   |
 | `pnpm --filter @bug-bounty-escrow/api openapi:check` | Verify the OpenAPI snapshot                |
 | `pnpm --filter @bug-bounty-escrow/database test`     | Verify migrations, RLS, and database flows |
+
+If the browser reports a missing `Access-Control-Allow-Origin` header, first open
+`http://localhost:3001/api/health`. It must return JSON from the NestJS API. A Next.js HTML 404
+means a second web development server claimed the API port; stop the duplicate development
+processes and start a single `pnpm dev` session from the repository root.
 
 ## Repository structure
 

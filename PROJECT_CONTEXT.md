@@ -677,86 +677,186 @@ Important security rules:
 
 ## 10. Smart contract design
 
-MVP dùng:
+MVP dùng một custom escrow đã version cho mỗi program:
 
 ```text
-One Escrow Factory
+Circle Contracts deploys BountyEscrow 1.1.0 on Arc Testnet
         ↓
-One Escrow Contract per Program
+One canonical escrow per program
         ↓
-Multiple Report Payouts
+Direct canonical Arc USDC funding + multiple immutable reward payouts
 ```
 
-Factory:
+Không dùng Escrow Factory, ERC-20 template hoặc client-supplied deployed address trong flow
+canonical. Backend deploy ABI/bytecode đã pin checksum qua Circle Contracts. Circle
+Developer-Controlled Wallet chỉ deploy/trả gas; constructor nhận `owner` tường minh nên deployment
+wallet không giữ admin, approver hoặc withdraw role.
+
+Constructor canonical:
 
 ```solidity
-interface IBountyEscrowFactory {
-    function createEscrow(
-        bytes32 programId,
+constructor(
+        bytes32 programKey,
         address owner,
         address token,
-        uint256 deadline
-    ) external returns (address escrow);
-}
+        uint256 refundUnlockAt,
+        address withdrawRecipient
+);
 ```
 
-Escrow:
+* `token` phải là canonical Arc Testnet USDC
+  `0x3600000000000000000000000000000000000000`, 6 decimals.
+* `refundUnlockAt` do server derive chính xác từ `program.deadline`; thiếu deadline thì deploy fail
+  closed.
+* `withdrawRecipient` immutable và được owner review trước deploy.
+* Sau deployment confirmed, deadline không được sửa database-only. Nếu hỗ trợ extension, phải tăng
+  lock on-chain trước, verify final receipt/state rồi mới cập nhật projection; không được shorten.
+
+Interface target của artifact `1.1.0`:
 
 ```solidity
 interface IBountyEscrow {
-    function fund(uint256 amount) external;
+    function syncExternalFunding()
+        external
+        returns (uint256 newlyObserved);
 
-    function payReward(
-        bytes32 reportId,
+    function approveReward(
+        bytes32 reportKey,
+        bytes32 approvedContentHash,
         address researcher,
         uint256 amount
     ) external;
 
-    function refundRemaining() external;
+    function payReward(bytes32 reportKey) external;
+
+    function extendRefundUnlockAt(uint256 newUnlockAt) external;
+
+    function close() external;
+
+    function withdrawRemaining(uint256 expectedAmount)
+        external
+        returns (uint256 amount);
 
     function availableBalance()
         external
         view
         returns (uint256);
 
+    function totalFunded()
+        external
+        view
+        returns (uint256);
+
+    function approvedOutstanding()
+        external
+        view
+        returns (uint256);
+
     function isReportPaid(
-        bytes32 reportId
+        bytes32 reportKey
     ) external
         view
         returns (bool);
 }
 ```
 
-Events:
+Primary funding không gọi `approve(escrow)`, `fund(amount)` hoặc native `msg.value`. Send, Bridge và
+Unified Balance chuyển canonical Arc USDC trực tiếp tới escrow; backend verify exact destination
+receipt/event rồi gọi permissionless `syncExternalFunding()`.
+
+Unified Balance source deposit còn có một Gateway subscription boundary bắt buộc:
+
+* Môi trường test dùng stable permissionless subscription `TEST` với public HTTPS endpoint hỗ trợ
+  `HEAD` để Circle validate endpoint và `POST` để nhận signed notification; subscription chỉ đăng ký
+  exact event `gateway.deposit.finalized`.
+* Trước source-deposit operation hoặc wallet signature, backend phải remote-verify connected owner
+  wallet và toàn bộ selected source domains đã được đăng ký. Local cache/config hay một write response
+  không đủ; mismatch, API uncertainty hoặc registration failure đều fail closed trước khi chuyển tiền.
+* Membership update là durable serialized desired-state reconcile: merge remote state, persist
+  revision/attempt và remote-verify sau write để concurrent intents không lost update.
+* Capacity bị bound rõ ở tối đa 50 registered addresses/developer account. Hết capacity phải fail
+  closed; không tự evict address khác. Không tự remove wallet/domain khi còn active, pending,
+  uncertain hoặc recoverable deposit/delivery/`removeFund` operation.
+* Circle-signed `gateway.deposit.finalized` vẫn là authority duy nhất cho Gateway finalization.
+  Source RPC evidence là proof on-chain bổ sung; client balance/App Kit result, polling balance và
+  registration state không được thay signed webhook.
+
+Lifetime reconciliation:
+
+```text
+observedLifetimeInflow =
+  token.balanceOf(escrow) + totalPaid + totalWithdrawn
+
+newlyObserved = observedLifetimeInflow - totalFunded
+```
+
+`syncExternalFunding()` chỉ increment khi `newlyObserved > 0`, nên retry idempotent. Funding-intent
+attribution dùng exact canonical Arc USDC destination receipt/event amount và yêu cầu post-sync
+`totalFunded >= pre-sync totalFunded + attributed amount`. Không dùng pre/post live balance delta
+làm amount hoặc equality gate vì permissionless payout có thể chạy giữa destination transfer và
+sync.
+
+Events chính:
 
 ```solidity
-event EscrowFunded(
-    address indexed funder,
-    uint256 amount
+event EscrowInitialized(
+    bytes32 indexed programKey,
+    address indexed owner,
+    address indexed token,
+    uint256 refundUnlockAt,
+    address withdrawRecipient
 );
 
-event RewardPaid(
-    bytes32 indexed reportId,
+event ExternalFundingSynced(
+    address indexed actor,
+    uint256 newlyObserved,
+    uint256 totalFunded
+);
+
+event RewardApproved(
+    bytes32 indexed reportKey,
+    bytes32 indexed approvedContentHash,
     address indexed researcher,
     uint256 amount
 );
 
-event RemainingFundsRefunded(
-    address indexed owner,
+event RewardPaid(
+    bytes32 indexed reportKey,
+    address indexed researcher,
+    uint256 amount
+);
+
+event EscrowClosed(address indexed actor);
+
+event RemainingFundsWithdrawn(
+    address indexed recipient,
     uint256 amount
 );
 ```
 
 Security requirements:
 
-* Chỉ authorized owner hoặc reviewer được payout.
-* Không payout cùng report hai lần.
-* Không payout vượt balance.
-* Refund chỉ được thực hiện khi program đóng hoặc hết hạn.
+* Chỉ authorized on-chain approver được tạo immutable reward snapshot; reviewer role trong database
+  không tự động có contract role.
+* Sau approval, `payReward(reportKey)` permissionless nhưng chỉ chuyển đúng recipient/amount đã
+  snapshot; không payout cùng report hai lần và không payout vượt live available balance.
+* `close()` chỉ owner, chỉ sau `refundUnlockAt`, là transition một chiều và chặn approval mới; payout
+  đã approve vẫn được thực thi.
+* `withdrawRemaining(expectedAmount)` chỉ owner, sau close/unlock và khi
+  `totalApprovedOutstanding == 0`.
+* `expectedAmount` là exact 6-decimal base-unit snapshot từ server-verified withdrawal intent.
+  Contract require live balance **ít nhất** snapshot rồi chỉ chuyển đúng snapshot tới immutable
+  recipient; không require equality để tránh dust grief.
+* Late/dust USDC vượt snapshot ở lại escrow. Backend scan/reconcile và tạo withdrawal intent +
+  idempotency key mới; không reuse intent hoặc transaction hash đã complete.
+* Transaction hash đã biết chỉ poll/reconcile, không ký lại. Unknown-after-sign đi vào recovery;
+  deterministic revert kết thúc attempt cũ và retry bằng linked replacement intent.
 * Dùng `SafeERC20`.
 * Dùng `ReentrancyGuard`.
-* Dùng `AccessControl` hoặc owner role.
-* Contract tests bắt buộc.
+* Dùng checks-effects-interactions; không `SELFDESTRUCT`, native sweep hoặc wrapped-USDC path.
+* Contract/integration tests bắt buộc cho unauthorized, duplicate sync/payout/withdraw, early
+  close/withdraw, outstanding guard, exact-snapshot withdrawal, late-funds intent mới và concurrent
+  payout giữa funding destination receipt với reconciliation.
 
 ---
 
@@ -1170,7 +1270,9 @@ Must have:
 * Private report submission.
 * Review workflow.
 * Escrow deployment.
-* USDC funding.
+* USDC funding tới canonical Arc escrow: Arc-only Send, đúng một non-Arc Bridge hoặc multi-source
+  Unified Balance từ exact four testnets `Arc_Testnet`, `Ethereum_Sepolia`, `Arbitrum_Sepolia`,
+  `Base_Sepolia`.
 * USDC reward payout.
 * Transaction tracking.
 * Realistic seed data.
@@ -1182,14 +1284,13 @@ Optional:
 * Duplicate detection.
 * Realtime notifications.
 * Disputes.
-* Cross-chain bridge.
-* Unified balance.
 * Public disclosure workflow.
 
 Do not include in the first MVP:
 
 * AI auto-approval.
 * AI auto-payout.
+* Token swap hoặc arbitrary multi-chain settlement ngoài fixed Arc escrow destination.
 * Video analysis.
 * Complex dispute court.
 * Multi-chain settlement.

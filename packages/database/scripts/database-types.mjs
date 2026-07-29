@@ -4,7 +4,9 @@ import { dirname } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, URL } from 'node:url';
 
-const SUPABASE_CLI_VERSION = '2.54.11';
+// Keep type generation deterministic while matching the workspace CLI/config
+// schema. Older pins reject current config keys before connecting to Postgres.
+const SUPABASE_CLI_VERSION = '2.109.1';
 const outputPath = fileURLToPath(new URL('../src/generated/database.types.ts', import.meta.url));
 const mode = process.argv[2];
 
@@ -40,6 +42,7 @@ if (result.error !== undefined) {
 }
 
 if (result.status !== 0) {
+  process.stderr.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exit(result.status ?? 1);
 }

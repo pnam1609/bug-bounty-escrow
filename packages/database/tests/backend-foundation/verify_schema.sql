@@ -100,6 +100,7 @@ do $pool_accounting$
 declare
   owner_uuid uuid := '90000000-0000-4000-8000-000000000001';
   program_uuid uuid := '90000000-0000-4000-8000-000000000100';
+  escrow_uuid uuid;
   computed numeric;
   caught text;
 begin
@@ -109,12 +110,12 @@ begin
 
   insert into public.programs (
     id, owner_id, name, slug, short_summary, description, website_url,
-    status, total_pool, reserved_pool, paid_pool
+    status, total_pool, reserved_pool, paid_pool, deadline
   )
   values (
     program_uuid, owner_uuid, 'Schema program', 'schema-program',
     'Summary', 'Description', 'https://schema.example.test',
-    'draft', 1000, 250, 100
+    'draft', 1000, 250, 100, now() + interval '1 day'
   );
 
   select available_pool into computed from public.programs where id = program_uuid;
@@ -131,6 +132,61 @@ begin
   if (select public_status from public.programs where id = program_uuid) is not null then
     raise exception 'An unfunded program has a public status';
   end if;
+
+  insert into public.escrow_contracts (
+    program_id, chain_id, contract_address, deployment_transaction_hash,
+    deployment_status, deployed_at, token_address, token_decimals,
+    refund_unlock_at, contract_version, artifact_checksum
+  ) values (
+    program_uuid, 5042002, '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'confirmed', now(), '0x3600000000000000000000000000000000000000', 6,
+    (select deadline from public.programs where id = program_uuid), '1.1.0',
+    '0x1111111111111111111111111111111111111111111111111111111111111111'
+  ) returning id into escrow_uuid;
+
+  insert into public.funding_intents (
+    id, program_id, escrow_contract_id, created_by, idempotency_key,
+    wallet_address, route_mode, gross_amount_base_units,
+    estimated_fee_reserve_base_units, fee_allocations, sources,
+    destination_address, pre_balance_base_units, pre_total_funded_base_units,
+    status, destination_transaction_hash, net_received_base_units,
+    expires_at, completed_at
+  ) values (
+    '90000000-0000-4000-8000-000000000110', program_uuid, escrow_uuid,
+    owner_uuid, '90000000-0000-4000-8000-000000000111',
+    '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'send', 1000000, 0,
+    '[{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb,
+    '[{"network":"Arc_Testnet","amountBaseUnits":"1000000"}]'::jsonb,
+    '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0, 0, 'complete',
+    '0x2222222222222222222222222222222222222222222222222222222222222222',
+    1000000, now() + interval '1 day', now()
+  );
+  insert into public.funding_confirmation_artifacts (
+    funding_intent_id, program_id, escrow_contract_id, route_mode, escrow_address,
+    artifact_version, artifact_checksum, token_address, token_decimals,
+    destination_transaction_hash, destination_log_index,
+    destination_block_number, destination_block_hash,
+    sync_transaction_hash, sync_log_index, sync_block_number, sync_block_hash,
+    gross_amount_base_units, estimated_fee_reserve_base_units,
+    net_received_base_units, pre_total_funded_base_units,
+    required_total_funded_base_units, post_total_funded_base_units,
+    total_pool, reserved_pool, paid_pool, withdrawn_pool, available_pool
+  ) values (
+    '90000000-0000-4000-8000-000000000110', program_uuid, escrow_uuid,
+    'send', '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '1.1.0',
+    '0x1111111111111111111111111111111111111111111111111111111111111111',
+    '0x3600000000000000000000000000000000000000', 6,
+    '0x2222222222222222222222222222222222222222222222222222222222222222',
+    0, 1,
+    '0x3333333333333333333333333333333333333333333333333333333333333333',
+    '0x4444444444444444444444444444444444444444444444444444444444444444',
+    0, 2,
+    '0x5555555555555555555555555555555555555555555555555555555555555555',
+    1000000, 0, 1000000, 0, 1000000, 1000000,
+    1000, 250, 100, 0, 650
+  );
 
   update public.programs
   set status = 'active', published_at = now()

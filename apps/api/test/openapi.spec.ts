@@ -160,6 +160,15 @@ describe('OpenAPI generation', () => {
         },
       },
     });
+    expect(document.paths['/webhooks/circle/gateway']?.head).toMatchObject({
+      operationId: 'CircleGatewayWebhookController_readiness',
+      responses: {
+        200: {
+          description: 'Circle Gateway webhook endpoint is reachable',
+        },
+      },
+      security: [{}],
+    });
     expect(document.components?.schemas?.['ApiErrorResponse']).toBeDefined();
     expect(document.components?.headers?.['CorrelationId']).toBeDefined();
   });

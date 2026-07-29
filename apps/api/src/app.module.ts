@@ -23,6 +23,7 @@ import { NotificationModule } from './notifications/notification.module.js';
 import { ProgramModule } from './programs/program.module.js';
 import { ReportModule } from './reports/report.module.js';
 import { RewardModule } from './rewards/reward.module.js';
+import { EscrowModule } from './escrow/escrow.module.js';
 
 @Module({})
 export class AppModule implements NestModule {
@@ -36,6 +37,7 @@ export class AppModule implements NestModule {
         AuthModule,
         HealthModule,
         ProgramModule,
+        EscrowModule,
         ReportModule,
         RewardModule,
         NotificationModule,

@@ -12,6 +12,16 @@ The override prevents conflicts with services already running on the host:
 
 No Supabase port is exposed publicly. Host Nginx terminates TLS for
 `supabase.bountyescrow.xyz` and proxies the supported public API paths to Kong.
+The example Nginx site is in `nginx-site.example`; it intentionally does not
+expose Supabase Studio or internal administration endpoints.
+
+Google OAuth is enabled by the Compose override. Store `GOOGLE_CLIENT_ID` and
+`GOOGLE_SECRET` only in the self-hosted Supabase `.env` file. The production
+Google OAuth redirect URI is:
+
+```text
+https://supabase.bountyescrow.xyz/auth/v1/callback
+```
 
 The application joins the external Docker network `supabase_default`:
 

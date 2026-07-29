@@ -33,12 +33,26 @@ radius, or px spacing value in a component.** Use the utility that maps to the t
 | Semantic | `text-escrow` `text-success` `text-error` `text-usdc` |
 | Severity | `text-critical` `text-high` `text-medium` `text-low` `text-informational` |
 | Spacing | `p-xs p-sm p-md p-lg p-xl p-2xl p-3xl` (4/8/12/16/24/32/48) and the `gap-*`, `m-*` equivalents |
+| Container width | `max-w-3xs max-w-2xs max-w-xs ... max-w-7xl` |
 | Radius | `rounded-sm` (6) `rounded-md` (10) `rounded-lg` (14) `rounded-full` |
 | Elevation | `shadow-subtle` `shadow-elevated` `shadow-overlay` |
 | Type | `text-h1 text-h2 text-h3 text-body text-body-sm text-label-lg text-label-md text-label-sm` |
 
 Mint (`escrow`) is reserved for escrow and completed states. Violet (`primary`) is the current or
 primary action. Red is error and destructive only.
+
+### Named dimensions in Tailwind v4
+
+BBE spacing names overlap Tailwind's container names (`md`, `lg`, `xl`, and so on). Tailwind
+otherwise compiles `max-w-md` from `--spacing-md` (12px) instead of `--container-md` (28rem).
+`theme.css` therefore defines targeted `--max-width-*` aliases for the complete container scale.
+Use ordinary `max-w-*` utilities for layout containers.
+
+Spacing and compact dimensions keep the BBE spacing scale: `gap-md`, `p-md`, `size-sm`, and
+`h-3xl` must continue to resolve from `--spacing-*`. Do not copy the full namespace workaround
+from [Tailwind issue #16047](https://github.com/tailwindlabs/tailwindcss/issues/16047), especially
+the `--size-*`, `--width-*`, or `--height-*` aliases; those would turn icon and control dimensions
+into container-sized values.
 
 ## Component rules
 

@@ -86,6 +86,33 @@ export function decorateOpenApiDocument(document: OpenAPIObject): OpenAPIObject 
     },
   };
 
+  /*
+   * @nestjs/swagger currently omits Nest's HEAD routes from its route explorer.
+   * Keep this explicit transformation next to the other non-inferable metadata:
+   * the runtime route exists and Circle uses it to check webhook reachability.
+   */
+  const gatewayWebhookPath = (document.paths['/webhooks/circle/gateway'] ??= {});
+  if (gatewayWebhookPath.post?.parameters !== undefined) {
+    gatewayWebhookPath.post.parameters = [...gatewayWebhookPath.post.parameters].sort(
+      (left, right) => {
+        const leftName = 'name' in left ? left.name : left.$ref;
+        const rightName = 'name' in right ? right.name : right.$ref;
+        return leftName.localeCompare(rightName);
+      },
+    );
+  }
+  gatewayWebhookPath.head = {
+    operationId: 'CircleGatewayWebhookController_readiness',
+    summary: 'Check Circle Gateway webhook endpoint reachability',
+    responses: {
+      200: {
+        description: 'Circle Gateway webhook endpoint is reachable',
+      },
+    },
+    security: [{}],
+    tags: ['CircleGatewayWebhook'],
+  };
+
   return document;
 }
 

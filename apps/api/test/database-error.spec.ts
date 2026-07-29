@@ -54,4 +54,22 @@ describe('normalizeDatabaseError', () => {
     expect(normalizeDatabaseError({ code: '40001' }).retryable).toBe(true);
     expect(normalizeDatabaseError({ code: '22023' }).retryable).toBe(false);
   });
+
+  it('maps only the exact Gateway capacity limit to a stable conflict', () => {
+    const capacity = normalizeDatabaseError({
+      code: '54000',
+      details: 'gateway_subscription_address_capacity_exceeded',
+    });
+    const unrelated = normalizeDatabaseError({
+      code: '54000',
+      details: 'unrelated_program_limit',
+    });
+
+    expect(capacity).toMatchObject({
+      code: 'conflict',
+      reason: 'gateway_subscription_address_capacity_exceeded',
+      retryable: false,
+    });
+    expect(unrelated).toMatchObject({ code: 'unknown', reason: undefined });
+  });
 });

@@ -145,6 +145,20 @@ export function normalizeDatabaseError(error: unknown): DatabaseError {
         retryable: true,
         ...withReason,
       });
+    case '54000':
+      if (reason === 'gateway_subscription_address_capacity_exceeded') {
+        return new DatabaseError({
+          code: 'conflict',
+          databaseCode,
+          message: 'The Gateway subscription address capacity was exceeded',
+          reason,
+        });
+      }
+      return new DatabaseError({
+        code: 'unknown',
+        databaseCode,
+        message: 'An unexpected database error occurred',
+      });
     case '57014':
       return new DatabaseError({
         code: 'database_unavailable',

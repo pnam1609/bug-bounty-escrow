@@ -289,7 +289,7 @@ export function ProgramDetailView({ slug }: { readonly slug: string }) {
       </header>
 
       <Tabs onValueChange={openTab} value={activeTab}>
-        <TabsList className="overflow-x-auto">
+        <TabsList>
           {TABS.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               {tab.label}

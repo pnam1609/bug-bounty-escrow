@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "dev": "next dev",
+    "dev": "next dev --port 3000",
     "lint": "eslint . --no-error-on-unmatched-pattern",
     "start": "next start",
     "test": "vitest run",
@@ -14,6 +14,8 @@
   "dependencies": {
     "@bug-bounty-escrow/shared": "workspace:*",
     "@bug-bounty-escrow/ui": "workspace:*",
+    "@circle-fin/adapter-viem-v2": "1.14.0",
+    "@circle-fin/app-kit": "1.10.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-checkbox": "^1.3.11",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -38,6 +40,7 @@
     "react-dom": "19.2.8",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
+    "viem": "2.55.10",
     "zod": "4.4.3"
   },
   "devDependencies": {

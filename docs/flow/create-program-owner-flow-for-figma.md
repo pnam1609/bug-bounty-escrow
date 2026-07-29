@@ -4,7 +4,8 @@
 
 Tài liệu này định nghĩa user flow để **Program owner tạo một bug bounty program mới** trong BountyEscrow.
 
-Flow bắt đầu từ Owner workspace tại `/owner/programs`, kết thúc khi API tạo thành công một program ở trạng thái `draft` và điều hướng bằng `replace` tới `/owner/programs/:id/edit`.
+Flow bắt đầu từ Owner workspace tại `/owner/programs`, tạo program ở trạng thái `draft`, rồi tiếp
+tục trong edit workspace tới khi custom escrow được deploy và funding đã được verify ở CP-13.
 
 Flow mô tả hành trình liên tục từ cấu hình program tới funding escrow gồm:
 
@@ -14,8 +15,16 @@ Flow mô tả hành trình liên tục từ cấu hình program tới funding es
 - Reward tiers và reward calculation theo asset type.
 - Program rules, PoC requirement và disclosure policy.
 - Review và lưu draft.
-- Deploy escrow contract.
-- Fund USDC và xác nhận funding thành công.
+- Kết nối owner wallet để xác nhận địa chỉ admin của escrow.
+- Backend deploy custom `BountyEscrow` bytecode lên Arc Testnet bằng Circle Contracts.
+- Chọn nguồn USDC testnet trong Ethereum Sepolia, Arbitrum Sepolia, Base Sepolia và Arc Testnet.
+- Tự động dùng đúng Circle App Kit capability theo selection: một Arc source dùng same-chain
+  `send`, một source ngoài Arc dùng `bridge`, từ hai source/network trở lên mới dùng Unified Balance
+  deposit + `spend`.
+- Với Unified Balance, `Submit` đầu tiên tạo/khóa funding intent nhưng vẫn ở CP-11 để owner deposit
+  tuần tự; chỉ `Submit` tiếp theo sau khi confirmed balance đủ mới chuyển CP-12.
+- CP-12 giữ tên `Funding pending`, thực thi Send/Bridge hoặc destination spend đã khóa tới escrow
+  trên Arc và xác nhận số USDC thực nhận on-chain trước CP-13.
 
 Publish program là hành động kế tiếp sau flow này, không được gộp vào thao tác tạo draft hoặc fund reward.
 
@@ -28,6 +37,7 @@ Publish program là hành động kế tiếp sau flow này, không được g�
 | Danh sách program của owner | `/owner/programs` |
 | Tạo program | `/owner/programs/new` |
 | Edit draft sau khi tạo | `/owner/programs/:id/edit` |
+| Theo dõi funding | `/owner/programs/:id/edit`, CP-12 state được hydrate từ active funding intent |
 
 ### API
 
@@ -44,6 +54,163 @@ invalidate programs query
 cache program response
 router.replace(/owner/programs/:id/edit)
 ```
+
+Real Arc flow hiện là API gap. `POST /api/programs/:id/deploy` đang nhận
+`chainId + contractAddress + transactionHash` do client cung cấp và
+`POST /api/programs/:id/fund` đang nhận `amount + tokenAddress + transactionHash`; contract này chỉ
+đủ cho off-chain/mock milestone. Không được dùng client-supplied address/hash hoặc App Kit result
+làm bằng chứng cho milestone on-chain thật.
+
+Target API cho Circle Contracts deployment và App Kit funding:
+
+```text
+POST /api/programs/:id/deploy
+  body: { ownerWallet, withdrawRecipient }
+  server: require program.deadline; derive refundUnlockAt = program.deadline, then
+          Circle Contracts deployContract(ABI, bytecode, ARC-TESTNET, constructorParameters)
+  result: { deploymentId, circleContractId, circleTransactionId, refundUnlockAt, status }
+
+GET /api/programs/:id/deploy/status
+  result: pending | confirmed | failed deployment projection
+
+POST /api/programs/:id/funding-intents
+  body: {
+    grossAmount: decimalString,
+    estimatedFeeReserve: decimalString,
+    sources: [{ chain, amount: decimalString }]
+  }
+  result: {
+    fundingIntentId,
+    routeMode: "send" | "bridge" | "unified_balance",
+    destinationChain: "Arc_Testnet",
+    recipientAddress: escrowAddress,
+    token: "USDC",
+    expiresAt
+  }
+
+POST /api/programs/:id/funding-intents/:fundingIntentId/observe
+  body: { operationType, txHash?, providerOperationId?, boundedStepStates? }
+  result: accepted_for_reconciliation
+
+POST /api/programs/:id/funding-intents/:fundingIntentId/fee-quote
+  result: { quoteId, feeReserveBaseUnits, quotedAt, expiresAt }
+
+GET /api/programs/:id/funding-intents/:fundingIntentId
+  result: preparing | collecting_deposits | awaiting_confirmed_balance
+          | awaiting_wallet_signature | approving | building_burn_intents
+          | signing_burn_intents | burning | fetching_attestation
+          | sending | minting
+          | verifying_escrow
+          | reconciling | confirmed | failed | replaced | recovery_required
+  sourceDeposits[].state: awaiting_signature | submission_uncertain | submitted
+                          | onchain_verified | gateway_finalized | confirmed | failed
+
+POST /api/programs/:id/withdrawal-intents
+  server: verify expired/closed policy, unlock, outstanding, owner and locked recipient
+  result: { withdrawalIntentId, chain: "Arc_Testnet", escrowAddress,
+            recipientAddress, amountBaseUnits, requiresClose, status }
+
+POST /api/programs/:id/withdrawal-intents/:withdrawalIntentId/observe
+  body: { closeTxHash?, withdrawTxHash? }
+  result: accepted_for_reconciliation
+
+GET /api/programs/:id/withdrawal-intents/:withdrawalIntentId
+  result: awaiting_close_signature | closing | awaiting_withdraw_signature
+          | withdrawing | verifying | confirmed | failed | recovery_required
+```
+
+`deploy` phải dùng ABI/bytecode artifact `BountyEscrow` version `1.1.0` đã pin ở server; API key,
+Entity Secret và Circle Developer-Controlled Wallet ID không bao giờ đi xuống browser. Cùng một
+program + contract version dùng một Circle idempotency key ổn định để retry không tạo contract thứ
+hai. Version `1.1.0` là ABI có `withdrawRemaining(uint256 expectedAmount)`; client/server/OpenAPI
+không được tiếp tục advertise hoặc encode ABI `1.0.0`.
+
+Server derive `routeMode` từ normalized unique `sources`; client không được tự chọn hoặc override
+mode. Một source `Arc_Testnet` là `send`; một source khác Arc là `bridge`; từ hai source/network trở
+lên là `unified_balance`. `sources[].amount` phải cộng đúng bằng `grossAmount`.
+
+`observe` chỉ nhận bounded telemetry/evidence để tìm operation nhanh hơn; không lưu raw provider
+result hoặc secrets. Worker vẫn phải poll Circle deployment,
+đọc Arc receipt/runtime bytecode/immutable state và đối soát transaction đích của Send, Bridge hoặc
+Gateway trước khi xác nhận. `grossAmount` là số owner muốn chuyển; số credit vào pool là
+`netReceivedAmount` từ exact canonical Arc USDC destination `Transfer`/route event trong receipt đã
+verify, sau phí. Không suy ra amount này bằng pre/post live balance vì payout có thể chạy đồng thời.
+Mọi write idempotent theo Circle IDs, internal
+funding intent ID, send/bridge/deposit/spend transaction hash, optional Gateway `transferId` hoặc
+`chainId + transactionHash + logIndex`.
+Amount trong API/database là decimal string hoặc integer base units 6 decimals; không serialize
+qua JavaScript `number`.
+
+Với từng Unified Balance source deposit, backend quản lý state machine độc lập:
+
+- `awaiting_signature`: chưa nhận transaction hash hợp lệ; UI chỉ hiển thị đang chờ user ký.
+- `submission_uncertain`: wallet/SDK đã được gọi nhưng client không chắc request đã broadcast hoặc
+  không nhận được hash; worker reconcile wallet/provider/source RPC trước khi cho ký lại.
+- `submitted`: transaction hash đã được attach/persist nhưng exact source receipt/log proof chưa
+  hoàn tất; reload chỉ poll/reconcile hash này, không mở signature lại.
+- `onchain_verified`: source RPC xác nhận receipt success và backend verify chính xác canonical
+  source-chain USDC `Transfer` (token, sender, GatewayWallet recipient, amount) cùng GatewayWallet
+  `Deposited` (depositor, token, amount, transaction/log identity).
+- `gateway_finalized`: backend verify Circle-signed `gateway.deposit.finalized`, kiểm tra chữ ký/key
+  hợp lệ và bind đúng source chain, transaction hash, log/deposit identifier. State này vẫn cần exact
+  source on-chain evidence trước khi terminal.
+- `confirmed`: terminal state chỉ sau khi **cả** exact source receipt/log proof và signed
+  `gateway.deposit.finalized` đã bind cùng deposit attempt. Chỉ state này mới được cộng vào
+  server-verified readiness/deposit accounting.
+- `failed`: chỉ dùng khi có deterministic failure đã verify; timeout hoặc client mất response không
+  tự động chuyển sang failed.
+
+Gateway webhook subscription là precondition bắt buộc của Unified Balance source deposit:
+
+- Môi trường test dùng một stable permissionless subscription có `environment = TEST`; endpoint
+  public HTTPS phải xử lý được `HEAD` cho Circle endpoint validation và `POST` cho signed
+  notifications. Subscription chỉ đăng ký đúng event `gateway.deposit.finalized`, không dùng event
+  rộng hơn làm settlement authority.
+- Trước khi tạo source-deposit operation hoặc mở wallet signature, backend phải bảo đảm owner wallet
+  đang kết nối và toàn bộ selected source domains của intent đã nằm trong subscription. Trạng thái
+  này phải được đọc lại từ Circle và remote-verified; local cache/config hoặc response thành công của
+  một write trước đó không đủ. Không đăng ký được hoặc remote state không khớp thì flow fail closed
+  trước khi owner chuyển USDC.
+- Cập nhật address/domain membership là durable serialized reconcile trên desired state để hai
+  funding intent đồng thời không gây lost update. Mỗi lần reconcile phải merge với remote state,
+  persist revision/attempt và verify lại remote state sau write; không dùng read-modify-write
+  không khóa hoặc replace list từ snapshot cũ.
+- Circle giới hạn tối đa **50 registered addresses trên mỗi developer account**. Hệ thống phải theo
+  dõi capacity có giới hạn rõ ràng, reserve slot idempotently trước source deposit và fail closed khi
+  không thể chứng minh còn capacity; không evict một address khác để tạo chỗ một cách tự động.
+- Không tự động remove owner wallet/domain membership khi funding intent kết thúc, timeout hoặc bị
+  thay thế nếu source deposit, delivery, manual attach hoặc `removeFund` recovery vẫn có thể tồn tại.
+  Removal chỉ được phép bởi lifecycle/retention policy riêng sau khi chứng minh không còn active,
+  pending, uncertain hoặc recoverable operation tham chiếu address/domain đó.
+- Circle-signed `gateway.deposit.finalized` nhận tại subscription đã remote-verified vẫn là authority
+  duy nhất cho Gateway finalization. Source RPC proof, client/App Kit result, Gateway balance polling,
+  local subscription state hoặc thao tác đăng ký thành công không được thay thế signed webhook.
+
+`getBalances(includePending: true)`, số dư hiển thị từ client hoặc việc USDC biến mất khỏi wallet
+chỉ là telemetry để render/reconcile nhanh hơn; không phải bằng chứng deposit on-chain hoặc Gateway
+finalization.
+
+CP-12 luôn hydrate active `fundingIntentId` của program từ API thay vì dựa vào local component
+state. Reload, deep link tới edit route hoặc Browser Back không được tự tạo funding intent, burn
+intent hay destination transfer mới. Mỗi program/escrow chỉ có một funding intent active; operation
+đã submitted chỉ được resume/poll/reconcile theo evidence đã lưu.
+
+CP-11 cũng hydrate cùng active intent khi Unified Balance đang ở
+`collecting_deposits | awaiting_confirmed_balance`. `Submit` đầu tiên của route này tạo và khóa
+intent nhưng không navigate; source deposits sau đó luôn bind vào intent đã khóa. Chỉ `Submit` thứ
+hai, khi mỗi selected domain có gateway-finalized balance cover allocation + provider/gas fee
+allocation từ fresh App Kit snapshot đã được server validate/bound/persist và quote còn hạn, mới
+chuyển CP-12 và cho phép bắt đầu `unifiedBalance.spend()`.
+
+Transaction hash/operation ID phải được persist như durable evidence ngay khi wallet/SDK trả về.
+Nếu hash đã tồn tại, reload/recovery chỉ poll receipt và reconcile; UI không được yêu cầu ký lại
+cùng transaction. Khi destination Send/Bridge/Spend deterministic-revert, operation attempt đó là
+terminal `failed` nhưng funding intent và source-deposit evidence vẫn bị khóa/giữ nguyên; retry tạo
+**linked destination operation attempt** cùng intent với idempotency key mới. Funding bổ sung sau một
+intent đã confirmed/cancelled mới tạo intent + key mới; không reopen transaction history cũ. Send
+reverted có thể ký linked attempt mới; Bridge chỉ dùng documented `retryBridge` khi còn original SDK
+result trong cùng session. Reload Bridge/Unified Balance sau source operation phải recovery-required/
+manual original-message recovery, tuyệt đối không chạy lại full bridge/spend.
 
 ### Quyền truy cập
 
@@ -232,6 +399,713 @@ Migration không được biến report content thành public mặc định. `re
 
 Child records đã được report/review tham chiếu phải giữ stable ID. Update program dùng upsert + soft-disable/versioning; không delete-and-recreate scope, impact hoặc reward rows đã có lịch sử. Program `expired` và `closed` vẫn có public read model cho Program Detail/disclosures, trong khi private report tables tiếp tục participant-only.
 
+### Arc integration decision
+
+MVP dùng:
+
+```text
+Versioned BountyEscrow ABI + bytecode artifact
+        ↓ Circle Contracts deployContract
+One custom BountyEscrow contract per program on Arc Testnet
+        ↓
+App Kit routes Send / Bridge / Unified Balance to the escrow address
+        ↓
+Many reward approvals and payouts per escrow
+```
+
+Custom escrow **không phải ERC-20 template**. Foundry vẫn compile/test/audit contract, nhưng
+production deployment đi qua Circle Contracts Smart Contract Platform:
+
+```typescript
+const result = await circleContracts.deployContract({
+  idempotencyKey,
+  name: circleSafeContractName,
+  description: "BountyEscrow program contract",
+  blockchain: "ARC-TESTNET",
+  walletId: circleDeploymentWalletId,
+  abiJson: JSON.stringify(versionedArtifact.abi),
+  bytecode: versionedArtifact.bytecode,
+  constructorParameters: [
+    programKey,
+    ownerWallet,
+    ARC_USDC_ADDRESS,
+    refundUnlockAt,
+    withdrawRecipient,
+  ],
+  fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+});
+```
+
+Circle Contracts trả `contractId` và `transactionId`; đây là operation identifiers, chưa phải bằng
+chứng deployment đã final. Backend phải poll trạng thái, lấy transaction hash/contract address rồi
+verify trực tiếp trên Arc RPC:
+
+- Receipt `status = success` và contract creation address khớp Circle record.
+- Runtime bytecode hash khớp artifact version đã pin.
+- `programKey`, `owner`, `token`, `refundUnlockAt`, `withdrawRecipient` đọc từ contract khớp dữ
+  liệu server.
+- Constructor event `EscrowInitialized` khớp các immutable parameters.
+
+Circle Developer-Controlled Wallet chỉ là deployment origin và trả gas. Constructor phải nhận
+`ownerWallet` tường minh; không dùng `Ownable(msg.sender)` nếu điều đó vô tình trao admin cho Circle
+deployment wallet. Sau deploy, Circle wallet không có payout/withdraw/admin role.
+
+Circle App Kit là lớp funding. Product không dùng Unified Balance cho mọi selection mà derive route
+deterministically từ số source/network owner chọn:
+
+| Selection đã normalize | `routeMode` | App Kit call | Funds path |
+| --- | --- | --- | --- |
+| Chỉ `Arc_Testnet` | `send` | `kit.send()` | Same-chain transfer trực tiếp từ owner wallet tới Arc escrow |
+| Chỉ một source ngoài Arc | `bridge` | `kit.bridge()` | CCTP bridge từ source tới Arc escrow |
+| Từ hai source/network trở lên | `unified_balance` | `kit.unifiedBalance.deposit()` cho từng source, rồi `kit.unifiedBalance.spend()` | Deposit vào Circle Gateway, chờ confirmed combined balance, rồi spend tới Arc escrow |
+
+Routing này bám theo Arc App Kit chính thức: [Send cùng
+chain](https://docs.arc.io/app-kit/quickstarts/send-tokens-same-chain), [Bridge giữa các
+chain](https://docs.arc.io/app-kit/quickstarts/bridge-tokens-across-blockchains) và [Unified Balance
+deposit + spend](https://docs.arc.io/app-kit/quickstarts/unified-balance-deposit-and-spend).
+Unified Balance không phải tên khác của một bridge đơn. Nó là balance đã deposit vào Circle Gateway;
+owner phải chờ confirmed balance rồi ký burn intents/spend để mint/credit ở destination. Explicit
+per-chain allocations phải cộng đúng total spend theo [Arc source-selection
+rules](https://docs.arc.io/app-kit/tutorials/unified-balance/select-source-blockchains).
+
+Product allowlist testnet được chốt đúng bốn lựa chọn trong source dropdown:
+
+| Vai trò | App Kit chain identifier | Network |
+| --- | --- | --- |
+| Source/destination | `Arc_Testnet` | Arc Testnet |
+| Source | `Base_Sepolia` | Base Sepolia |
+| Source | `Arbitrum_Sepolia` | Arbitrum Sepolia |
+| Source | `Ethereum_Sepolia` | Ethereum Sepolia |
+
+Từ “Erc” trong yêu cầu sản phẩm được chuẩn hóa thành **Ethereum Sepolia**. UI và API không dùng
+label mơ hồ `Erc` hoặc map nó sang Arc. Arc Testnet là lựa chọn source thứ tư đồng thời luôn là
+destination cố định của per-program escrow.
+
+Arc cũng có ERC-8183 job reference flow, nhưng không dùng trực tiếp cho MVP này: ERC-8183 mô hình
+một client/provider/evaluator job với một deliverable, trong khi BountyEscrow cần một pool theo
+program, nhiều private report cạnh tranh/duplicate và nhiều payout. Mapping mỗi report thành một
+ERC-8183 job sẽ đổi domain model, tăng transaction count và làm lộ submission metadata. Có thể
+đánh giá lại như interoperability option sau MVP, không thay custom per-program escrow hiện tại.
+
+Signer/custody được tách rõ:
+
+- Backend giữ Circle API key/Entity Secret và dùng Circle Developer-Controlled Wallet để deploy.
+- Owner browser EOA là contract admin được truyền vào constructor và ký reward approval, close,
+  withdraw phần dư.
+- Owner browser EOA dùng `@circle-fin/app-kit` với viem adapter để `send`, `bridge` hoặc
+  deposit/spend Unified Balance theo routing table. UI luôn hiển thị route được derive, không cho
+  owner chọn mode thủ công.
+- Route Unified Balance dùng explicit allocation theo từng source row; SDK automatic allocation
+  không được phép âm thầm thay selection owner đã review.
+- Sau `RewardApproved`, `payReward(reportKey)` nên permissionless vì recipient/amount đã bị khóa;
+  owner, researcher hoặc gas relayer đều chỉ có thể thực thi đúng payment đã approve. Nếu MVP vẫn
+  role-gate payout, phải ghi nhận liveness risk là owner có thể trì hoãn settlement.
+- NestJS không giữ owner private key. Circle credentials chỉ cấp quyền cho deployment wallet, không
+  cho phép backend giả danh owner/admin.
+- Reviewer trong database không tự động có on-chain role. Cấp `PAYOUT_ROLE` cho một wallet khác là
+  hành động security-sensitive, cần flow riêng và audit event.
+- Nếu funding dùng Circle Wallets SCA thay vì browser EOA, phải dùng Unified Balance delegate
+  workflow; SCA deposit dùng `allowanceStrategy: "approve"`. Đây không phải default owner UX.
+
+Package/adapter boundary:
+
+| Runtime | Packages | Trách nhiệm |
+| --- | --- | --- |
+| NestJS backend | `@circle-fin/smart-contract-platform`, `@circle-fin/developer-controlled-wallets` | Deploy custom bytecode, poll Circle IDs, execute permissionless funding sync và reconcile |
+| Next.js owner UI | `@circle-fin/app-kit`, `@circle-fin/adapter-viem-v2`, `viem` | Connect owner browser wallet, estimate và thực thi Send/Bridge hoặc deposit/get balance/spend Unified Balance |
+| Optional backend-custodied funding | `@circle-fin/app-kit`, `@circle-fin/adapter-circle-wallets` | Chỉ dùng nếu source funds thuộc Circle Developer entity; không thể ký thay external owner wallet |
+
+Không đưa Circle Entity Secret vào Next.js public/runtime bundle. Nếu owner dùng external browser
+wallet thì App Kit signing phải chạy qua browser provider; backend Node library chỉ chuẩn bị intent
+và verify, không có quyền ký thay.
+
+### Network, USDC và amount policy
+
+| Network | App Kit ID / Circle ID | Gas token | Funding role |
+| --- | --- | --- | --- |
+| Arc Testnet | `Arc_Testnet` / `ARC-TESTNET` | Native USDC | Send source, Unified Balance source, fixed destination |
+| Base Sepolia | `Base_Sepolia` / `BASE-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
+| Arbitrum Sepolia | `Arbitrum_Sepolia` / `ARB-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
+| Ethereum Sepolia | `Ethereum_Sepolia` / `ETH-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
+
+Arc deployment constants:
+
+| Thuộc tính | Target MVP |
+| --- | --- |
+| Chain ID | `5042002` |
+| RPC baseline | `https://rpc.testnet.arc.io` |
+| Explorer | `https://testnet.arcscan.app` |
+| Circle deployment blockchain | `ARC-TESTNET` |
+| Canonical Arc USDC contract | `0x3600000000000000000000000000000000000000` |
+| USDC token decimals | `6`; vẫn đọc/verify bằng `decimals()` |
+
+Native USDC và ERC-20 USDC trên Arc dùng chung một underlying balance nhưng có hai precision khác
+nhau. Đây không có nghĩa BountyEscrow là ERC-20: contract chỉ tham chiếu canonical USDC bằng
+`IERC20` để đọc pool và payout. Không trộn `address.balance`/`msg.value` 18 decimals với
+`IERC20.balanceOf`/amount 6 decimals.
+
+Frontend/backend phải:
+
+- Chỉ USDC được hỗ trợ trong funding flow; parse/format amount bằng 6 decimals và không dùng
+  JavaScript floating point.
+- Backend allowlist chính xác bốn chain identifiers ở trên và reject mainnet/lookalike values; UI
+  có thể đối chiếu runtime bằng `kit.getSupportedChains(operationType)` nhưng SDK result không thay
+  thế product allowlist. Arc Docs hiện xác nhận cả bốn testnet đều hỗ trợ Send, Bridge và Unified
+  Balance trong [capability matrix](https://docs.arc.io/app-kit/references/supported-blockchains).
+- Backend derive route sau khi normalize/dedupe source: Arc-only → `send`, một non-Arc →
+  `bridge`, từ hai source/network trở lên → `unified_balance`. Route bị khóa trong funding intent;
+  thay đổi selection trước submission phải refresh intent/estimate, còn sau submission không được
+  reroute cùng intent.
+- Hiển thị USDC balance và gas readiness riêng cho từng source chain. Ethereum/Base/Arbitrum cần
+  testnet ETH cho bridge/deposit transaction; Arc dùng cùng underlying USDC cho amount và native
+  gas. Native gas preflight/combined Arc amount+gas check phải hoàn tất trước durable
+  `submission_uncertain`; lỗi preflight giữ attempt ở `awaiting_signature`.
+- Hiển thị `gross amount`, route-specific estimated fees và `estimated net received`; funding
+  projection cuối cùng luôn lấy `netReceivedAmount` đã verify trên Arc. Với Unified Balance,
+  Gateway protocol fee chỉ áp dụng cho phần cross-chain và gas phát sinh theo burn intent; chi tiết
+  bám [Arc Unified Balance fee model](https://docs.arc.io/app-kit/concepts/unified-balance-fees).
+- Route Send/Bridge dùng một `Submit`: chỉ enable khi source wallet cover amount + route-specific
+  gas/fee; action tạo/khóa intent rồi chuyển CP-12.
+- Route Unified Balance dùng hai `Submit` trên CP-11. `Submit` đầu tiên validate source allocations,
+  tạo/khóa intent và mở sequential deposit state nhưng không navigate. `Submit` thứ hai chỉ enable
+  khi từng selected domain có confirmed balance lớn hơn hoặc bằng spend allocation + provider/gas
+  fee allocation của chính domain đó; aggregate và unselected domains chỉ là summary, không bù vào
+  readiness. Pending/on-chain-only balance không bù vào điều kiện này. Ngay trước second Submit,
+  client gọi App Kit bằng connected wallet để
+  refresh quote rồi server validate/bound/persist snapshot gồm `quotedAt`, `expiresAt`; hết hạn thì
+  disable Submit và re-quote. Snapshot này chỉ là advisory readiness evidence, không phải
+  server-issued/provider-authoritative settlement proof. Nếu
+  fee reserve mới khác snapshot đã khóa thì fail closed và cập nhật fresh quote trên cùng locked
+  intent trước destination submission; không spend theo quote cũ.
+  Action mới chuyển CP-12 để bắt đầu destination spend; UI nói rõ actual Arc net có thể khác estimate.
+- Circle Forwarding Service và custom App Kit fee đều disabled trong scope này. Estimate trả
+  non-zero `forwarder` hoặc `kit` fee phải fail closed trước signature; không âm thầm route hoặc
+  trộn fee làm giảm destination mint vào provider/gas source headroom.
+- Chỉ route Unified Balance mới deposit; chờ deposit chuyển từ pending sang confirmed Unified
+  Balance trước khi cho spend. Send và Bridge không tạo Gateway deposit.
+- Mỗi source row dùng một network duy nhất, không cho duplicate network. Tổng source amounts phải
+  bằng gross amount. Ở route Unified Balance, server refresh confirmed Gateway balance theo từng
+  selected source domain/wallet; existing confirmed balance có thể thỏa allocation tương ứng mà
+  không cần current-intent deposit row hoặc bị buộc deposit lại. Pending balance không được tính.
+  Spend allocations luôn giữ tổng bằng gross. Provider/gas fees bắt buộc có App Kit per-chain
+  allocation; non-zero provider/gas fee thiếu allocation phải fail closed, không tự gán sang chain
+  đầu tiên.
+  Server tính exact deposit còn thiếu từ allocation + bounded fee allocation trừ confirmed Gateway
+  balance. Vì vậy durable `sourceDeposit.amount` có thể lớn hơn allocation row
+  và web phải ký đúng amount server trả về, hiển thị phần deposit/top-up riêng, không sửa spend
+  allocation. Nếu quote tăng sau một deposit confirmed, tạo top-up attempt mới cùng network/intent;
+  không rewrite hoặc replay attempt cũ.
+- Không đếm cả ERC-20 `Transfer` log 6 decimals và native system `Transfer` log 18 decimals cho
+  cùng một movement. Pool accounting ưu tiên event riêng của BountyEscrow và kiểm tra chéo ERC-20
+  balance.
+- Destination/recipient trong `send`, `bridge` hoặc `unifiedBalance.spend` luôn là verified escrow
+  address; UI không cho owner sửa hoặc paste địa chỉ đích.
+- Cả ba route chuyển USDC tới địa chỉ escrow nhưng không gọi một ABI funding function của escrow.
+  Contract phải hỗ trợ direct token credit bằng balance reconciliation; không yêu cầu
+  `approve(escrow)` hoặc `fund(amount)` ở Arc trong primary flow.
+- Gateway mint/credit không hỗ trợ arbitrary `fundProgram` callback. MVP vì vậy giữ chiến lược
+  **một escrow address cho mỗi program**, khóa một active funding intent trên escrow, verify exact
+  route destination receipt/event rồi reconcile lifetime accounting để attribution không mơ hồ.
+- Chỉ cho một destination transfer/reconciliation active trên mỗi escrow để funding intent và
+  destination evidence không bị attribution chéo. Source deposits của Unified Balance có thể tiếp
+  tục độc lập. Pre/post live balance chỉ là telemetry/cross-check và không phải attribution proof,
+  vì permissionless payout có thể thay đổi balance giữa destination transfer và reconciliation.
+- Sau khi một funding intent đã `confirmed`, `expired`, `cancelled` hoặc unrecoverable terminal,
+  mọi lần Add funds/late funding phải tạo intent mới và idempotency key mới. Destination revert có
+  thể retry bằng linked operation attempt trong cùng locked intent. Existing confirmed Gateway
+  balance có thể được reuse làm nguồn, nhưng không được rewrite accounting hoặc transaction history.
+- Không có payable `receive` funding path và không dùng native `msg.value`.
+
+Trước khi bật production flow, integration test bắt buộc phải deploy artifact qua Circle Contracts
+và chạy đủ route-path test: Arc-only Send; từng Ethereum/Arbitrum/Base Bridge; ít nhất một
+multi-source Unified Balance case gồm hai network. Test chỉ pass khi Arc receipt cho thấy exact
+canonical USDC destination event đã credit deployed BountyEscrow, `syncExternalFunding()` đưa
+lifetime `totalFunded` lên ít nhất threshold trước sync + attributed destination amount và retry
+không double-count. Phải có regression trong đó permissionless payout chạy giữa destination
+transfer và sync; funding vẫn reconcile đúng dù optional live-balance telemetry trước/sau không
+khớp destination amount.
+
+### Dữ liệu nên lưu trong BountyEscrow
+
+Contract chỉ giữ dữ liệu cần để enforce escrow invariant. Không mirror toàn bộ Program database.
+
+| On-chain state | Kiểu gợi ý | Lý do |
+| --- | --- | --- |
+| `programKey` | immutable `bytes32` | Domain-separated hash của canonical program UUID; bind contract với program |
+| `token` | immutable `IERC20` | Khóa escrow vào canonical Arc USDC ERC-20 |
+| Admin/owner role | `DEFAULT_ADMIN_ROLE` | Quản lý role; production nên hỗ trợ chuyển sang multisig |
+| Reward approver role | `PAYOUT_ROLE` | Chỉ wallet được cấp quyền mới tạo immutable reward approval; execution có thể permissionless |
+| `refundUnlockAt` | `uint64` hoặc `uint256` | Server-derived bằng chính xác `program.deadline`; client không được nhập/override; thiếu deadline thì deploy fail closed |
+| `withdrawRecipient` | immutable `address` | Đích nhận phần dư đã khóa khi deploy; mặc định owner hoặc treasury đã review |
+| `closed` | `bool` | Lifecycle on-chain tối thiểu; không mirror mọi status của app |
+| `totalFunded` | `uint256` | Lifetime USDC inflow đã reconcile, gồm Send/Bridge/Unified Balance direct credits |
+| `totalPaid` | `uint256` | Audit accounting và invariant |
+| `totalWithdrawn` | `uint256` | Audit phần dư owner đã withdraw sau khi program kết thúc |
+| `totalApprovedOutstanding` | `uint256` | Không approve vượt available balance và không withdraw reward đã reserve |
+| `rewards[reportKey]` | mapping | Snapshot recipient, amount, approved content hash và `Approved/Paid` |
+
+Canonical keys phải được tạo duy nhất ở backend/shared package:
+
+```text
+programKey = keccak256(
+  abi.encode("BBE_PROGRAM_V1", chainId, platformNamespace, canonicalProgramUuidBytes)
+)
+reportKey = keccak256(
+  abi.encode("BBE_REPORT_V1", programKey, canonicalReportUuidBytes)
+)
+```
+
+Không hash bằng string concatenation mơ hồ. Raw UUID vẫn ở database; public chain chỉ cần
+domain-separated key. `chainId` và `programKey` ngăn cùng UUID tạo key trùng khi mở rộng sang
+network/program khác. Uniqueness của deployment được enforce bởi unique database constraint +
+Circle idempotency key; không dựa vào browser hoặc contract address do client gửi.
+
+`approvedContentHash` là hash của canonical report snapshot mà human reviewer đã approve, không
+phải raw report content. Hash được commit ở reward-approval time thay vì lúc submit để giảm việc
+lộ timing/metadata của mọi private submission. Nếu report trải qua `needs_information`, hash phải
+đại diện cho version cuối được review.
+
+Để giảm khả năng đoán nội dung từ hash của một report ngắn/dễ đoán, dùng commitment có salt:
+
+```text
+approvedContentHash = keccak256(
+  abi.encode(
+    "BBE_REPORT_CONTENT_V1",
+    reportKey,
+    canonicalizationVersion,
+    canonicalApprovedSnapshotBytes,
+    random32ByteSalt
+  )
+)
+```
+
+Salt và canonicalization version nằm trong private review metadata, không phát lên chain cùng
+approval. Chỉ reveal salt nếu sau này cần chứng minh một public disclosure khớp snapshot đã approve.
+
+Reward mapping tối thiểu:
+
+```solidity
+enum RewardStatus {
+    None,
+    Approved,
+    Paid
+}
+
+struct Reward {
+    bytes32 approvedContentHash;
+    address researcher;
+    uint128 amount;
+    RewardStatus status;
+}
+```
+
+Không cho silent overwrite một approval. Cancel/reapprove nếu được thêm sau MVP phải là transition
+riêng, có event và không được áp dụng sau payout.
+
+### Escrow invariants bắt buộc
+
+1. Constructor reject zero address, sai canonical Arc USDC, invalid program key và invalid lock.
+2. Constructor trao admin/approver cho `owner` parameter, không cho Circle deployment wallet theo
+   `msg.sender`.
+3. `availableBalance()` dựa trên `token.balanceOf(address(this)) -
+   totalApprovedOutstanding`, không dựa trên App Kit payload hoặc database snapshot.
+4. Send, Bridge và Unified Balance đều có thể chuyển USDC trực tiếp tới escrow mà không gọi
+   contract. Hàm
+   `syncExternalFunding()` permissionless tính:
+
+   ```text
+   observedLifetimeInflow =
+     token.balanceOf(escrow) + totalPaid + totalWithdrawn
+
+   newlyObserved = observedLifetimeInflow - totalFunded
+   ```
+
+   Chỉ emit/increment khi `newlyObserved > 0`; gọi lại không được double-count. Backend gọi sync
+   sau khi destination transfer final và serialize một reconciliation per escrow.
+5. Reward chỉ được approve khi:
+   - caller có `PAYOUT_ROLE`;
+   - report chưa từng được approve/paid;
+   - researcher khác zero address;
+   - amount lớn hơn 0;
+   - `amount <= tokenBalance - totalApprovedOutstanding`.
+6. `payReward` chỉ chuyển đúng recipient/amount đã snapshot ở approval; target khuyến nghị
+   permissionless execution sau approval để không phụ thuộc owner ký lần hai.
+7. Report không thể payout hai lần.
+8. `totalApprovedOutstanding <= token.balanceOf(address(this))`; payout/withdraw không được dựa vào
+   database snapshot hoặc `totalFunded` cũ hơn current balance.
+9. `withdrawRemaining(uint256 expectedAmount)` chỉ được thực hiện bởi locked owner khi escrow đã `closed`,
+   `block.timestamp >= refundUnlockAt` và `totalApprovedOutstanding == 0`.
+   `close()` cũng chỉ dành cho authorized admin, chỉ được gọi khi
+   `block.timestamp >= refundUnlockAt`, là transition một chiều và gọi lại không được mở escrow
+   hoặc reset accounting. Boundary này ngăn owner đóng escrow sớm để chặn approvals trong khi
+   program vẫn active.
+10. Backend derive `refundUnlockAt = program.deadline` chính xác. Client không có field hoặc API
+    override; program thiếu deadline thì deploy fail closed. Trong flow này lock không được chỉnh
+    độc lập khỏi deadline sau deploy. Sau khi escrow đã confirmed, backend block mọi thay đổi
+    `program.deadline` nếu chưa có verified on-chain extend flow. Nếu extension được hỗ trợ sau MVP,
+    phải tăng lock on-chain trước, verify final receipt/state, rồi mới cập nhật deadline projection;
+    không được rút ngắn deadline hoặc chỉ sửa database.
+11. Dùng `SafeERC20`, `ReentrancyGuard` và checks-effects-interactions.
+12. Transfer tới zero/blocklisted address có thể revert trên Arc; state không được đánh dấu paid
+    hoặc withdrawn trước receipt success.
+13. Không dùng `SELFDESTRUCT`, native sweep hoặc wrapped-USDC logic.
+14. Recipient của `withdrawRemaining(expectedAmount)` là immutable `withdrawRecipient`, không lấy
+    địa chỉ hoặc amount tùy ý từ browser input. `expectedAmount` lấy từ server-verified withdrawal
+    intent snapshot theo 6-decimal canonical USDC; contract require live balance ít nhất bằng
+    snapshot rồi chỉ chuyển đúng snapshot. Late USDC vượt snapshot ở lại escrow cho scan + intent
+    mới. Effect cập nhật trước interaction và cùng intent/transaction không thể double-withdraw.
+
+`syncExternalFunding()` chỉ ghi nhận tổng inflow; không chứng minh source chain hoặc depositor. Các
+App Kit route, send/bridge/deposit/spend identifiers, source allocation và phí nằm ở database. Một
+người thứ ba gửi USDC trực tiếp tới escrow vẫn làm tăng pool thật, nhưng không được gắn attribution
+“owner funded” nếu không khớp funding intent đã verify.
+
+Accounting dùng integer base units và đối soát chính xác theo từng intent:
+
+```text
+netReceivedBaseUnits = exact canonical Arc USDC destination Transfer/route-event amount
+minimumTotalFundedBaseUnits = totalFundedBefore + netReceivedBaseUnits
+totalFundedAfter >= minimumTotalFundedBaseUnits
+availableUnreservedBaseUnits = canonicalArcUsdcBalance - totalApprovedOutstanding
+```
+
+Không suy ra `netReceived` bằng `gross - estimatedFee`, không dùng
+`postArcUsdcBalance - preArcUsdcBalance` làm amount/acceptance invariant, không cộng lại cumulative
+balance như một delta mới và không round qua decimal UI. Pre/post balance có thể persist để
+telemetry/cross-check nhưng payout hoặc withdrawal hợp lệ chạy đồng thời có thể làm delta khác
+destination amount. `totalFunded`, `totalPaid`, `totalWithdrawn`, outstanding và canonical Arc USDC
+balance phải thỏa lifetime invariant trước khi CP-13 hoặc withdrawal được xác nhận.
+
+CP-10 hiển thị read-only `Escrow fund lock until` do server derive bằng chính xác public submission
+deadline. Browser không gửi hoặc chỉnh giá trị này. Nếu program không có deadline, deployment bị
+fail closed và owner phải quay lại Overview để đặt deadline trước khi deploy.
+
+### Dữ liệu tuyệt đối không lưu on-chain
+
+- Program name, slug, summary, description, website, logo, tags và resources.
+- Scope URLs, smart-contract targets, impact catalog, reward-policy text và prohibited activities.
+- Raw report UUID, title, vulnerability description, PoC, comments, attachments hoặc signed URLs.
+- Researcher account/profile identity; chỉ payout wallet xuất hiện khi reward được approve.
+- Reviewer profile/assignment, AI triage output hoặc private review notes.
+- Disclosure body hoặc Known Issues content.
+- Full application status machine (`draft`, `awaiting_funding`, `active`, `paused`, `expired`,
+  `closed`); chain chỉ cần state bảo vệ tiền.
+
+On-chain payout amount, payout wallet, report key/hash, transaction timing và events là dữ liệu
+public. UI reward approval phải nói rõ metadata thanh toán sẽ công khai dù vulnerability body vẫn
+private.
+
+### Contract interface target
+
+Interface hiện trong `PROJECT_CONTEXT.md` cần được mở rộng để phản ánh approval/reservation và
+close invariant:
+
+```solidity
+interface IBountyEscrow {
+    event EscrowInitialized(
+        bytes32 programKey,
+        address owner,
+        address token,
+        uint256 refundUnlockAt,
+        address withdrawRecipient
+    );
+
+    function syncExternalFunding() external returns (uint256 newlyObserved);
+
+    function approveReward(
+        bytes32 reportKey,
+        bytes32 approvedContentHash,
+        address researcher,
+        uint256 amount
+    ) external;
+
+    function payReward(bytes32 reportKey) external;
+
+    function close() external;
+    function withdrawRemaining(uint256 expectedAmount) external returns (uint256 amount);
+
+    function totalFunded() external view returns (uint256);
+    function availableBalance() external view returns (uint256);
+    function approvedOutstanding() external view returns (uint256);
+    function isReportPaid(bytes32 reportKey) external view returns (bool);
+}
+```
+
+Contract constructor thực tế nhận `programKey`, `owner`, canonical Arc USDC, `refundUnlockAt` và
+locked `withdrawRecipient`. Tên legacy `refundRemaining()` trong prototype cũ phải migrate rõ sang
+ABI canonical `withdrawRemaining(uint256 expectedAmount)`; frontend phải encode exact intent
+snapshot, còn indexer/event verification không được hỗ trợ hai tên hoặc no-arg ABI mơ hồ song song.
+Implementation/ABI/bytecode phải lấy từ compiled artifact đã version/pin checksum,
+không viết tay trong frontend hoặc lấy từ request của owner.
+
+### Events và source of truth
+
+```solidity
+event EscrowInitialized(
+    bytes32 indexed programKey,
+    address indexed owner,
+    address indexed token,
+    uint256 refundUnlockAt,
+    address withdrawRecipient
+);
+
+event ExternalFundingSynced(
+    address indexed actor,
+    uint256 newlyObserved,
+    uint256 totalFunded
+);
+
+event RewardApproved(
+    bytes32 indexed reportKey,
+    bytes32 indexed approvedContentHash,
+    address indexed researcher,
+    uint256 amount
+);
+
+event RewardPaid(
+    bytes32 indexed reportKey,
+    address indexed researcher,
+    uint256 amount
+);
+
+event EscrowClosed(address indexed actor);
+
+event RemainingFundsWithdrawn(
+    address indexed recipient,
+    uint256 amount
+);
+```
+
+NestJS/event worker chỉ ghi confirmed chain effects khi receipt:
+
+- Có đúng `chainId`.
+- `status = success`.
+- Deployment xuất phát từ Circle deployment wallet đã config; interaction gửi tới đúng escrow.
+- Có event signature/contract address đúng ABI/config.
+- Event bind đúng `programKey`, `reportKey`, token, owner/recipient và amount đã verify.
+- Chưa từng được consume theo unique key `chainId + transactionHash + logIndex`.
+
+Đối với mọi route, App Kit result chỉ là hint. Worker phải verify exact destination transaction/
+receipt event credit đúng escrow, canonical USDC và lấy `netReceivedAmount` từ event amount. Sau
+`syncExternalFunding()`, worker verify lifetime `totalFunded` đạt threshold của intent; live balance
+chỉ là cross-check. Không suy ra success chỉ từ SDK trả `SendResult`, `BridgeResult`, `SpendResult`
+hoặc source deposit đã confirmed.
+
+### Database projection cần giữ
+
+Program/product data vẫn là source of truth trong PostgreSQL. Chain records là evidence và
+financial enforcement:
+
+| Storage | Fields target |
+| --- | --- |
+| `programs` | Product status, policies và derived pool snapshot |
+| `escrow_contracts` | `program_id`, `program_key`, `chain_id`, `contract_address`, `contract_version`, ABI/bytecode checksum, `token_address`, `token_decimals`, `owner_wallet`, `withdraw_recipient`, `refund_unlock_at`, Circle `contract_id`, Circle `transaction_id`, deployment wallet ID reference, deploy idempotency key, deployment tx/block/status, `last_synced_block` |
+| `funding_intents` | `program_id`, derived `route_mode`, CP-11 phase (`review`/`collecting_deposits`/`ready_for_destination`), gross amount/base units, server-validated App Kit fee snapshot/reserve/quoted-at/expires-at, exact four-chain allowlist, requested sources/allocations, destination chain/address, durable operation status, expiry, creator, idempotency key, optional `replaces_intent_id`/`replaced_by_intent_id` |
+| `funding_operations` | Funding intent + route, send/bridge/deposit/spend tx hashes, optional `traceId`/`transferId`, returned steps/allocations, source chain/address, requested/deposited/allocated amounts, source deposit state (`awaiting_signature`/`submission_uncertain`/`submitted`/`onchain_verified`/`gateway_finalized`/`confirmed`/`failed`), exact source receipt + canonical USDC `Transfer` + GatewayWallet `Deposited` identities, signed `gateway.deposit.finalized` reference, exact fee base units, exact destination receipt/log-derived `net_received_base_units`, optional pre/post canonical Arc USDC telemetry và timestamps; client/provider payload chỉ lưu bounded reference, không làm authority |
+| `funding_confirmation_artifacts` | Canonical CP-13 snapshot: funding intent/version, escrow artifact version/checksum, canonical Arc USDC address/decimals, exact destination tx/log evidence, gross/fee/net base units, pre-sync and post-sync lifetime `totalFunded` threshold/evidence, total paid/withdrawn/outstanding/available values, optional live-balance telemetry và reconciliation timestamp |
+| `withdrawal_intents` | Program/escrow, Arc chain, locked recipient, amount base units, close/withdraw tx hashes, status, idempotency key, optional replacement linkage, failure code và reconciliation timestamps |
+| `escrow_transactions` | `program_id`, optional `report_id`/funding intent, escrow ID, Arc chain ID, tx hash, log index, type (`deployment`, `funding_sync`, `payout`, `withdraw_remaining`), status, token, net amount, from/to, block number/hash, failure code, timestamps |
+| `reports` / `report_reviews` | Private report, final review, reward calculation snapshot, content-commitment salt/version và settlement state |
+| `audit_logs` | Actor, API decision, intent creation, receipt reconciliation; không chứa report body/private key |
+
+Schema hiện tại chưa có Circle IDs, artifact checksum, funding intent hoặc App Kit operation
+projection; real Arc milestone phải migration trước khi thay mock deploy/fund. Không lưu raw Entity
+Secret/API key trong database. Cột `confirmations` trong `escrow_transactions` không được dùng để
+dựng multi-confirmation UX trên Arc.
+
+Arc có deterministic finality: transaction chỉ `unconfirmed` hoặc `final`, không có confirmation
+window/reorg sau commit. Mapping application:
+
+```text
+Circle deploy accepted          → pending
+Circle transaction + no receipt → pending/unconfirmed
+Arc receipt status success      → confirmed/final
+Arc receipt status reverted     → operation attempt failed terminal; funding destination retry dùng linked attempt/key trong same locked intent
+no receipt before timeout       → timeout, nhưng reconciliation tiếp tục theo Circle/hash IDs
+```
+
+Không hiển thị `1/12 confirmations`. Sau receipt final có thể cập nhật database, notification và
+readiness checklist ngay.
+
+Khi transaction hash đã được lưu, `pending`, `timeout`, reload hoặc reconnect đều đi qua
+hash-first recovery: poll canonical Arc/source receipt rồi reconcile, không mở lại wallet signature.
+Chỉ trạng thái chưa từng trả hash và chưa vượt submission boundary mới có thể prompt đúng signature
+step hiện tại. Replacement intent phải liên kết intent cũ và không xóa revert/timeout evidence.
+
+### End-to-end Arc contract flow
+
+```mermaid
+sequenceDiagram
+  actor Owner
+  participant Web as Next.js + owner wallet
+  participant API as NestJS API
+  participant DB as PostgreSQL
+  participant Circle as Circle Contracts
+  participant GW as App Kit / Circle Gateway
+  participant Escrow as BountyEscrow
+  participant Arc as Arc RPC
+
+  Owner->>Web: Create program draft
+  Web->>API: POST /api/programs
+  API->>DB: Save private draft and child records
+  DB-->>API: Program UUID
+  API-->>Web: Draft
+
+  Owner->>Web: Connect wallet and confirm admin/withdraw recipient
+  Web->>API: Deploy escrow(owner, withdrawRecipient)
+  API->>API: Require deadline; set refundUnlockAt = program.deadline
+  API->>Circle: deployContract(ABI, bytecode, ARC-TESTNET, constructor args)
+  Circle-->>API: contractId + transactionId
+  API-->>Web: Deployment pending
+  API->>Circle: Poll deployment
+  API->>Arc: Verify receipt, runtime bytecode and immutables
+  API->>DB: Persist verified escrow address and Circle evidence
+
+  Owner->>Web: CP-11 connect/change wallet
+  Owner->>Web: Add rows: network + amount
+  Note over Web: Ethereum / Arbitrum / Base / Arc testnets only
+  alt Only Arc_Testnet selected
+    Note over Web,GW: routeMode=send; no Gateway deposit
+    Owner->>Web: Submit when Arc USDC + gas are ready
+    Web->>API: Create and lock Send funding intent
+    API-->>Web: Intent + Arc_Testnet + verified escrow recipient
+  else One non-Arc source selected
+    Note over Web,GW: routeMode=bridge; no Gateway deposit
+    Owner->>Web: Submit when source USDC + gas are ready
+    Web->>API: Create and lock Bridge funding intent
+    API-->>Web: Intent + Arc_Testnet + verified escrow recipient
+  else Two or more sources selected
+    Note over Web,GW: routeMode=unified_balance
+    Owner->>Web: First Submit after allocations review
+    Web->>API: Create and lock Unified Balance funding intent
+    API-->>Web: collecting_deposits; remain on CP-11
+    loop One source at a time; wallet prompt count is SDK-dependent
+      Web->>GW: switch chain + unifiedBalance.deposit selected USDC
+      GW-->>Web: Deposit submitted/pending
+      Web->>API: Persist deposit hash/operation evidence
+      API->>API: Source RPC receipt + canonical USDC Transfer + GatewayWallet Deposited
+      API->>GW: Verify signed gateway.deposit.finalized
+      GW-->>API: gateway_finalized or continue reconciliation
+      Web->>GW: getBalances(testnet, includePending=true) for display telemetry
+    end
+    Web->>GW: Refresh App Kit fee quote with connected wallet
+    Web->>API: Persist quote snapshot before second Submit
+    API-->>Web: Validated, bounded, unexpired advisory fee reserve
+    Owner->>Web: Second Submit when every selected domain covers allocation + source fee allocation
+  end
+  Web-->>Owner: Navigate to CP-12 Funding pending
+  alt routeMode=send
+    Web->>GW: estimateSend + send to Arc_Testnet escrow
+  else routeMode=bridge
+    Web->>GW: bridge source to Arc_Testnet escrow
+    Note over Web,GW: approve/burn/fetchAttestation/mint as returned
+  else routeMode=unified_balance
+    Web->>GW: unifiedBalance.spend(explicit allocations)
+    Note over Web,GW: build/sign burn intents, attestation and mint as returned
+  end
+  GW-->>Web: Destination operation + transaction
+  Web->>API: Observe App Kit result
+  API->>Arc: Verify exact canonical USDC destination receipt/event at escrow
+  API->>Circle: Execute permissionless syncExternalFunding()
+  Circle->>Escrow: Contract execution transaction
+  API->>Arc: Verify lifetime totalFunded threshold and accounting invariants
+  API->>DB: Persist source evidence, actual Arc net and available pool
+  Web-->>Owner: CP-13 Rewards funded
+
+  Owner->>Web: Publish when readiness checks pass
+  Web->>API: POST /api/programs/:id/publish
+  API->>DB: Verify draft + escrow + funding + coverage
+  DB-->>Web: Active program
+```
+
+Reward lifecycle sau create/fund:
+
+```text
+Researcher submits private report
+  → no on-chain write
+Human validates and chooses final reward
+  → database atomically reserves amount and creates settlement intent
+Owner signs approveReward(reportKey, approvedContentHash, researcher, amount)
+  → final RewardApproved event
+Owner, researcher or relayer calls payReward(reportKey)
+  → payment_pending while unconfirmed
+  → final RewardPaid event
+  → database moves reserved → paid and report becomes paid
+```
+
+Nếu approval transaction bị reject/revert/timeout, report chưa được chuyển sang
+`reward_approved`; reservation/intent phải được retry hoặc released bằng atomic server workflow.
+Nếu payout bị revert, report giữ `reward_approved`, không chuyển `paid`.
+
+Owner withdrawal sau program end là một management flow riêng, không nối thẳng từ CP-13:
+
+```mermaid
+sequenceDiagram
+  actor Owner
+  participant Web as Owner program management
+  participant API as NestJS API
+  participant Escrow as BountyEscrow on Arc
+  participant DB as PostgreSQL
+
+  Owner->>Web: EW-01 Open escrow management
+  Web->>API: Load closed/expired, unlock, outstanding, Arc balance
+  API-->>Web: Eligibility + locked withdraw recipient
+  Owner->>Web: Withdraw remaining funds
+  Web-->>Owner: EW-02 Review Arc Testnet transaction
+  Owner->>Escrow: close() if needed, then withdrawRemaining(intent.expectedAmount)
+  Escrow-->>Web: RemainingFundsWithdrawn(recipient, amount)
+  Web->>API: Observe transaction evidence
+  API->>Escrow: Verify receipt/event/exact amount + totalWithdrawn delta
+  API->>DB: Persist idempotent withdrawal projection
+  API-->>Web: EW-03 Remaining funds withdrawn
+```
+
+UI chỉ enable action khi program đã expired/closed theo product state, on-chain escrow đã/được
+đóng, `block.timestamp >= refundUnlockAt`, `totalApprovedOutstanding == 0` và recipient khớp
+immutable `withdrawRecipient`. Nếu `close()` và `withdrawRemaining(expectedAmount)` cần hai
+transaction, UI yêu
+cầu owner ký tuần tự trên Arc Testnet và không hứa số signature cố định. Receipt/event phải được
+verify trước success. Đây là **escrow withdrawal**, không phải Gateway `removeFund`; `removeFund`
+chỉ là trustless recovery của tiền còn trong Unified Balance và có lifecycle riêng.
+
+### Publish funding rule
+
+Để claim `Guaranteed Escrow` có nghĩa kiểm chứng được, readiness không chỉ kiểm tra pool lớn hơn
+0 hoặc raw token balance. Publish phải dùng canonical Arc state đã reconcile:
+
+```text
+available_pool = canonicalArcUsdcBalance - totalApprovedOutstanding
+available_pool >= max_bounty
+```
+
+Actual Arc net và `available_pool` là authority cho accounting/collateralization; client fee quote,
+estimated net hoặc client balance chỉ là telemetry. Nếu product chấp nhận pool thấp hơn `max_bounty`,
+UI/public detail phải nói rõ reward nào chưa được
+fully collateralized và không dùng claim guaranteed cho tier đó. MVP nên chọn rule đầu tiên để
+giữ product promise đơn giản.
+
+### Arc Docs references
+
+- [Connect to Arc](https://docs.arc.io/arc/references/connect-to-arc)
+- [Deploy contracts on Arc with Circle Contracts](https://docs.arc.io/arc/tutorials/deploy-contracts)
+- [Interact with contracts on Arc](https://docs.arc.io/arc/tutorials/interact-with-contracts)
+- [Circle Contracts custom bytecode deployment](https://developers.circle.com/contracts/scp-deploy-smart-contract)
+- [Circle Contracts deploy API](https://developers.circle.com/api-reference/contracts/smart-contract-platform/deploy-contract)
+- [Arc contract addresses](https://docs.arc.io/arc/references/contract-addresses)
+- [Stablecoin-native model](https://docs.arc.io/arc/concepts/stablecoin-native-model)
+- [USDC system events](https://docs.arc.io/arc/references/usdc-system-events)
+- [Gas and fees](https://docs.arc.io/arc/references/gas-and-fees)
+- [Deterministic finality](https://docs.arc.io/arc/concepts/deterministic-finality)
+- [ERC-8183 job lifecycle reference](https://docs.arc.io/arc/tutorials/create-your-first-erc-8183-job)
+- [App Kit same-chain Send quickstart](https://docs.arc.io/app-kit/quickstarts/send-tokens-same-chain)
+- [App Kit cross-chain Bridge quickstart](https://docs.arc.io/app-kit/quickstarts/bridge-tokens-across-blockchains)
+- [Unified Balance overview](https://docs.arc.io/app-kit/unified-balance)
+- [Unified Balance deposit and spend quickstart](https://docs.arc.io/app-kit/quickstarts/unified-balance-deposit-and-spend)
+- [Select Unified Balance source blockchains](https://docs.arc.io/app-kit/tutorials/unified-balance/select-source-blockchains)
+- [Unified Balance fee and funds-flow model](https://docs.arc.io/app-kit/concepts/unified-balance-fees)
+- [Supported App Kit blockchains](https://docs.arc.io/app-kit/references/supported-blockchains)
+- [App Kit adapter setups](https://docs.arc.io/app-kit/tutorials/adapter-setups)
+
 ## 4. Nguyên tắc UX
 
 1. Dùng stepper 7 bước để thể hiện trọn hành trình: Overview, Scope, Impacts, Rewards, Rules, Review và Fund rewards.
@@ -296,10 +1170,22 @@ flowchart LR
   DR -->|Invalid| DRV[CP-03RV Rules validation]
   E -->|Save draft| F[CP-05 Saving]
   F -->|201 success| G[CP-06 Draft created / edit]
-  G -->|Deploy escrow| J[CP-10 Deploying escrow]
-  J -->|Contract ready| K[CP-11 Fund rewards]
-  K -->|Confirm transfer| L[CP-12 Funding pending]
-  L -->|USDC funded| M[CP-13 Rewards funded]
+  G -->|Deploy escrow| W[CP-10 Confirm owner wallet]
+  W -->|Owner address valid| J[CP-10A Review Circle deployment]
+  J -->|Confirm deploy| JP[CP-10B Circle deployment pending]
+  JP -->|Final receipt + EscrowInitialized valid| K[CP-11 Fund rewards]
+  K -->|Arc only: derive Send| KS[Route summary: Send]
+  K -->|One non-Arc: derive Bridge| KB[Route summary: Bridge]
+  K -->|Two or more: first Submit locks intent| KU[CP-11 Unified Balance deposits]
+  KU -->|Deposit one source; pending/confirmed| KU
+  KS -->|Arc wallet ready; Submit| L[CP-12 Funding pending]
+  KB -->|Source wallet ready; Submit| L
+  KU -->|Each selected domain covers allocation + provider/gas fees; second Submit| L
+  L -->|Arc net USDC verified + DB reconciled| M[CP-13 Rewards funded]
+  W -->|No wallet / account changed| WE[CP-10E Wallet recovery]
+  JP -->|Circle/API/revert/timeout| DE[CP-10C Deployment recovery]
+  L -->|Before destination operation submission; Back| K
+  L -->|Recoverable failure| L
   F -->|API or network error| H[CP-07 Save error]
   H -->|Try again, same payload| F
   B -->|Cancel with dirty form| I[CP-08 Discard dialog]
@@ -310,6 +1196,9 @@ flowchart LR
   E -->|Cancel with dirty form| I
   I -->|Discard| A
   I -->|Keep editing| previous[Return to current step]
+  M -.->|Program later expired/closed| EW1[EW-01 Escrow management]
+  EW1 -->|Eligible; review| EW2[EW-02 Withdraw remaining dialog]
+  EW2 -->|Final Arc receipt/event| EW3[EW-03 Remaining funds withdrawn]
 ```
 
 ## 7. Screen inventory
@@ -334,10 +1223,17 @@ flowchart LR
 | CP-07 | Save error | Mutation error | Retry giữ nguyên payload |
 | CP-08 | Discard changes | Confirmation dialog | Ngăn mất dữ liệu ngoài ý muốn |
 | CP-09 | Wrong role | Safe forbidden | Bảo vệ owner-only route |
-| CP-10 | Deploying escrow | Deploy mutation pending | Tạo escrow contract cho program đã có ID |
-| CP-11 | Fund rewards | Fund form | Chọn số USDC chuyển vào escrow |
-| CP-12 | Funding pending | Fund mutation pending | Chờ giao dịch funding được xác nhận |
-| CP-13 | Rewards funded | Funding success | Xác nhận pool và chuẩn bị publish |
+| CP-10 | Confirm owner wallet | Wallet state | Chọn địa chỉ nhận admin role; không dùng wallet này để deploy |
+| CP-10A | Review Circle deployment | Pre-deploy review | Review owner, artifact, token, program key và refund lock |
+| CP-10B | Circle deployment pending | Backend operation pending | Chờ Circle Contracts và verify `EscrowInitialized` trên Arc |
+| CP-10C | Deployment recovery | API/reverted/timeout | Pre-submit retry dùng same key; deterministic revert dùng linked replacement deployment intent/key |
+| CP-10E | Wallet recovery | No wallet/account changed | Reconnect và review lại địa chỉ admin |
+| CP-11 | Fund rewards workspace | Single page + inline states | Derive route; Send/Bridge single Submit, Unified first Submit khóa intent rồi deposit tuần tự và second Submit khi confirmed đủ |
+| CP-12 | Funding pending | Funding operation state dưới `/owner/programs/:id/edit` | Durable route-specific progress và recovery, verify escrow và DB reconciliation |
+| CP-13 | Rewards funded | Funding success | Canonical escrow artifact/Arc USDC, exact accounting, pool readiness và publish handoff |
+| EW-01 | Escrow management | Owner program management, post-program | Kiểm tra điều kiện withdraw phần dư |
+| EW-02 | Withdraw remaining | Confirmation/progress dialog | Ký Arc transaction tuần tự và verify receipt/event |
+| EW-03 | Remaining funds withdrawn | Management success state | Xác nhận amount/recipient/Arc evidence |
 
 ## 8. Chi tiết màn hình
 
@@ -753,12 +1649,16 @@ Primary next action:
 Deploy escrow
 ```
 
+CTA mở CP-10 để connect owner wallet và review immutable deployment parameters; không deploy trực
+tiếp từ click đầu tiên.
+
 Secondary actions:
 
 - `Edit program`.
 - `Back to programs`.
 
-`Deploy escrow` chuyển sang CP-10. Program phải được tạo thành draft trước vì API deploy và fund đều yêu cầu program ID.
+`Deploy escrow` chuyển sang CP-10. Program phải được tạo thành draft trước vì API cần program UUID
+để tạo canonical `programKey`; deploy/fund không nhận slug hoặc client-generated key.
 
 ### CP-07 — Save error
 
@@ -811,42 +1711,469 @@ Your account does not have Program owner access.
 
 Không render form create program phía sau forbidden state.
 
-### CP-10 — Deploying escrow
+### CP-10 — Confirm owner wallet
 
-- Stepper: Overview, Scope, Rewards và Review completed; Fund rewards current.
-- Heading: `Preparing program escrow…`.
-- Hiển thị program name, network `Arc testnet`, token `USDC` và trạng thái `Deploying contract`.
-- Khoá navigation/action trong lúc mutation pending.
+- Stepper: Overview, Scope, Impacts, Rewards, Rules và Review completed; Fund rewards current.
+- Heading: `Choose the escrow admin wallet`.
+- Copy:
+
+```text
+Circle Contracts will deploy the escrow on Arc Testnet. The wallet you connect here becomes the on-chain admin; it does not deploy the contract and is not your login identity.
+```
+
+- Dùng connector hiện có (`wagmi` + `viem`) để lấy owner EOA; owner ký challenge có
+  program ID + server nonce + expiry để chứng minh quyền kiểm soát trước khi địa chỉ được dùng làm
+  constructor admin. Đây là message signature, không phải deployment transaction.
+- Không bắt owner switch sang Arc chỉ để deploy vì transaction deployment do backend Circle
+  Developer-Controlled Wallet gửi.
+- Hiển thị:
+  - Connected address hoặc `Not connected`.
+  - Role nhận được: `Escrow admin and reward approver`.
+  - Deployment network: `Arc Testnet`, chain ID `5042002`.
+  - Security note: BountyEscrow không yêu cầu seed phrase/private key; Circle credentials không có
+    quyền owner.
+- Primary: `Use this wallet`.
+- Secondary: `Do this later` về draft edit.
+
+Backend tạo deployment request chỉ sau khi owner address được xác nhận, `withdrawRecipient` đã
+review và `refundUnlockAt` hợp lệ.
+
+### CP-10A — Review Circle deployment
+
+Heading:
+
+```text
+Review escrow deployment
+```
+
+Read-only parameters:
+
+- Program name và private program UUID presentation.
+- `Program key` shortened + copy action.
+- Owner/admin wallet.
+- Locked remaining-funds recipient; mặc định cùng owner, chỉ đổi bằng policy/flow được review.
+- Network `Arc Testnet` + chain ID.
+- Deployment method `Circle Contracts — custom bytecode`.
+- Contract artifact version và shortened ABI/bytecode checksum.
+- Canonical Arc USDC token address.
+- `Escrow fund lock until` read-only, bằng chính xác program deadline.
+- Fee handling của Circle deployment wallet/Gas Station config.
+
+Callout:
+
+```text
+Circle Contracts deploys a custom BountyEscrow contract, not an ERC-20 token template. Program content and private reports are not stored on-chain.
+```
+
+Security rules:
+
+- UI không được upload/sửa ABI, bytecode, token, chain hoặc `programKey`.
+- Backend recompute `programKey`, chọn artifact allowlist và truyền owner wallet vào constructor.
+- Backend require deadline và derive `refundUnlockAt = program.deadline` chính xác. Không có editable
+  client field/override; thiếu deadline thì deploy fail closed.
+- Sau khi escrow confirmed, khóa deadline editor/API. Chỉ verified on-chain extend flow tăng lock,
+  verify final receipt/state rồi mới cập nhật deadline projection mới được mở khóa; không cho shorten
+  hoặc database-only change.
+- Circle deployment wallet không được nhận admin/payout role.
+
+Actions:
+
+- Ghost: `Back`.
+- Primary: `Deploy with Circle Contracts`.
+
+Primary gọi server; không mở owner wallet transaction. Double-click/retry dùng cùng deployment
+idempotency key.
+
+### CP-10B — Circle deployment pending
+
+Heading:
+
+```text
+Deploying program escrow on Arc…
+```
+
+- Ban đầu hiển thị Circle `contractId` và `transactionId`; thêm Arc transaction hash/ArcScan link
+  khi Circle trả về.
+- Progress:
+  - `Deployment accepted by Circle Contracts` — complete.
+  - `Waiting for Arc finality` — active.
+  - `Verifying bytecode and escrow parameters` — upcoming.
+- Backend poll Circle status và đọc Arc receipt; browser không tự gửi contract address/hash như
+  nguồn sự thật.
+- Khi receipt success, verify runtime bytecode checksum, `EscrowInitialized`, `programKey`, owner,
+  token, locked withdraw recipient và refund lock rồi mới persist address.
+- Arc có deterministic finality; không hiển thị confirmation counter.
 - Thành công chuyển tự động tới CP-11.
+
+### CP-10C — Deployment recovery
+
+Phân biệt:
+
+- `Circle API rejected before submission`: hiển thị safe error code; retry cùng idempotency key.
+- `Circle transaction pending/receipt timeout`: giữ `contractId`/`transactionId`, tiếp tục poll và
+  không phát request deployment mới.
+- `Transaction reverted`: deterministic terminal `failed`; giữ Circle/tx/revert evidence. Retry chỉ
+  sau terminal bằng replacement deployment intent + idempotency key mới có linkage tới intent cũ,
+  không reset hoặc replay request đã reverted.
+- `Bytecode/immutable/event mismatch`: hard error, không persist contract; `Contact support`.
+- `Deployment already accepted`: recover bằng Circle IDs/database unique row, không tạo contract
+  thứ hai.
+
+### CP-10E — Wallet recovery
+
+- No wallet: `Connect an EVM wallet to receive escrow admin permissions.`
+- Owner declines connection: chưa có deploy request; quay lại CP-10.
+- Wallet account changed trước deploy: invalidate review snapshot và quay CP-10A.
+- Wallet account changed sau deploy: không tự đổi on-chain admin; dùng owner-transfer flow riêng.
+- Không log address kèm private draft data ngoài audit boundary cần thiết.
 
 ### CP-11 — Fund rewards
 
-- Heading: `Fund reward pool`.
-- Current escrow pool: `0 USDC`.
-- Amount input có suffix `USDC`.
-- Summary hiển thị network, token, escrow contract và reward coverage.
-- Warning copy: `USDC will be transferred to the program escrow. This does not publish the program.`
-- Primary: `Fund reward pool`.
-- Secondary: `Do this later` về draft edit.
+- Heading: `Fund rewards`.
+- Đây là workspace chung để chọn source/network, nhập amount và review funding route. Không tạo
+  page mới hoặc standalone CP-11A.
+- Wallet area luôn có `Connect wallet`; sau khi kết nối hiển thị shortened address và
+  `Change wallet`. CP-10 wallet có thể được reuse nhưng CP-11 vẫn phải xử lý disconnected/reload.
+- Nếu account đổi sau khi funding intent đã tạo, pause flow, không tự remap send/bridge/deposit/
+  spend sang address mới.
+- Hiển thị current confirmed escrow pool, `Max single bounty`, destination `Arc Testnet` và verified
+  per-program escrow address read-only + copy/ArcScan.
+- Repeatable source rows:
+  - `Network` dropdown chỉ có `Ethereum Sepolia`, `Arbitrum Sepolia`, `Base Sepolia`,
+    `Arc Testnet`.
+  - `Amount` input USDC dạng decimal string, tối đa 6 decimals; parse thành base units, không dùng
+    JavaScript float.
+  - Không cho duplicate network; add/remove row giữ tổng và validation rõ ràng.
+  - Network trigger và selected-value row dùng logo chính thức đứng trước label; logo không thay
+    thế accessible text. Label network dùng small body text, nhỏ hơn amount/value text. Giữ khoảng
+    cách dọc rõ từ dòng logo + network name tới balance/gas/amount content phía dưới.
+  - Mỗi row hiển thị source wallet USDC, gas readiness và amount.
+  - Ethereum/Base/Arbitrum gas hint là testnet ETH; Arc gas hint là USDC.
+- Chỉ hiển thị testnet; không trộn mainnet balance.
+- Card `Funding route` được derive live, read-only và có một trong ba mode:
+  - Chỉ một row `Arc Testnet` → `Send on Arc`.
+  - Chỉ một row Ethereum/Arbitrum/Base → `Bridge to Arc`.
+  - Từ hai row/network trở lên → `Unified Balance`.
+- Với Send/Bridge, CP-11 không tạo Gateway deposit. Row chỉ hiển thị
+  `ready/insufficient balance/insufficient gas`; một lần `Submit` tạo/khóa intent rồi chuyển CP-12,
+  và wallet transaction chỉ bắt đầu sau user gesture ở CP-12.
+- Chỉ với Unified Balance, CP-11 có hai submit boundary rõ ràng:
+  - Trước `Submit` đầu tiên, owner còn sửa được sources/amounts và review estimate. Action validate
+    exact allocations, tạo/khóa intent idempotent rồi **giữ nguyên ở CP-11**; chưa deposit và chưa
+    tạo destination spend trước user gesture này.
+  - Sau khi khóa intent nhưng trước khi tạo source-deposit operation hoặc mở wallet prompt, backend
+    phải remote-verify owner wallet + toàn bộ selected domains trong stable TEST Gateway
+    subscription. Thiếu registration, vượt bounded capacity hoặc subscription reconcile chưa hoàn
+    tất thì fail closed trong CP-11; không thay đổi route hoặc cho deposit trước rồi chờ đăng ký sau.
+  - Sau khi intent đã khóa, source rows chuyển sang sequential deposit state. Route, destination,
+    escrow và reviewed allocations không còn edit; muốn thay đổi phải cancel/replace intent theo
+    policy, không mutate intent đang thu deposit.
+  - Existing confirmed Unified Balance của connected wallet được tính vào readiness; không ép
+    owner deposit lại amount đã confirmed.
+  - Owner deposit theo **một row tại một thời điểm**: switch source chain → App Kit/Gateway
+    approval/authorization nếu SDK yêu cầu → `unifiedBalance.deposit`. Poll
+    `getBalances({ networkType: "testnet", includePending: true })` chỉ để hiển thị telemetry.
+  - Trước wallet prompt, API tạo một source-deposit operation bất biến theo intent + network và
+    chụp baseline Gateway balance làm telemetry. Client persist `submission_uncertain` ngay trước
+    khi gọi composite App Kit; vì vậy chỉ `awaiting_signature` mới được resume wallet boundary.
+    Nếu SDK response/hash không chắc chắn, row vẫn là `submission_uncertain` và tuyệt đối không tự
+    gọi deposit lại. Khi SDK trả hash, client ghi hash
+    vào recovery storage trước rồi persist observation; server chỉ chuyển `onchain_verified` sau
+    exact source RPC receipt success + canonical source USDC `Transfer` + GatewayWallet `Deposited`,
+    và chỉ chuyển `gateway_finalized` sau verified Circle-signed `gateway.deposit.finalized` bind
+    đúng source chain/transaction/log/deposit identity.
+  - Wallet prompt được serialize, luôn ghi rõ network + amount. Không hứa một số signature cố định
+    vì approval/permit/deposit steps phụ thuộc wallet, chain và SDK result.
+  - Mỗi row map server state `awaiting_signature`, `submission_uncertain`, `submitted`,
+    `onchain_verified`, `gateway_finalized`, `confirmed`, `failed`; action là
+    `Add to Unified Balance` chỉ trước durable claim. UI có
+    thể dùng copy thân thiện nhưng không collapse `onchain_verified` thành finalized. Operation đã
+    qua `submission_uncertain` không có auto-retry; khi mất hash dùng reconcile/manual
+    attach/support, còn hash đã biết chỉ poll/reconcile.
+  - Các state switch/approve/deposit/pending/confirmed hiển thị inline ngay trong CP-11.
+  - Ngay trước `Submit` thứ hai, UI lấy fresh App Kit quote bằng connected wallet, gửi server
+    validate/bound/persist per-domain provider/gas fee allocations và hiển thị expiry. Chỉ enable
+    khi quote còn hạn và mỗi selected domain cover allocation + fee allocation của domain đó;
+    expired quote phải
+    re-quote. Action này mới chuyển CP-12 để bắt đầu destination `unifiedBalance.spend()`; nó không
+    deposit lại source nào.
+- Summary:
+  - Derived funding route.
+  - Gross funding amount.
+  - Route-specific App Kit/Gateway/gas fee estimate.
+  - Với Unified Balance: mỗi selected-domain gateway-finalized balance phải cover spend allocation
+    + fresh validated App Kit provider/gas fee allocation; aggregate chỉ là summary.
+  - Estimated net received.
+  - Destination `Arc Testnet`.
+  - Locked recipient = verified escrow address.
+- Primary `Submit` chỉ enable khi sources hợp lệ, tổng source amounts bằng gross amount,
+  wallet/account khớp intent, escrow đã verified và route-specific readiness pass:
+  - Send: Arc wallet cover amount + estimated gas.
+  - Bridge: selected non-Arc wallet cover amount + estimated bridge gas/fee.
+  - Unified Balance first Submit: source allocations/estimate hợp lệ; chưa yêu cầu confirmed
+    balance và không ép source-wallet USDC khi existing confirmed Unified Balance đã đủ. Canonical
+    source USDC + native gas được check riêng ngay trước từng explicit deposit.
+  - Unified Balance second Submit: App Kit quote snapshot đã được server validate/bound/persist còn
+    hạn và từng selected domain cover allocation + provider/gas fee allocation; pending,
+    on-chain-only và unselected-domain balance không được tính. Quote chỉ là advisory readiness
+    telemetry; actual Arc net mới authoritative.
+- Send/Bridge `Submit` tạo/reuse funding intent idempotent rồi điều hướng CP-12. Unified Balance
+  first Submit tạo/reuse intent nhưng ở CP-11; second Submit mới điều hướng CP-12. Không action nào
+  mở dialog overlay hoặc tạo destination operation mới nếu intent đã có durable submission evidence.
+- Secondary: `Do this later`.
+
+Copy:
+
+```text
+Your source selection determines the funding route. Arc-only uses Send, one source outside Arc uses Bridge, and two or more networks use Unified Balance. The reward pool is credited only after USDC is verified at this program’s escrow on Arc.
+```
+
+Không hiển thị `Approve escrow` hoặc gọi `fund(amount)`. Bridge/Unified Balance có thể yêu cầu
+wallet approve/permit Circle contracts trên source chain như internal App Kit steps; UI phải đặt
+tên theo route/source operation, không mô tả đó là escrow funded.
+
+Với Unified Balance, deposit success chưa phải escrow funding success. Nếu owner dừng tại đây, USDC
+vẫn nằm trong Unified Balance và có thể dùng cho spend sau. Gateway `removeFund` là trustless
+Unified Balance recovery riêng, không phải action withdraw của BountyEscrow.
+
+Source balance/gas error được xử lý inline. Với Unified Balance, approval/signature rejected,
+deposit pending/timeout hoặc chỉ một phần source đã gateway-finalized phải giữ selections và existing
+finalized balance rồi poll operation đã submit; không deposit lại mù quáng. Wallet balance giảm hoặc
+client balance/result không chứng minh deposit. Operation `submission_uncertain` phải reconcile
+wallet/provider/source RPC và không tự mở lại signature; chỉ manual attach verified hash, support
+hoặc linked source-deposit replacement attempt trong cùng intent mới được tiếp tục.
+Nếu source deposit đã có durable tx hash thì recovery chỉ poll/reconcile hash đó và không yêu cầu
+re-sign. Deterministic source-deposit revert đóng attempt cũ ở `failed`; owner tiếp tục bằng linked
+replacement deposit attempt và idempotency key mới trong cùng locked intent. Confirmed Gateway
+balance còn lại có thể được reuse, nhưng evidence/accounting cũ không bị rewrite.
 
 ### CP-12 — Funding pending
 
-- Heading: `Funding reward pool…`.
-- Hiển thị amount, token, program và escrow address để owner kiểm tra.
-- Không optimistic success; khoá nút trong khi chờ API/transaction confirmation.
-- Thành công chuyển tới CP-13; lỗi giữ amount để retry.
+Giữ màn hình CP-12 hiện có trong Program owner flow và giữ canonical frame name
+`CP-12 · Funding pending · Desktop`. Send/Bridge chuyển tới đây sau single Submit; Unified Balance
+chỉ chuyển tới đây sau **second Submit** khi gateway-finalized balance và fresh fee quote đã đủ. Đây
+không phải dialog overlay
+và không tạo một flow/page song song. First Submit của Unified Balance vẫn ở CP-11.
+
+Phần summary đầu screen luôn giữ context của operation:
+
+- Connected wallet.
+- Exact source rows và source testnets.
+- Locked `routeMode`: `Send`, `Bridge` hoặc `Unified Balance`.
+- Gross amount, refreshed estimated fees/fee reserve và estimated net received.
+- Destination cố định `Arc Testnet`.
+- Verified escrow address read-only.
+- Warning: wallet prompt count phụ thuộc route/SDK; actual net credit được xác nhận on-chain.
+
+Nếu intent chưa có destination operation submitted, primary `Continue and sign` bắt đầu route đã
+khóa và ghost `Back` quay CP-11. Wallet prompt chỉ mở sau user gesture, không tự bật khi
+hydrate/reload.
+
+Progress luôn kết thúc bằng hai bước chung:
+
+1. `Verifying escrow funding received` — exact canonical Arc USDC destination receipt/event;
+   live balance chỉ là cross-check.
+2. `Reconciling reward pool` — permissionless `syncExternalFunding()` + database projection.
+
+Các bước đứng trước đó phụ thuộc route:
+
+- Send: `Waiting for Arc signature` → `Sending USDC to the Arc escrow`.
+- Bridge: map `approve` khi có → `burn` → `fetchAttestation` → `mint` từ `kit.bridge()` result/
+  events. Không giả định approve luôn tồn tại hoặc số prompt cố định.
+- Unified Balance: map `buildBurnIntents` → `signBurnIntents` tuần tự → `fetchAttestation` →
+  destination `mint` từ `kit.unifiedBalance.spend()` result/events. Không coi các source deposits
+  ở CP-11 là destination progress.
+
+Các App Kit calls target:
+
+```typescript
+// routeMode=send
+await kit.send({
+  from: { adapter: viemAdapter, chain: "Arc_Testnet" },
+  to: verifiedEscrowAddress,
+  amount: grossAmount,
+  token: "USDC",
+});
+
+// routeMode=bridge
+await kit.bridge({
+  from: { adapter: viemAdapter, chain: selectedNonArcSource },
+  to: {
+    adapter: viemAdapter,
+    chain: "Arc_Testnet",
+    recipientAddress: verifiedEscrowAddress,
+  },
+  amount: grossAmount,
+  token: "USDC",
+});
+
+// routeMode=unified_balance
+await kit.unifiedBalance.spend({
+  amount: grossAmount,
+  token: "USDC",
+  from: { adapter: viemAdapter, allocations: explicitConfirmedAllocations },
+  to: {
+    adapter: viemAdapter,
+    chain: "Arc_Testnet",
+    recipientAddress: verifiedEscrowAddress,
+  },
+});
+```
+
+- Recipient lấy từ backend funding intent và bị khóa. Bridge explicit recipient behavior bám
+  [Arc App Kit recipient guide](https://docs.arc.io/app-kit/tutorials/bridge/specify-recipient-address).
+- Send transfer hoặc Bridge/Gateway mint/credit USDC trực tiếp; không route nào gọi
+  `fundProgram`/arbitrary callback trên escrow. Per-program escrow + serialized active intent +
+  exact route destination receipt/event + lifetime `totalFunded` threshold là attribution strategy.
+- Không optimistic success. `SendResult`, `BridgeResult` hoặc `SpendResult` vẫn phải qua server
+  reconciliation.
+- Backend verify destination receipt/token/address/exact event amount, gọi permissionless
+  `syncExternalFunding()` bằng server relayer/Circle wallet, rồi verify lifetime `totalFunded` đạt
+  threshold trước-sync + exact event amount. Pre/post live balance không phải completion invariant.
+- Event/destination writes idempotent theo funding intent + route + send/bridge/spend `txHash`,
+  optional `transferId` và `chainId + transactionHash + logIndex`.
+- Thành công chuyển CP-13; không chờ thêm confirmation sau Arc final receipt.
+- Trước khi route operation được submitted, `Back` hoặc `Cancel` có thể quay CP-11 và giữ
+  source/confirmed-balance state. Với Unified Balance, Back quay lại intent đã khóa/deposit state,
+  không quay về editable pre-intent form. Sau submission, CP-12 khóa source selection và mọi action
+  có thể tạo destination transfer mới; chỉ cho resume/continue/retry đúng operation.
+- Route hydrate từ funding intent phía server. Reload, deep link và Browser Back restore cùng
+  route + operation IDs/status; không gọi lại `send`, `bridge`, `buildBurnIntents`,
+  `signBurnIntents` hoặc `spend` cho step đã accepted/submitted.
+
+Recovery hiển thị như state của chính CP-12, không tạo screen/route hoặc funding intent khác:
+
+- Signature rejected trước submission: escrow chưa funded; cho quay CP-11 hoặc resume đúng
+  signature step của intent hiện tại.
+- Send submitted: persist Arc `txHash`; receipt pending/reload chỉ poll và reconcile, không gọi
+  `send` lần hai và không yêu cầu owner re-sign.
+- Ngay trước khi mở signing/submission boundary, client persist bounded
+  `submissionUncertain=true`. Nếu SDK/wallet mất response sau prompt, intent ở
+  `source_submitted/recovery_required` sau reload; không suy đoán rằng transaction chưa gửi và
+  không tự chạy lại Send/Bridge/Spend.
+- Bridge đã burn nhưng chưa có Arc mint hash: persist state riêng `source_submitted` cùng bounded
+  step names/states, source tx hashes, error category và `retryable`; không serialize raw provider
+  error hoặc toàn bộ `BridgeResult` vào DB. `delivery_pending` chỉ bắt đầu khi đã có destination
+  transaction hash.
+- `retryBridge(result, context)` cần chính `BridgeResult` gốc. Vì vậy chỉ same-session recovery còn
+  giữ result trong memory mới được gọi `retryBridge`; tuyệt đối không gọi lại `bridge()` hoặc burn.
+  Sau reload, bounded telemetry không đủ để tái tạo result và App Kit không cung cấp query/resume
+  bằng `transferId`: CP-12 phải hiển thị `recovery_required`, refresh durable server state và hướng
+  dẫn recover CCTP mint bằng original session/support tooling. Không được quảng cáo auto-resume.
+- Khi recovered mint tạo destination hash, secured operation observation chuyển intent từ
+  `source_submitted` sang `delivery_pending`; từ đó chỉ verify/reconcile, không tạo bridge mới.
+- Unified Balance burn intents/signatures/attestation/mint đã bắt đầu: persist durable status và
+  returned operation IDs. App Kit hiện không expose documented `retrySpend`; mint-only failure dùng
+  original-message/manual recovery hoặc support flow, không build/sign/spend lại mù quáng.
+- Bridge/Unified Balance destination delivery pending: giữ tx hashes, optional `transferId` và
+  returned steps; tiếp tục reconciliation, không tạo destination operation mới.
+- Bất kỳ durable source/destination tx hash nào đã có đều là recovery boundary: UI hydrate hash,
+  receipt/status và không mở lại signature cho transaction đó. Một generic `Resume signatures`
+  chỉ áp dụng cho step chưa từng có transaction hash.
+- Deterministic revert từ Send/Bridge/Spend làm operation attempt hiện tại terminal `failed`. Giữ
+  hash, revert reason/code và accounting snapshot; retry tạo linked destination operation attempt
+  với attempt number/idempotency key mới trong cùng locked funding intent để reuse verified source
+  deposits. Send có thể ký linked attempt mới; Bridge/Unified Balance sau source operation chỉ retry
+  bằng documented SDK result còn trong memory hoặc manual original-message recovery. Không reset,
+  ký lại failed transaction cũ hoặc chạy lại full bridge/spend sau reload.
+- Destination final nhưng net received thấp hơn gross vì fee: đây là expected result; credit net
+  amount theo exact canonical Arc USDC destination receipt/event base units, không dùng estimated
+  subtraction hoặc live-balance subtraction.
+- USDC đã tới escrow nhưng sync call failed: pool tiền thật đã tăng; retry riêng
+  `syncExternalFunding()`, tuyệt đối không send/bridge/spend lần hai.
+- Destination/token/address mismatch: không gắn funding intent vào pool; hard error/support.
+- Client mất mạng: mở lại CP-12 từ edit route phải restore route, funding intent,
+  send/bridge/deposit/spend tx hashes và optional Gateway `transferId`, không dựa vào local state.
+- Mọi CP-12 recovery CTA nói rõ `Resume signatures`, `Continue delivery`,
+  `Continue verification` hoặc `Retry sync`; không dùng một `Try again` có thể double-spend.
+- Sau intent `confirmed`, mọi Add funds/late funding tạo funding intent và idempotency key mới.
+  CP-12 không reopen một operation đã complete để nhận thêm tiền.
 
 ### CP-13 — Rewards funded
 
-- Success banner: `Rewards funded`.
-- Hiển thị funded amount và remaining pool.
-- Readiness checklist cập nhật Escrow contract và Funding thành Complete.
+- Success banner: `Rewards funded on Arc`.
+- Hiển thị route đã dùng, gross amount, fee, net USDC received, confirmed total/available pool,
+  escrow address, destination transaction và `View on ArcScan`.
+- Hiển thị canonical deployment/funding artifact: BountyEscrow artifact version + shortened
+  bytecode checksum, verified escrow address, canonical Arc USDC
+  `0x3600000000000000000000000000000000000000`, 6 decimals, destination tx hash/log và
+  reconciliation timestamp. CP-13 không lấy token/artifact từ client hoặc SDK display metadata.
+- Accounting breakdown lấy từ immutable `funding_confirmation_artifact` của intent và hiển thị
+  exact base-unit-derived values: destination event amount, pre-sync lifetime total funded,
+  post-sync lifetime total funded, required threshold, total paid, approved outstanding, total
+  withdrawn và available unreserved. CP-13 chỉ render khi post-sync lifetime `totalFunded` đạt
+  threshold và accounting invariants hợp lệ. Optional pre/post live balance được ghi rõ là
+  telemetry; không yêu cầu delta bằng destination amount.
+- Khi mở hoặc reload CP-13, web phải hydrate artifact mới nhất qua
+  `GET /api/programs/:id/funding-confirmations/latest`; không dựng success evidence từ wallet,
+  local storage, mutable program totals hoặc kết quả Circle SDK còn trong memory. Thiếu artifact
+  thì fail closed và không hiển thị success/publish handoff.
+- Source breakdown hiển thị Ethereum Sepolia/Arbitrum Sepolia/Base Sepolia/Arc Testnet allocations
+  đã dùng; đây là off-chain verified evidence, không phải contract state.
+- Hiển thị collateralization:
+  - `Ready` khi `available_pool = canonical Arc USDC balance - totalApprovedOutstanding` và
+    `available_pool >= max_bounty`.
+  - `Add funds` khi pool chưa cover max single bounty; Publish bị disable theo target rule.
+- Readiness checklist cập nhật Circle deployment và App Kit funding thành Complete.
 - Primary next action: `Publish program`.
 - Secondary: `Back to program`.
 
+Funding success không tự publish. Publish endpoint re-read verified database projection và
+reconcile actual Arc net, approved outstanding và `available_pool` trước khi chuyển `active`.
+Mỗi lần Add funds sau CP-13 tạo funding intent/idempotency key và CP-13 confirmation artifact mới;
+không update lịch sử cũ thành một cumulative “latest transaction”.
+
+### EW-01 — Escrow management after program end
+
+EW là branch riêng trong owner program management, không phải bước tiếp theo của CP-13.
+
+- Heading: `Escrow funds`.
+- Hiển thị product status, on-chain `closed`, unlock time, locked withdraw recipient, canonical Arc
+  USDC remainder và approved/reserved outstanding amount.
+- `Withdraw remaining funds` chỉ enable khi program expired/closed, unlock reached, on-chain escrow
+  closed và outstanding bằng 0.
+- Unlock evidence phải chứng minh `refundUnlockAt` do server derive và bằng chính xác
+  `program.deadline`; program thiếu deadline không thể deploy escrow.
+- Nếu product đã end nhưng contract chưa closed, UI giải thích owner có thể cần ký `close()` trước.
+- Không hiển thị Gateway `removeFund` trong panel này.
+
+### EW-02 — Withdraw remaining funds dialog
+
+- Review amount 6-decimal USDC, immutable recipient, Arc Testnet escrow/address và unlock evidence.
+- Owner wallet phải là authorized admin và switch sang Arc Testnet.
+- Nếu cần `close()` rồi `withdrawRemaining(expectedAmount)`, prompt tuần tự, mỗi bước có tx
+  hash/ArcScan. `expectedAmount` là exact server-verified intent snapshot, không có editable input.
+- Trước từng `eth_sendTransaction`, client persist durable boundary
+  `close_submission_uncertain` hoặc `withdraw_submission_uncertain`. Nếu provider mất response sau
+  prompt, reload không được ký lại; owner chỉ attach original Arc hash hoặc dùng support recovery.
+  Hash do provider trả phải được ghi local trước rồi POST `submitted` cho đúng operation.
+- Progress: `Closing escrow` → `Withdrawing remaining USDC` → `Verifying
+  RemainingFundsWithdrawn` → `Reconciling database`.
+- Close/reload resume từ durable tx hash/receipt của withdrawal intent. Khi close hoặc withdraw hash
+  đã tồn tại, UI chỉ poll/reconcile và tuyệt đối không yêu cầu re-sign transaction đó.
+- Revert do outstanding/unlock/auth giữ tiền nguyên vẹn, đánh dấu withdrawal intent `failed` và
+  hiển thị condition cụ thể. Retry sau deterministic revert tạo replacement withdrawal intent/key
+  mới có linkage tới intent cũ; không reset intent cũ.
+
+### EW-03 — Remaining funds withdrawn
+
+- Success chỉ sau Arc receipt success, event đúng escrow/recipient/amount và database projection đã
+  reconcile.
+- Hiển thị exact snapshot amount, locked recipient, transaction hash, ArcScan và post-withdraw
+  escrow balance. Late remainder có thể khác 0 và phải mở scan/new withdrawal intent, không làm
+  transaction snapshot hiện tại thất bại.
+- Cùng withdrawal intent/transaction đã complete không được replay; action kế tiếp bị
+  disable/no-op và không thể double-withdraw.
+- Nếu canonical Arc USDC được chuyển trực tiếp vào escrow sau lần withdraw trước, backend phải
+  reconcile phần inflow mới và owner có thể tạo **withdrawal intent mới** để rút đúng balance mới.
+  Không được reuse intent hoặc transaction hash cũ cho late funds.
+
 ## 9. Prototype scenarios
 
-1. Owner programs → Create program → Overview → Scope → Impacts → Rewards → Rules → Review → Saving → Draft created → Deploy escrow → Fund rewards → Rewards funded.
+1. Owner programs → Create program → Draft → Confirm admin wallet → Circle Contracts deploys custom
+   escrow → CP-11 chọn source/network → route được derive → Send/Bridge single Submit hoặc Unified
+   Balance first Submit + sequential deposits + second Submit → CP-12 Funding pending → route
+   transfer/spend tới Arc escrow → Net funding verified → Rewards funded.
 2. Overview invalid → field errors → sửa → tiếp tục.
 3. Add scope modal → validation error → sửa → scope card được thêm.
 4. Asset type thiếu impact → tab error → thêm template/custom impact → tiếp tục.
@@ -857,17 +2184,96 @@ Không render form create program phía sau forbidden state.
 9. Cancel khi form dirty → Discard draft → Owner programs.
 10. Researcher deep link `/owner/programs/new` → safe forbidden screen.
 11. Program hết hạn/closed → owner chọn disclosure cho resolved report → chỉ approved disclosure xuất hiện trong Known Issues.
+12. Owner đổi wallet trước deploy → invalidate review → xác nhận lại constructor owner.
+13. Circle deploy request timeout → giữ Circle IDs/idempotency key → poll/recover, không deploy duplicate.
+14. CP-11 disconnected → Connect wallet → exact four-network dropdown và source rows xuất hiện.
+15. Chỉ Arc Testnet → route preview `Send on Arc`; không có Gateway deposit → CP-12 ký Send.
+16. Chỉ Base/Arbitrum/Ethereum Sepolia → route preview `Bridge to Arc`; không có Gateway deposit →
+    CP-12 map approve/burn/attestation/mint của Bridge.
+17. Chọn từ hai network trở lên → route preview `Unified Balance`; first Submit tạo/khóa intent và
+    vẫn ở CP-11; sau đó deposit tuần tự, confirmed balance cũ được reuse, wallet prompts không
+    overlap.
+18. Unified Balance deposit đi qua `awaiting_signature` → `submission_uncertain` hoặc `submitted`
+    → `onchain_verified`/`gateway_finalized` → `confirmed`; chỉ exact source receipt + canonical USDC
+    `Transfer` + GatewayWallet `Deposited` + verified signed `gateway.deposit.finalized` hoàn tất
+    state cuối.
+    Client balance giảm hoặc `getBalances` reported confirmed không tự unlock second Submit.
+    Trước wallet prompt đầu tiên, stable TEST permissionless subscription phải remote-verify owner
+    wallet + selected domains, public endpoint phải pass `HEAD` và nhận signed `POST` cho đúng event
+    `gateway.deposit.finalized`. Concurrent registration reconcile không được lost update, không
+    được tự evict/remove registration còn khả năng recovery và phải fail closed ở giới hạn
+    50 registered addresses/developer account.
+19. Duplicate source hoặc tổng explicit source amounts khác gross amount → validation, không mở wallet.
+20. Unified Balance selected-domain balances cover allocations + fee allocations cũ → client
+    refresh App Kit
+    quote bằng connected wallet, server validate/bound/persist snapshot trước second Submit. Quote
+    hết hạn disable action/re-quote; quote còn hạn và đủ fresh reserve mới reuse locked intent,
+    navigate CP-12 và bắt đầu spend.
+21. CP-12 Funding pending hiển thị đúng progress của Send/Bridge/Unified Balance, rồi verify/sync →
+    CP-13; net received sau fee được credit, không báo mismatch giả.
+22. Signature rejected, client reload, delivery pending hoặc sync failed → restore cùng
+    route/intent/step IDs; chỉ resume/retry đúng step và không duplicate send/bridge/spend.
+23. `available_pool = canonical Arc USDC balance - totalApprovedOutstanding` thấp hơn `max_bounty` →
+    hiển thị Add funds và disable Publish, kể cả raw escrow balance có vẻ đủ.
+24. Program chưa expired, unlock chưa tới hoặc còn outstanding → EW-01 disable Withdraw và chỉ đúng
+    failed condition.
+25. EW-02 close/withdraw signed trên Arc → verify `RemainingFundsWithdrawn` → EW-03; reload không
+    double-withdraw.
+26. Program có deadline → server derive `refundUnlockAt = program.deadline`; client không có input/
+    override. Program không deadline → deploy fail closed và yêu cầu quay lại đặt deadline. Sau
+    escrow confirmed, deadline change bị block nếu chưa có verified on-chain extend flow cập nhật
+    lock trước rồi reconcile projection.
+27. Reload sau khi đã có send/bridge/deposit/spend/close/withdraw tx hash → hydrate hash và poll;
+    không mở lại wallet signature cho transaction đó.
+28. Deterministic destination revert → operation attempt cũ terminal `failed`; retry tạo linked
+    attempt + idempotency key mới trong cùng locked funding intent và giữ source/evidence cũ; reload
+    Bridge/Unified Balance không có original SDK result thì chuyển recovery-required/manual recovery.
+29. Add funds sau CP-13 hoặc canonical Arc USDC tới escrow muộn → tạo funding/withdrawal intent +
+    key mới phù hợp, không reopen intent đã complete.
+30. CP-13 chỉ render khi canonical artifact/Arc USDC, exact destination receipt/event amount và
+    post-sync lifetime `totalFunded` đạt threshold của intent đã được persist; live-balance snapshot
+    chỉ là telemetry và không được dùng làm equality gate khi payout chạy đồng thời.
 
 ## 10. Figma screen placement
 
-- Chỉ sử dụng page `Layouts` hiện có.
-- Tạo section mới: `Owner · Create program flow`.
-- Không tạo thêm Figma page.
-- Đặt section sau các section flow hiện có, tránh overlap.
+- Chỉnh trực tiếp flow hiện có trên page `Program owner`; không tạo page `Owner` mới hoặc một
+  parallel create/funding flow.
+- Giữ section, reading order và prototype connections hiện có của Program owner flow.
+- Reuse components, text/color/effect variables và tokens từ page `BBE Design System`; không dựng
+  local lookalike nếu design-system component phù hợp đã tồn tại.
+- Đặt section/frame không overlap và giữ reading order trái sang phải theo prototype.
 - Desktop frame dùng width `1440px`; height theo content và tối thiểu `1288px` khi có Header `80px` + workspace `1120px` + Footer `88px`.
 - Mỗi frame đặt tên theo screen ID, ví dụ `CP-01 · Overview · Desktop`.
 - Error state đặt cạnh screen gốc tương ứng.
-- Prototype nối theo scenarios ở mục 9.
+- Funding handoff bắt buộc có:
+  - `CP-11 · Disconnected` với `Connect wallet`.
+  - `CP-11 · Allocations` với repeatable network + amount rows, exact four-network dropdown và
+    read-only route preview cho Arc-only Send, one-non-Arc Bridge và multi-source Unified Balance.
+  - Network logo nằm trước small network label; tăng khoảng cách dọc giữa network identity row và
+    balance/gas/amount content bên dưới.
+  - `CP-11 · Sequential signing` chỉ xuất hiện sau Unified Balance first Submit đã tạo/khóa intent;
+    frame vẫn thuộc CP-11 và chỉ mở một wallet prompt tại một thời điểm.
+  - `CP-11 · Unified Balance confirmed` với pending tách khỏi confirmed và second Submit enabled.
+  - Giữ frame `CP-12 · Funding pending · Desktop` (`106:680`) và cập nhật operation summary cùng
+    durable route-specific Send/Bridge/Unified Balance destination spend, verify/sync/recovery trong
+    frame đó; tên frame không đổi.
+  - `CP-13 · Rewards funded` hiển thị canonical escrow artifact, Arc USDC evidence và exact
+    accounting artifact.
+- Không tạo standalone `CP-11A`; source deposit status nằm inline/adjacent trong existing CP-11
+  section và chỉ xuất hiện cho Unified Balance, còn destination/reconciliation operation nằm trong
+  existing CP-12 Funding pending.
+- EW-01..03 vẫn là requirement của owner escrow-management flow sau program end nhưng không thêm EW
+  frame vào lần cập nhật Program owner Figma này vì section hiện tại chưa có matching frames.
+- CP-10 đến CP-13 phải có annotation phân biệt `Circle deploy accepted`, derived route, optional
+  `source deposit pending`, `Unified Balance confirmed`, route-specific transaction steps,
+  `Arc net amount verified` và `database reconciled`; không gộp các trạng thái thành một success giả.
+- Contract/token address, Circle IDs, route transaction hashes và optional Gateway `transferId`
+  trong frame dùng shortened value + copy/explorer action; full address nằm trong annotation/dev
+  handoff.
+- Không dùng confirmation-counter component ở Arc finality state.
+- Prototype của lần cập nhật này nối theo funding scenarios 1–23 và 26–30 ở mục 9; EW scenarios
+  24–25 thuộc
+  owner escrow-management scope riêng và không thêm frame vào Program owner section hiện tại.
 
 ## 11. Design-system và shadcn/Tailwind mapping
 
@@ -892,6 +2298,11 @@ Không render form create program phía sau forbidden state.
 | Discard changes | `AlertDialog` |
 | Impact and reward summary | `Tabs`, `Checkbox`, `Table` |
 | Saving | Disabled Button + spinner/progress |
+| Wallet connect/network switch | `wagmi` + viem App Kit adapter UI, `Button`, four-option source `Select`, `Alert` |
+| Contract/token/tx evidence | Address row + copy `Button` + external-link action |
+| App Kit funding | Repeatable network + amount rows, derived Send/Bridge/Unified Balance badge, per-row gas/optional deposit status và fee/net summary; existing CP-12 Funding pending dùng `Card`/`Progress`/`Alert` |
+| Remaining-funds withdrawal | Eligibility `Alert`, locked recipient row, confirmation/progress `Dialog` |
+| Arc finality | Two-state pending/final progress; không dùng multi-confirmation meter |
 
 Layout rules:
 
@@ -917,6 +2328,99 @@ Layout rules:
 - Save error giữ nguyên form data và có same-payload retry.
 - Success chuyển tới edit route, cho phép deploy escrow rồi fund reward pool trong cùng user flow.
 - Funding chỉ bắt đầu sau khi program draft đã có ID và escrow contract sẵn sàng.
+- Custom BountyEscrow ABI/bytecode được compile/test trước, pin checksum và deploy bằng Circle
+  Contracts `deployContract` trên `ARC-TESTNET`; không dùng ERC-20 contract template.
+- `IERC20` chỉ là interface để custom escrow tương tác canonical Arc USDC tại
+  `0x3600000000000000000000000000000000000000` với 6 decimals; BountyEscrow không phát hành token.
+- Circle Developer-Controlled Wallet chỉ deploy/trả gas; constructor trao admin/approver cho owner
+  wallet rõ ràng và Circle wallet không giữ privileged role sau deploy.
+- Circle API key, Entity Secret, wallet ID và bytecode allowlist chỉ ở backend. Deployment idempotent
+  theo program + artifact version và được verify lại bằng Arc RPC.
+- Contract chỉ lưu program/report keys, token/roles/lock, financial accounting và reward snapshot;
+  không lưu program content, report body, PoC, attachments, reviewer/AI data.
+- Arc Testnet chain ID, artifact checksum, USDC token, owner wallet, locked withdraw recipient và
+  refund lock được review trước server deployment; account-change invalidates pre-deploy review.
+- Funding MVP allowlist đúng `Ethereum_Sepolia`, `Arbitrum_Sepolia`, `Base_Sepolia`,
+  `Arc_Testnet`; label UI tương ứng là Ethereum Sepolia, Arbitrum Sepolia, Base Sepolia, Arc Testnet.
+- Server derive và khóa route từ normalized unique sources: chỉ Arc → Send; chỉ một non-Arc →
+  Bridge; từ hai source/network trở lên → Unified Balance. Client không có manual route selector.
+- CP-11 có Connect/change wallet, repeatable network + amount rows, không duplicate source, amount
+  decimal string/base units 6 decimals và wallet prompts tuần tự khi route yêu cầu.
+- Network value có official logo trước small accessible label và đủ vertical gap tới
+  balance/gas/amount content; style áp dụng nhất quán cho tất cả source rows/states.
+- Explicit source amounts phải bằng gross amount. Send/Bridge Submit dựa trên source balance +
+  route-specific fee/gas. Unified Balance first Submit tạo/khóa intent và giữ CP-11; second Submit
+  chỉ enable khi từng selected domain cover spend allocation + fresh validated App Kit
+  provider/gas fee allocation và quote còn hạn; aggregate/unselected balance không unlock action;
+  pending/on-chain-only balance không được tính và existing server-verified balance được reuse.
+- Unified Balance source deposit có server states `awaiting_signature`, `submission_uncertain`,
+  `submitted`, `onchain_verified`, `gateway_finalized`, `confirmed`, `failed`. `onchain_verified`
+  bắt buộc exact source RPC receipt success + canonical USDC `Transfer` + GatewayWallet `Deposited`;
+  `gateway_finalized` bắt buộc verified Circle-signed `gateway.deposit.finalized`; chỉ `confirmed`
+  sau khi cả hai proof khớp cùng attempt mới là terminal readiness state. Client balance/result hoặc
+  việc token biến mất khỏi wallet chỉ là telemetry, không phải proof.
+- Unified Balance source deposit chỉ được bắt đầu sau khi stable TEST permissionless subscription
+  với public `HEAD` + signed-notification `POST` endpoint đã remote-verify owner wallet và toàn bộ
+  selected domains cho exact event `gateway.deposit.finalized`. Membership reconcile phải durable,
+  serialized và merge remote state để không lost update; capacity bị bound ở 50 registered
+  addresses/developer account, không auto-evict và fail closed khi đầy hoặc verification không
+  chắc chắn. Không tự remove membership khi còn active/pending/uncertain/recoverable operation;
+  signed webhook vẫn là Gateway finalization authority duy nhất.
+- Ngay trước Unified Balance second Submit, client refresh App Kit quote bằng connected wallet;
+  server validate/bound/persist snapshot có expiry. Expired quote phải re-quote và disable action.
+  Snapshot chỉ là advisory readiness telemetry. Actual Arc net và reconciled on-chain accounting
+  mới là authority cho pool/collateralization.
+- Chỉ Unified Balance route gọi `unifiedBalance.deposit` trong CP-11; Arc-only Send và one-non-Arc
+  Bridge không tạo Gateway deposit.
+- Giữ CP-12 `Funding pending` hiện có làm durable progress screen cho Send, Bridge hoặc Unified
+  Balance cùng verify/reconcile; không có standalone CP-11A hoặc funding page mới.
+- Send/Bridge single Submit tạo/reuse intent và navigate CP-12. Unified Balance first Submit
+  tạo/khóa intent nhưng ở CP-11 để deposit tuần tự; second Submit sau confirmed readiness mới
+  navigate CP-12 và bắt đầu destination spend/verification.
+- Trước destination operation submission có thể Back về CP-11; Unified Balance quay về locked
+  deposit state, không quay về editable pre-intent state. Sau submission CP-12 khóa route/sources và
+  chỉ resume/verify/reconcile cùng operation, kể cả reload, deep link hoặc Browser Back.
+- Send/Bridge/Unified Balance đều khóa destination là verified escrow trên `Arc_Testnet`. Source
+  approval/deposit success không được trình bày như escrow funding success.
+- Pool credit dùng exact canonical Arc USDC destination receipt/event amount thực nhận sau fee. App
+  Kit success/result không phải source of truth nếu chưa verify destination evidence và lifetime
+  `totalFunded` threshold sau sync.
+- Primary funding không gọi `approve(escrow)`/`fund(amount)` và không dùng native `msg.value`;
+  contract nhận direct USDC rồi reconcile bằng idempotent `syncExternalFunding()`.
+- Bridge/Circle Gateway destination mint không gọi arbitrary escrow callback. Một escrow per
+  program, serialized funding intent, exact destination receipt/event và lifetime `totalFunded`
+  threshold phải ngăn attribution chéo.
+- Gross, estimated fee reserve/net và actual net received được phân biệt; Forwarding Service nếu
+  có là opt-in/config explicit, không âm thầm bật.
+- Arc receipt success là final; UI không chờ hoặc hiển thị nhiều confirmations.
+- Deployment/funding write idempotent theo Circle IDs, funding intent, route,
+  send/bridge/deposit/spend tx hashes, optional Gateway `transferId` hoặc
+  `chainId + txHash + logIndex`; timeout không được dẫn tới blind retry.
+- Durable tx hash recovery không re-sign: khi hash đã tồn tại, reload/reconnect chỉ poll receipt và
+  reconcile. Deterministic destination revert làm attempt đó terminal failed; retry dùng linked
+  operation attempt + idempotency key mới trong cùng locked funding intent, giữ source/evidence cũ.
+- Add funds/late funding sau terminal hoặc confirmed intent luôn tạo funding intent/key và CP-13
+  confirmation artifact mới; không reopen lịch sử cũ.
+- `refundUnlockAt` do server derive bằng chính xác `program.deadline`; client không có editable
+  override và program thiếu deadline thì deploy fail closed. Sau escrow confirmed, deadline change
+  bị block nếu không có verified on-chain extend flow tăng lock trước, verify final receipt/state rồi
+  mới cập nhật projection; không shorten hoặc database-only change.
+- CP-13 success bind canonical BountyEscrow `1.1.0` artifact/checksum và canonical Arc USDC
+  address/6 decimals; exact destination event amount + post-sync lifetime `totalFunded` threshold
+  phải được verify, mọi amount lưu base units. Pre/post live balance chỉ là telemetry/cross-check.
+- `withdrawRemaining(expectedAmount)` chỉ cho locked owner sau expired/closed, unlock reached và
+  outstanding bằng 0; chuyển đúng server-verified snapshot canonical USDC tới immutable recipient,
+  emit `RemainingFundsWithdrawn`, dùng CEI/reentrancy guard và không double-withdraw. Late amount
+  vượt snapshot ở lại escrow cho new intent.
+- EW-01..03 là owner escrow-management branch sau program end, verify Arc receipt/event trước DB
+  success; không dùng hoặc gọi Gateway `removeFund` cho escrow withdrawal.
+- Sau on-chain approval, payout target permissionless nhưng bị bind cứng vào report key,
+  recipient/amount đã approve; không mở quyền thay đổi reward.
 - Funding success thể hiện pool đã funded nhưng program vẫn chưa public cho tới khi Publish.
+- Publish chỉ ready khi `available_pool = canonical Arc USDC balance - totalApprovedOutstanding` và
+  `available_pool >= max_bounty`; raw balance hoặc estimated net không đủ làm collateralization proof.
 - Discard dialog bảo vệ dữ liệu chưa lưu.
-- Figma dùng Design System hiện tại, dark desktop, semantic layer names và prototype connections.
+- Figma chỉnh trực tiếp page `Program owner` và existing CP-11 → `CP-12 · Funding pending · Desktop`
+  (`106:680`) → CP-13 flow, reuse `BBE Design System`, dark desktop và semantic layer names; không
+  tạo parallel Owner page/flow hoặc thêm EW frames trong scope update này. CP-11/CP-12 phải thể
+  hiện route derivation và route-specific progress.

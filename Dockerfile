@@ -81,8 +81,13 @@ CMD ["node", "apps/web/server.js"]
 
 FROM source AS api-builder
 
+RUN pnpm --filter @bug-bounty-escrow/contracts build
 RUN pnpm --filter @bug-bounty-escrow/api... build
 RUN pnpm --filter @bug-bounty-escrow/api deploy --prod --legacy /opt/api
+RUN install -D -m 0444 \
+    /workspace/packages/contracts/artifacts/BountyEscrow.v1.json \
+    /opt/api/packages/contracts/artifacts/BountyEscrow.v1.json \
+    && test -s /opt/api/packages/contracts/artifacts/BountyEscrow.v1.json
 
 FROM node:22-bookworm-slim AS api
 

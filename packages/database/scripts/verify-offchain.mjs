@@ -13,6 +13,14 @@ const schemaVerificationPath = new URL(
 );
 const verificationPath = new URL('tests/offchain/verify_rls.sql', packageDirectory);
 const workflowVerificationPath = new URL('tests/offchain/verify_workflows.sql', packageDirectory);
+const escrowRecoveryVerificationPath = new URL(
+  'tests/offchain/verify_escrow_recovery.sql',
+  packageDirectory,
+);
+const gatewaySubscriptionVerificationPath = new URL(
+  'tests/offchain/verify_gateway_subscription_lifecycle.sql',
+  packageDirectory,
+);
 // The core-schema suite asserts DB-001..DB-004 in isolation, so it needs its own database.
 const coreSchemaMigrations = [
   '20260725000100_db_001_profiles.sql',
@@ -70,6 +78,8 @@ const migrations = readdirSync(migrationDirectory)
 const schemaVerificationSql = loadSql(schemaVerificationPath);
 const verificationSql = loadSql(verificationPath);
 const workflowVerificationSql = loadSql(workflowVerificationPath);
+const escrowRecoveryVerificationSql = loadSql(escrowRecoveryVerificationPath);
+const gatewaySubscriptionVerificationSql = loadSql(gatewaySubscriptionVerificationPath);
 let verificationFailed = false;
 
 {
@@ -156,10 +166,17 @@ for (let pass = 1; pass <= 2 && !verificationFailed; pass += 1) {
     }
     currentFile = 'verify_workflows.sql';
     await database.exec(workflowVerificationSql);
+    currentFile = 'verify_escrow_recovery.sql';
+    await database.exec(escrowRecoveryVerificationSql);
+    currentFile = 'verify_gateway_subscription_lifecycle.sql';
+    await database.exec(gatewaySubscriptionVerificationSql);
     process.stdout.write(`Off-chain database verification pass ${pass}: passed\n`);
   } catch (error) {
+    const databaseDetail = error && typeof error === 'object'
+      ? `\nposition=${String(error.position ?? '')} internal=${String(error.internalPosition ?? '')} detail=${String(error.detail ?? '')} where=${String(error.where ?? '')}`
+      : '';
     process.stderr.write(
-      `Off-chain database verification pass ${pass} failed in ${currentFile}\n${String(error)}\n`,
+      `Off-chain database verification pass ${pass} failed in ${currentFile}\n${String(error)}${databaseDetail}\n`,
     );
     verificationFailed = true;
     break;

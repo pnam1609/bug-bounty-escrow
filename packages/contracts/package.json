@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "build": "node scripts/compile.mjs",
+    "test": "forge test",
+    "fmt": "forge fmt --check",
     "lint": "eslint . --no-error-on-unmatched-pattern"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "5.4.0",
+    "solc": "0.8.30"
   }
 }

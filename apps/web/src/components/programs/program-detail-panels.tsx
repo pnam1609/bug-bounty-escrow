@@ -231,7 +231,6 @@ export function InformationPanel({ program }: { readonly program: Program }) {
               <BulletList
                 items={[
                   POC_POLICY_LABELS[rules.pocPolicy],
-                  'No KYC to submit a report',
                   'No wallet connection required to browse or submit',
                   'A human reviewer decides the final severity and the reward',
                 ]}

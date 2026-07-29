@@ -56,7 +56,14 @@ export const RESEARCHER_ACCOUNT_MENU_ITEMS = Object.freeze([
 
 export const RESEARCHER_LOGOUT_LABEL = ACCOUNT_SETTINGS_COPY.logOut;
 
-function AccountMenu() {
+/**
+ * Session-aware account actions shared by public app chrome and the marketing landing.
+ *
+ * Keeping this in one place prevents the landing from painting a stale `Sign in` action while
+ * Supabase restores an existing session, and gives every public entry point the same role/account
+ * treatment once authentication has resolved.
+ */
+export function HeaderAccountMenu() {
   const { loading, session } = useAuth();
   const user = useCurrentUser();
   const pathname = usePathname();
@@ -157,7 +164,7 @@ function AccountMenu() {
 export function ResearcherHeader() {
   return (
     <SiteHeader
-      actions={<AccountMenu />}
+      actions={<HeaderAccountMenu />}
       brand={
         <Link className="rounded-md" href="/programs">
           <SiteBrand />

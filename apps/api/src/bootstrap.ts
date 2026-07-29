@@ -53,6 +53,7 @@ export async function createApiApplication(
   const config = parseApiEnvironment(environmentInput);
   const app = await NestFactory.create(AppModule.forRoot(config), {
     bufferLogs: true,
+    rawBody: true,
   });
   const logger = app.get(AppLogger);
 

@@ -24,6 +24,7 @@ function savedDraft(): Program {
     maxBounty: '50000',
     inScopeAssetTypes: ['smart_contract'],
     rewardSeverities: ['critical'],
+    deadline: '2099-07-31T00:00:00.000Z',
     createdAt: '2026-07-01T00:00:00.000Z',
     updatedAt: '2026-07-01T00:00:00.000Z',
     scopes: [
@@ -89,7 +90,7 @@ describe('CP-10 draft readiness model', () => {
       'Complete',
       'Complete',
       'Not deployed',
-      '0 USDC',
+      '0 USDC available',
       'Not ready',
     ]);
   });
@@ -120,6 +121,21 @@ describe('CP-10 draft readiness model', () => {
     expect(readiness.find(({ id }) => id === 'reward-tiers')?.status).toBe('Incomplete');
   });
 
+  it('keeps publishing not ready when the deadline is missing or already elapsed', () => {
+    for (const deadline of [undefined, '2020-01-01T00:00:00.000Z']) {
+      const program: Program = {
+        ...savedDraft(),
+        ...(deadline === undefined ? { deadline: undefined } : { deadline }),
+        contractAddress: '0x1111111111111111111111111111111111111111',
+        totalPool: '50000',
+        remainingPool: '50000',
+      };
+      const readiness = buildProgramReadiness(program);
+      expect(readiness.find(({ id }) => id === 'program-details')?.complete).toBe(false);
+      expect(readiness.find(({ id }) => id === 'publishing')?.status).toBe('Not ready');
+    }
+  });
+
   it('keeps publishing separate and only marks it ready after escrow and funding', () => {
     const draft = savedDraft();
     const prepared: Program = {
@@ -135,5 +151,26 @@ describe('CP-10 draft readiness model', () => {
     expect(readiness.find(({ id }) => id === 'funding')?.status).toBe('Complete');
     expect(readiness.find(({ id }) => id === 'publishing')?.status).toBe('Ready');
     expect(readiness.find(({ id }) => id === 'publishing')?.complete).toBe(false);
+  });
+
+  it('does not advertise publish readiness when available collateral is below max bounty', () => {
+    const undercollateralized: Program = {
+      ...savedDraft(),
+      contractAddress: '0x1111111111111111111111111111111111111111',
+      totalPool: '185000',
+      reservedPool: '150000',
+      remainingPool: '35000',
+    };
+
+    const readiness = buildProgramReadiness(undercollateralized);
+
+    expect(readiness.find(({ id }) => id === 'funding')).toMatchObject({
+      complete: false,
+      status: '35,000 USDC available',
+    });
+    expect(readiness.find(({ id }) => id === 'publishing')).toMatchObject({
+      complete: false,
+      status: 'Not ready',
+    });
   });
 });

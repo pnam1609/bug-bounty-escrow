@@ -52,8 +52,6 @@ rollback() {
   exit "${exit_code}"
 }
 
-trap rollback ERR
-
 compose config --quiet
 
 if [[ "${PULL_IMAGES}" == 'true' ]]; then
@@ -69,10 +67,14 @@ else
   exit 1
 fi
 
+printf 'Validating the new API image and production configuration\n'
+compose run --rm --no-deps api node dist/config/validate-production.js
+
 printf 'Applying database migrations for %s\n' "${IMAGE_TAG}"
 compose run --rm migrate
 
 printf 'Starting application images for %s\n' "${IMAGE_TAG}"
+trap rollback ERR
 compose up --detach --remove-orphans --wait api web
 
 state_tmp="${STATE_FILE}.tmp"

@@ -31,6 +31,21 @@ const positiveIntegerSchema = z.union([
 ]);
 
 const portSchema = positiveIntegerSchema.pipe(z.number().max(65_535));
+const durationMillisecondsSchema = positiveIntegerSchema.pipe(z.number().max(600_000));
+const booleanStringSchema = z
+  .union([z.boolean(), z.enum(['true', 'false'])])
+  .transform((value) => value === true || value === 'true');
+const uuidAllowlistSchema = z
+  .string()
+  .default('')
+  .transform((value) =>
+    value
+      .split(',')
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length > 0),
+  )
+  .pipe(z.array(z.string().uuid()).max(64))
+  .refine((value) => new Set(value).size === value.length, 'Expected unique UUIDs');
 
 export const apiEnvironmentSchema = z
   .object({
@@ -41,9 +56,27 @@ export const apiEnvironmentSchema = z
     SUPABASE_ANON_KEY: secretValueSchema,
     SUPABASE_SERVICE_ROLE_KEY: secretValueSchema,
     ARC_RPC_URL: httpUrlSchema,
+    ETHEREUM_SEPOLIA_RPC_URL: httpUrlSchema.default('https://ethereum-sepolia-rpc.publicnode.com'),
+    ARBITRUM_SEPOLIA_RPC_URL: httpUrlSchema.default('https://sepolia-rollup.arbitrum.io/rpc'),
+    BASE_SEPOLIA_RPC_URL: httpUrlSchema.default('https://sepolia.base.org'),
+    CIRCLE_GATEWAY_TESTNET_API_URL: httpUrlSchema.default('https://gateway-api-testnet.circle.com'),
+    CIRCLE_GATEWAY_WEBHOOKS_ENABLED: booleanStringSchema.default(false),
+    CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: uuidAllowlistSchema,
     ARC_CHAIN_ID: positiveIntegerSchema,
     USDC_ADDRESS: evmAddressSchema,
     ESCROW_FACTORY_ADDRESS: evmAddressSchema.optional(),
+    CIRCLE_CONTRACTS_ENABLED: booleanStringSchema.default(false),
+    CIRCLE_API_KEY: secretValueSchema.optional(),
+    CIRCLE_ENTITY_SECRET: secretValueSchema.optional(),
+    CIRCLE_DEPLOYMENT_WALLET_ID: z.string().uuid().optional(),
+    CIRCLE_API_BASE_URL: httpUrlSchema.default('https://api.circle.com'),
+    CIRCLE_REQUEST_TIMEOUT_MS: durationMillisecondsSchema.default(15_000),
+    CIRCLE_POLL_INTERVAL_MS: durationMillisecondsSchema.default(2_000),
+    CIRCLE_POLL_TIMEOUT_MS: durationMillisecondsSchema.default(120_000),
+    BOUNTY_ESCROW_ARTIFACT_PATH: z
+      .string()
+      .min(1)
+      .default('packages/contracts/artifacts/BountyEscrow.v1.json'),
     AI_PROVIDER: z.enum(['mock', 'gemini', 'disabled']).default('mock'),
     GEMINI_API_KEY: secretValueSchema.optional(),
     LOG_LEVEL: z
@@ -57,6 +90,81 @@ export const apiEnvironmentSchema = z
         code: 'custom',
         path: ['GEMINI_API_KEY'],
         message: 'GEMINI_API_KEY is required when AI_PROVIDER is gemini',
+      });
+    }
+    if (environment.CIRCLE_CONTRACTS_ENABLED) {
+      for (const field of [
+        'CIRCLE_API_KEY',
+        'CIRCLE_ENTITY_SECRET',
+        'CIRCLE_DEPLOYMENT_WALLET_ID',
+      ] as const) {
+        if (environment[field] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} is required when CIRCLE_CONTRACTS_ENABLED is true`,
+          });
+        }
+      }
+      if (environment.ARC_CHAIN_ID !== 5_042_002) {
+        context.addIssue({
+          code: 'custom',
+          path: ['ARC_CHAIN_ID'],
+          message: 'Circle escrow deployment is locked to Arc Testnet chain ID 5042002',
+        });
+      }
+      if (
+        environment.USDC_ADDRESS.toLowerCase() !==
+        '0x3600000000000000000000000000000000000000'
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['USDC_ADDRESS'],
+          message: 'Circle escrow deployment requires canonical Arc Testnet USDC',
+        });
+      }
+      if (environment.CIRCLE_POLL_INTERVAL_MS >= environment.CIRCLE_POLL_TIMEOUT_MS) {
+        context.addIssue({
+          code: 'custom',
+          path: ['CIRCLE_POLL_INTERVAL_MS'],
+          message: 'Circle poll interval must be shorter than the poll timeout',
+        });
+      }
+      if (!environment.CIRCLE_GATEWAY_WEBHOOKS_ENABLED) {
+        context.addIssue({
+          code: 'custom',
+          path: ['CIRCLE_GATEWAY_WEBHOOKS_ENABLED'],
+          message:
+            'Gateway webhooks are required for independently finalized Unified Balance deposits',
+        });
+      }
+    }
+    if (environment.CIRCLE_GATEWAY_WEBHOOKS_ENABLED && environment.CIRCLE_API_KEY === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CIRCLE_API_KEY'],
+        message: 'CIRCLE_API_KEY is required when Circle Gateway webhooks are enabled',
+      });
+    }
+    if (
+      environment.CIRCLE_GATEWAY_WEBHOOKS_ENABLED &&
+      environment.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS.length !== 1
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS'],
+        message: 'Exactly one stable Circle Gateway webhook subscription ID is required',
+      });
+    }
+    if (
+      environment.CIRCLE_GATEWAY_WEBHOOKS_ENABLED &&
+      environment.CIRCLE_REQUEST_TIMEOUT_MS > 58_000
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CIRCLE_REQUEST_TIMEOUT_MS'],
+        message:
+          'Circle Gateway request timeout exceeds the durable 15-minute subscription sync lease budget',
       });
     }
   });

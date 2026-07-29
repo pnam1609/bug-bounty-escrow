@@ -2,6 +2,7 @@ import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-option
 import { Test } from '@nestjs/testing';
 import {
   CORRELATION_ID_HEADER,
+  EnvironmentValidationError,
   IDEMPOTENCY_KEY_HEADER,
   parseApiEnvironment,
   type ApiEnvironment,
@@ -67,5 +68,59 @@ describe('API configuration', () => {
     (options.origin as OriginResolver)(undefined, callback);
 
     expect(callback).toHaveBeenCalledWith(null, true);
+  });
+
+  it('fails closed when Circle contracts are enabled without finalized Gateway webhooks', () => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_CONTRACTS_ENABLED: true,
+        CIRCLE_API_KEY: 'circle-api-key',
+        CIRCLE_ENTITY_SECRET: 'circle-entity-secret',
+        CIRCLE_DEPLOYMENT_WALLET_ID: '31000000-0000-4000-8000-000000000001',
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+        ARC_CHAIN_ID: 5_042_002,
+        USDC_ADDRESS: '0x3600000000000000000000000000000000000000',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: EnvironmentValidationError.name,
+        message: expect.stringContaining('CIRCLE_GATEWAY_WEBHOOKS_ENABLED'),
+      }),
+    );
+  });
+
+  it('requires exactly one stable Gateway subscription when webhooks are enabled', () => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOKS_ENABLED: true,
+        CIRCLE_API_KEY: 'circle-api-key',
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS:
+          '31000000-0000-4000-8000-000000000001,31000000-0000-4000-8000-000000000002',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: EnvironmentValidationError.name,
+        message: expect.stringContaining('CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS'),
+      }),
+    );
+  });
+
+  it('bounds Gateway request timeout to the durable subscription lease budget', () => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOKS_ENABLED: true,
+        CIRCLE_API_KEY: 'circle-api-key',
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '31000000-0000-4000-8000-000000000001',
+        CIRCLE_REQUEST_TIMEOUT_MS: 58_001,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: EnvironmentValidationError.name,
+        message: expect.stringContaining('CIRCLE_REQUEST_TIMEOUT_MS'),
+      }),
+    );
   });
 });

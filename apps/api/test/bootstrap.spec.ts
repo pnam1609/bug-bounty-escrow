@@ -65,6 +65,19 @@ describe('API bootstrap', () => {
     });
   });
 
+  it('keeps the public Circle Gateway reachability HEAD route live', async () => {
+    const { app } = await createApiApplication(SAFE_ENVIRONMENT);
+    applications.push(app);
+    await app.init();
+
+    const response = await request(app.getHttpServer()).head(
+      '/api/webhooks/circle/gateway',
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({});
+  });
+
   it('formats unexpected startup failures without leaking their message', () => {
     expect(formatStartupError(new Error('secret connection string'))).toBe(
       'API failed to start because of an unexpected error',

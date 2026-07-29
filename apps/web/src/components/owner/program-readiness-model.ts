@@ -1,4 +1,8 @@
-import type { AuthorableAssetType, Program } from '@bug-bounty-escrow/shared';
+import {
+  parseUsdcBaseUnits,
+  type AuthorableAssetType,
+  type Program,
+} from '@bug-bounty-escrow/shared';
 
 export type ProgramReadinessId =
   | 'program-details'
@@ -20,11 +24,6 @@ export interface ProgramReadinessItem {
 
 function hasText(value: string | undefined): boolean {
   return value !== undefined && value.trim() !== '';
-}
-
-function isPositiveAmount(value: string): boolean {
-  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return false;
-  return /[1-9]/.test(value);
 }
 
 function formatUsdc(amount: string): string {
@@ -68,6 +67,9 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
     hasText(program.shortSummary) &&
     hasText(program.description) &&
     hasText(program.websiteUrl) &&
+    program.deadline !== undefined &&
+    Number.isFinite(Date.parse(program.deadline)) &&
+    Date.parse(program.deadline) > Date.now() &&
     program.tags.length > 0;
   const scopeComplete = inScopeTypes.length > 0;
   const impactsComplete =
@@ -86,7 +88,13 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
 
   const contractAddress = program.contractAddress?.trim() ?? '';
   const deployed = contractAddress !== '';
-  const funded = isPositiveAmount(program.totalPool);
+  const availableBaseUnits = parseUsdcBaseUnits(program.remainingPool);
+  const maxBountyBaseUnits = parseUsdcBaseUnits(program.maxBounty);
+  const funded =
+    availableBaseUnits !== undefined &&
+    maxBountyBaseUnits !== undefined &&
+    maxBountyBaseUnits > 0n &&
+    availableBaseUnits >= maxBountyBaseUnits;
   const published = program.publicStatus !== null && program.publishedAt !== undefined;
   const publishingReady = authoringComplete && deployed && funded;
 
@@ -137,9 +145,11 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
     },
     {
       complete: funded,
-      detail: funded ? 'Rewards are secured in escrow' : 'Fund rewards before publishing',
+      detail: funded
+        ? 'Available escrow covers the maximum bounty'
+        : `Available escrow must cover the ${formatUsdc(program.maxBounty)} maximum bounty`,
       id: 'funding',
-      status: funded ? 'Complete' : formatUsdc(program.totalPool),
+      status: funded ? 'Complete' : `${formatUsdc(program.remainingPool)} available`,
       title: 'Funding',
     },
     {

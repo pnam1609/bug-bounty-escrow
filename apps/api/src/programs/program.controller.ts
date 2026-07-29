@@ -2,6 +2,7 @@ import {
   Controller,
   Delete,
   Get,
+  GoneException,
   Inject,
   Patch,
   Post,
@@ -131,10 +132,12 @@ export class ProgramController {
     @ZodBody(deployEscrowRequestSchema) input: DeployEscrowRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ProgramResponse> {
-    return {
-      success: true,
-      data: await this.service.deployEscrow(requirePrincipal(principal), params.id, input),
-    };
+    requirePrincipal(principal);
+    void params;
+    void input;
+    throw new GoneException(
+      'Legacy escrow evidence endpoint retired; use /programs/:id/escrow-deployments',
+    );
   }
 
   @Roles('owner')
@@ -145,10 +148,12 @@ export class ProgramController {
     @ZodBody(fundProgramRequestSchema) input: FundProgramRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ProgramResponse> {
-    return {
-      success: true,
-      data: await this.service.fund(requirePrincipal(principal), params.id, input),
-    };
+    requirePrincipal(principal);
+    void params;
+    void input;
+    throw new GoneException(
+      'Legacy client-trusted funding endpoint retired; use /programs/:id/funding-intents',
+    );
   }
 
   @Roles('owner')

@@ -1,3 +1,5 @@
+'use client';
+
 import {
   Button,
   SiteBrand,
@@ -11,6 +13,11 @@ import {
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { ROLE_LANDING_PATHS } from '@/components/onboarding/role-options';
+import { HeaderAccountMenu } from '@/components/programs/researcher-shell';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { useAuth } from '@/providers/auth-provider';
+
 /*
  * Header instance 167:525 and footer instance 167:541 on the landing frame. Both are the shell
  * components from `@bug-bounty-escrow/ui`; this file only supplies the Public-context slots.
@@ -23,10 +30,51 @@ interface ChromeLink {
 
 const HEADER_NAV: readonly ChromeLink[] = [
   { href: '/programs', label: 'Programs' },
-  { href: '#how-escrow-works', label: 'How it works' },
-  { href: '#live-escrow', label: 'Escrow' },
-  { href: '#why-bountyescrow', label: 'Security' },
+  { href: '/#how-escrow-works', label: 'How it works' },
+  { href: '/#live-escrow', label: 'Escrow' },
+  { href: '/#why-bountyescrow', label: 'Security' },
 ];
+
+function LandingHeaderActions() {
+  const { loading, session } = useAuth();
+  const user = useCurrentUser();
+
+  // Never flash anonymous CTAs while Supabase is restoring a persisted session.
+  if (loading) {
+    return (
+      <span
+        aria-label="Loading account"
+        className="h-11 w-32 rounded-full border border-border bg-surface-raised"
+        role="status"
+      />
+    );
+  }
+
+  if (session === null) {
+    return (
+      <>
+        {/* Below `sm` the bar keeps only the primary action so the row never forces a scroll. */}
+        <Button asChild className="hidden sm:inline-flex" size="md" variant="ghost">
+          <Link href="/login">Sign in</Link>
+        </Button>
+        <Button asChild size="md" variant="primary">
+          <Link href="/programs">Launch app</Link>
+        </Button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {user.data === undefined ? null : (
+        <Button asChild className="hidden sm:inline-flex" size="md" variant="ghost">
+          <Link href={ROLE_LANDING_PATHS[user.data.role]}>Open workspace</Link>
+        </Button>
+      )}
+      <HeaderAccountMenu />
+    </>
+  );
+}
 
 /*
  * Figma's header instance paints "Programs" at full strength because it is drawn in the Public
@@ -36,17 +84,7 @@ const HEADER_NAV: readonly ChromeLink[] = [
 export function LandingHeader(): ReactNode {
   return (
     <SiteHeader
-      actions={
-        <>
-          {/* Below `sm` the bar keeps only the primary action so the row never forces a scroll. */}
-          <Button asChild className="hidden sm:inline-flex" size="md" variant="ghost">
-            <Link href="/login">Sign in</Link>
-          </Button>
-          <Button asChild size="md" variant="primary">
-            <Link href="/programs">Launch app</Link>
-          </Button>
-        </>
-      }
+      actions={<LandingHeaderActions />}
       brand={
         <Link className="inline-flex min-h-11 shrink-0 items-center rounded-md" href="/">
           <SiteBrand />

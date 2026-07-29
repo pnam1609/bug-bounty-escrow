@@ -44,6 +44,8 @@ const expectedMigrations = [
   '20260727190000_rw02_researcher_rewards.sql',
   '20260727200000_rw04_researcher_payout_wallet.sql',
   '20260728090000_sr01_program_slug_immutable.sql',
+  '20260729000100_cp13_arc_escrow_intents.sql',
+  '20260729000200_cp13_gateway_subscription_lifecycle.sql',
 ];
 
 const tableMigrations = new Map([
@@ -162,6 +164,32 @@ const requiredIndexes = [
 for (const indexName of requiredIndexes) {
   if (!db014.includes(indexName)) {
     fail(`DB-014 is missing ${indexName}`);
+  }
+}
+
+const gatewayLifecycle = migrationContents.get(
+  '20260729000200_cp13_gateway_subscription_lifecycle.sql',
+);
+for (const tableName of [
+  'circle_gateway_subscriptions',
+  'circle_gateway_registrations',
+  'circle_gateway_webhook_tests',
+]) {
+  if (!gatewayLifecycle.includes(`create table public.${tableName}`)) {
+    fail(`CP-13 Gateway lifecycle migration does not own public.${tableName}`);
+  }
+}
+for (const functionName of [
+  'list_active_unified_balance_gateway_intent_ids',
+  'prepare_gateway_subscription_registration_atomic',
+  'complete_gateway_subscription_sync_atomic',
+  'fail_gateway_subscription_sync_atomic',
+  'gateway_subscription_intent_ready',
+  'record_gateway_webhook_test_atomic',
+  'gateway_webhook_test_received_after',
+]) {
+  if (!gatewayLifecycle.includes(`function public.${functionName}`)) {
+    fail(`CP-13 Gateway lifecycle migration does not own public.${functionName}`);
   }
 }
 

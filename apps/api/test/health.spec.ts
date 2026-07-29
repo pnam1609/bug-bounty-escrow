@@ -1,6 +1,10 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { parseApiEnvironment } from '@bug-bounty-escrow/shared';
+import {
+  CORRELATION_ID_HEADER,
+  IDEMPOTENCY_KEY_HEADER,
+  parseApiEnvironment,
+} from '@bug-bounty-escrow/shared';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -50,14 +54,18 @@ afterEach(async () => {
 });
 
 describe('GET /api/health', () => {
-  it('returns minimal public readiness without calling a real dependency', async () => {
+  it('returns minimal public readiness with CORS headers for the configured web origin', async () => {
     const checker = { check: vi.fn().mockResolvedValue(true) };
     const app = await createTestApp(checker);
 
     applications.push(app);
-    const response = await request(app.getHttpServer()).get('/api/health');
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('Origin', config.WEB_APP_ORIGIN);
 
     expect(response.status).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe(config.WEB_APP_ORIGIN);
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
     expect(response.body).toEqual({
       status: 'ok',
       ready: true,
@@ -66,16 +74,20 @@ describe('GET /api/health', () => {
     expect(checker.check).toHaveBeenCalledOnce();
   });
 
-  it('returns a documented non-ready response when the dependency fails', async () => {
+  it('keeps CORS headers on documented error responses', async () => {
     const checker = {
       check: vi.fn().mockRejectedValue(new Error('private connection failure')),
     };
     const app = await createTestApp(checker);
 
     applications.push(app);
-    const response = await request(app.getHttpServer()).get('/api/health');
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('Origin', config.WEB_APP_ORIGIN);
 
     expect(response.status).toBe(503);
+    expect(response.headers['access-control-allow-origin']).toBe(config.WEB_APP_ORIGIN);
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
     expect(response.body).toEqual({
       status: 'degraded',
       ready: false,
@@ -101,5 +113,45 @@ describe('GET /api/health', () => {
 
     expect(response.status).toBe(503);
     expect(performance.now() - startedAt).toBeLessThan(500);
+  });
+
+  it('answers an allowed browser preflight with the configured CORS contract', async () => {
+    const checker = { check: vi.fn().mockResolvedValue(true) };
+    const app = await createTestApp(checker);
+
+    applications.push(app);
+    const response = await request(app.getHttpServer())
+      .options('/api/health')
+      .set('Origin', config.WEB_APP_ORIGIN)
+      .set('Access-Control-Request-Method', 'GET')
+      .set(
+        'Access-Control-Request-Headers',
+        `authorization,content-type,${CORRELATION_ID_HEADER},${IDEMPOTENCY_KEY_HEADER}`,
+      );
+
+    const allowedHeaders = response.headers['access-control-allow-headers']
+      ?.split(',')
+      .map((header: string) => header.toLowerCase());
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe(config.WEB_APP_ORIGIN);
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers['access-control-allow-methods']).toContain('GET');
+    expect(allowedHeaders).toEqual(
+      expect.arrayContaining(['authorization', CORRELATION_ID_HEADER, IDEMPOTENCY_KEY_HEADER]),
+    );
+  });
+
+  it('does not emit an allow-origin header for an unconfigured browser origin', async () => {
+    const checker = { check: vi.fn().mockResolvedValue(true) };
+    const app = await createTestApp(checker);
+
+    applications.push(app);
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .set('Origin', 'https://attacker.example.test');
+
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect(checker.check).not.toHaveBeenCalled();
   });
 });
