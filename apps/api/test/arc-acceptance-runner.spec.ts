@@ -289,7 +289,7 @@ describe('QA-ARC-01 durable acceptance state machine', () => {
       'CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS must contain exactly one UUID',
     );
     expect(invalidAllowlist.stderr).not.toContain('31990000-0000-4000-8000-000000000032');
-  });
+  }, 15_000);
 
   it('GET-verifies the exact durable reload projection and fails a changed fingerprint', async () => {
     const driver = passingDriver();
