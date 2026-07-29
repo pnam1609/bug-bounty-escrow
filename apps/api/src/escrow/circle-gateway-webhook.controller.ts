@@ -51,6 +51,7 @@ export class CircleGatewayWebhookController {
   public readiness(): void {}
 
   @Post('gateway')
+  @HttpCode(200)
   @RateLimit({ limit: 30, windowMs: 60_000 })
   @ApiHeader({ name: 'x-circle-key-id', required: true })
   @ApiHeader({ name: 'x-circle-signature', required: true })

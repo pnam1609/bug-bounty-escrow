@@ -169,6 +169,10 @@ describe('OpenAPI generation', () => {
       },
       security: [{}],
     });
+    expect(document.paths['/webhooks/circle/gateway']?.post?.responses).toMatchObject({
+      200: expect.any(Object),
+    });
+    expect(document.paths['/webhooks/circle/gateway']?.post?.responses?.[201]).toBeUndefined();
     expect(document.components?.schemas?.['ApiErrorResponse']).toBeDefined();
     expect(document.components?.headers?.['CorrelationId']).toBeDefined();
   });
