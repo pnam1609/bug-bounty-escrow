@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
+FROM ghcr.io/foundry-rs/foundry@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd AS foundry
+
 FROM node:22-bookworm-slim AS workspace-base
 
 ENV CI=true
@@ -30,13 +32,26 @@ FROM dependencies AS source
 
 COPY . .
 
+FROM foundry AS contracts-quality
+
+WORKDIR /workspace/packages/contracts
+
+COPY --from=source --chown=foundry:foundry /workspace /workspace
+
+RUN forge fmt --check \
+    && forge test \
+    && forge --version > /tmp/contracts-quality.passed
+
 FROM source AS quality
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+COPY --from=contracts-quality /tmp/contracts-quality.passed /tmp/contracts-quality.passed
+
+RUN test -s /tmp/contracts-quality.passed
 RUN pnpm lint
 RUN pnpm typecheck
-RUN pnpm test
+RUN pnpm exec turbo run test --filter='!@bug-bounty-escrow/contracts'
 
 FROM source AS web-builder
 

@@ -1,7 +1,9 @@
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { stdout } from 'node:process';
 import solc from 'solc';
 
 const root = resolve(import.meta.dirname, '..');
@@ -81,4 +83,4 @@ const result = {
 const destination = resolve(root, 'artifacts/BountyEscrow.v1.json');
 await mkdir(dirname(destination), { recursive: true });
 await writeFile(destination, `${JSON.stringify(result, null, 2)}\n`);
-console.log(`Wrote ${destination}`);
+stdout.write(`Wrote ${destination}\n`);

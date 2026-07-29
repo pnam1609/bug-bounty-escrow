@@ -1,6 +1,7 @@
 .git
 .github
 .idea
+.tmp
 .vscode
 
 **/node_modules
