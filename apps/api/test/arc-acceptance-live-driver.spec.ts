@@ -689,7 +689,7 @@ describe('QA-ARC-01 live read-only verifier', () => {
   });
 
   it('requires the exact trusted Gateway webhook endpoint and notification type set', async () => {
-    const exactPreflight = preflightMock();
+    const exactPreflight = preflightMock({ domains: ['0', '3', '6', '26'] });
     await expect(
       driver(exactPreflight).verify('production_preflight', acceptanceState()),
     ).resolves.toMatchObject({
@@ -721,6 +721,15 @@ describe('QA-ARC-01 live read-only verifier', () => {
 
     await expect(
       driver(preflightMock({ domains: ['3', '6', '26'] })).verify(
+        'production_preflight',
+        acceptanceState(),
+      ),
+    ).rejects.toMatchObject({
+      code: 'gateway_subscription_preflight_failed',
+    });
+
+    await expect(
+      driver(preflightMock({ domains: ['0', '3', '6'] })).verify(
         'production_preflight',
         acceptanceState(),
       ),

@@ -466,11 +466,12 @@ export class LiveArcAcceptanceDriver implements ArcAcceptanceDriver {
       !gateway.domains.includes('0') ||
       !gateway.domains.includes('3') ||
       !gateway.domains.includes('6') ||
+      !gateway.domains.includes('26') ||
       gateway.addresses.length > 48
     ) {
       throw new AcceptanceAssertionError(
         'gateway_subscription_preflight_failed',
-        'The stable TEST Gateway subscription must use the expected webhook endpoint and exact notification type, cover Ethereum, Base and Arbitrum, and retain capacity for the dedicated run.',
+        'The stable TEST Gateway subscription must use the expected webhook endpoint and exact notification type, cover Arc, Ethereum, Base and Arbitrum, and retain capacity for the dedicated run.',
         false,
       );
     }
