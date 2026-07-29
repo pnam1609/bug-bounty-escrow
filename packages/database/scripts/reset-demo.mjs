@@ -5,6 +5,7 @@ import process from 'node:process';
 import { URL, pathToFileURL } from 'node:url';
 
 import { compatibilityBootstrap } from './compatibility-bootstrap.mjs';
+import { DEMO_PASSWORD, DEMO_PASSWORD_SALT } from './production-safety.mjs';
 
 const packageDirectory = new URL('../', import.meta.url);
 const migrationDirectory = new URL('migrations/', packageDirectory);
@@ -45,7 +46,7 @@ export async function migrateAndResetDemo(database) {
       await database.exec(loadSql(new URL(migration, migrationDirectory)));
     }
   }
-  const passwordHash = hashSync('local-demo-password', '$2b$10$abcdefghijklmnopqrstuu');
+  const passwordHash = hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT);
   await database.exec(loadSql(seedPath).replaceAll('__DEMO_PASSWORD_HASH__', passwordHash));
 }
 

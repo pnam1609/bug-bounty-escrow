@@ -56,7 +56,10 @@ describe('current-user HTTP integration', () => {
             Promise.resolve(
               token === AUTH_TOKEN_FIXTURES.valid
                 ? { data: { user: { id: userId, email } }, error: null }
-                : { data: { user: null }, error: { message: 'invalid claim: missing sub claim' } },
+                : {
+                    data: { user: null },
+                    error: { message: 'invalid claim: missing sub claim' },
+                  },
             ),
           ),
         },
@@ -64,6 +67,7 @@ describe('current-user HTTP integration', () => {
       {
         findProfile: vi.fn().mockResolvedValue({ role: 'researcher' }),
       } as never,
+      { NODE_ENV: 'test' },
     );
     const module = await Test.createTestingModule({
       controllers: [MeController],
@@ -332,7 +336,9 @@ describe('current-user HTTP integration', () => {
       repository.findProfile.mockResolvedValue({ ...researcherRow, display_name: maximumName });
 
       // 124 raw characters that trim down to the 120-character maximum must pass, trimmed.
-      await patch().send({ displayName: `  ${maximumName}  ` }).expect(200);
+      await patch()
+        .send({ displayName: `  ${maximumName}  ` })
+        .expect(200);
       expect(repository.updateProfile).toHaveBeenCalledWith(userId, { displayName: maximumName });
 
       for (const displayName of ['a'.repeat(121), '   ', '\t\n ', '', 42, null, undefined]) {

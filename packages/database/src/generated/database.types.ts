@@ -2180,6 +2180,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_active_auth_user: { Args: never; Returns: boolean }
       is_program_owner: {
         Args: { target_program_id: string }
         Returns: boolean

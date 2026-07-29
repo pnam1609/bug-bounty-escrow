@@ -236,6 +236,9 @@ importers:
 
   packages/database:
     dependencies:
+      bcryptjs:
+        specifier: 3.0.2
+        version: 3.0.2
       pg:
         specifier: ^8.22.0
         version: 8.22.0
@@ -243,9 +246,6 @@ importers:
       '@electric-sql/pglite':
         specifier: 0.5.4
         version: 0.5.4
-      bcryptjs:
-        specifier: 3.0.2
-        version: 3.0.2
 
   packages/domain: {}
 

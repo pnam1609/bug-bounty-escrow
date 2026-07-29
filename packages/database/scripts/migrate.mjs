@@ -5,6 +5,10 @@ import { URL, pathToFileURL } from 'node:url';
 import pg from 'pg';
 
 import { compatibilityBootstrap } from './compatibility-bootstrap.mjs';
+import {
+  assertDemoSeedTargetSafety,
+  assertProductionDemoIdentitySafety,
+} from './production-safety.mjs';
 
 /*
  * Applies `migrations/` to a real PostgreSQL over a connection string.
@@ -65,7 +69,15 @@ async function ensureLedger(client) {
   return new Set(rows.map((row) => row.version));
 }
 
-export async function migrate(client, { seed = false, log = () => {} } = {}) {
+export async function migrate(
+  client,
+  { seed = false, log = () => {}, environment = process.env } = {},
+) {
+  if (seed) {
+    assertDemoSeedTargetSafety(environment);
+  }
+  await assertProductionDemoIdentitySafety(client, environment);
+
   if (await ensureCompatibilityLayer(client)) {
     log('applied the Supabase compatibility shim (bare PostgreSQL target)');
   }
@@ -115,6 +127,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     await migrate(client, {
       seed: process.argv.includes('--seed'),
       log: (message) => process.stdout.write(`${message}\n`),
+      environment: process.env,
     });
   } finally {
     await client.end();

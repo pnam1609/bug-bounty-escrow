@@ -2,6 +2,8 @@ import { hashSync } from 'bcryptjs';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 
+import { DEMO_PASSWORD, DEMO_PASSWORD_SALT } from './production-safety.mjs';
+
 /*
  * Loads the demo seed into a real PostgreSQL and, when the target is a genuine Supabase stack,
  * finishes the demo users so GoTrue will actually authenticate them.
@@ -19,8 +21,7 @@ import { URL } from 'node:url';
 const seedPath = new URL('../seeds/offchain-demo.sql', import.meta.url);
 
 /** Matches `reset-demo.mjs` so the demo password is identical on every target. */
-export const DEMO_PASSWORD = 'local-demo-password';
-const DEMO_PASSWORD_SALT = '$2b$10$abcdefghijklmnopqrstuu';
+export { DEMO_PASSWORD };
 
 /** Every seeded account shares this id prefix, which is also how the seed deletes its own rows. */
 const DEMO_USER_ID_PREFIX = '30000000-%';
@@ -86,10 +87,9 @@ async function completeGoTrueUsers(client, log) {
     .filter(([column]) => userColumns.has(column))
     .map(([column, value]) => `${column} = ${value}`);
 
-  await client.query(
-    `update auth.users set ${assignments.join(', ')} where id::text like $1`,
-    [DEMO_USER_ID_PREFIX],
-  );
+  await client.query(`update auth.users set ${assignments.join(', ')} where id::text like $1`, [
+    DEMO_USER_ID_PREFIX,
+  ]);
 
   const identityColumns = await columnsOf(client, 'auth', 'identities');
   if (identityColumns.size === 0) {

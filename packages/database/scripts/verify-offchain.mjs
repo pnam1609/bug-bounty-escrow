@@ -21,6 +21,7 @@ const gatewaySubscriptionVerificationPath = new URL(
   'tests/offchain/verify_gateway_subscription_lifecycle.sql',
   packageDirectory,
 );
+const securityBoundaryMigration = '20260729000300_sec_prod_banned_auth_rls.sql';
 // The core-schema suite asserts DB-001..DB-004 in isolation, so it needs its own database.
 const coreSchemaMigrations = [
   '20260725000100_db_001_profiles.sql',
@@ -38,6 +39,8 @@ const bootstrapSql = `
     id uuid primary key,
     email text,
     encrypted_password text,
+    banned_until timestamp with time zone,
+    updated_at timestamp with time zone not null default now(),
     raw_user_meta_data jsonb not null default '{}'::jsonb
   );
   create function auth.uid()
@@ -98,9 +101,7 @@ let verificationFailed = false;
     await coreDatabase.exec(loadSql(coreVerificationPath));
     process.stdout.write('Core-schema verification: passed\n');
   } catch (error) {
-    process.stderr.write(
-      `Core-schema verification failed in ${coreFile}\n${String(error)}\n`,
-    );
+    process.stderr.write(`Core-schema verification failed in ${coreFile}\n${String(error)}\n`);
     verificationFailed = true;
   } finally {
     await coreDatabase.close();
@@ -116,7 +117,27 @@ for (let pass = 1; pass <= 2 && !verificationFailed; pass += 1) {
 
     for (const migration of migrations) {
       currentFile = migration;
-      await database.exec(loadSql(new URL(migration, migrationDirectory)));
+      const migrationSql = loadSql(new URL(migration, migrationDirectory));
+
+      if (migration === securityBoundaryMigration && pass === 1) {
+        await database.exec('begin; alter table storage.objects disable row level security;');
+        let rejectedUnsafeStorage = false;
+        try {
+          await database.exec(migrationSql);
+        } catch (error) {
+          rejectedUnsafeStorage = String(error).includes(
+            'Storage RLS security boundary is unavailable',
+          );
+        } finally {
+          await database.exec('rollback;');
+        }
+
+        if (!rejectedUnsafeStorage) {
+          throw new Error('SEC-PROD-001 accepted storage.objects without RLS');
+        }
+      }
+
+      await database.exec(migrationSql);
     }
 
     /*
@@ -132,6 +153,8 @@ for (let pass = 1; pass <= 2 && !verificationFailed; pass += 1) {
     await database.exec(`
       grant all on all tables in schema storage to service_role;
       grant usage on schema storage to service_role;
+      grant usage on schema storage to authenticated;
+      grant select, insert, update, delete on storage.objects to authenticated;
     `);
     currentFile = 'verify_schema.sql';
     await database.exec(schemaVerificationSql);
@@ -172,9 +195,10 @@ for (let pass = 1; pass <= 2 && !verificationFailed; pass += 1) {
     await database.exec(gatewaySubscriptionVerificationSql);
     process.stdout.write(`Off-chain database verification pass ${pass}: passed\n`);
   } catch (error) {
-    const databaseDetail = error && typeof error === 'object'
-      ? `\nposition=${String(error.position ?? '')} internal=${String(error.internalPosition ?? '')} detail=${String(error.detail ?? '')} where=${String(error.where ?? '')}`
-      : '';
+    const databaseDetail =
+      error && typeof error === 'object'
+        ? `\nposition=${String(error.position ?? '')} internal=${String(error.internalPosition ?? '')} detail=${String(error.detail ?? '')} where=${String(error.where ?? '')}`
+        : '';
     process.stderr.write(
       `Off-chain database verification pass ${pass} failed in ${currentFile}\n${String(error)}${databaseDetail}\n`,
     );

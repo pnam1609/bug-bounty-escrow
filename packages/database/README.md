@@ -69,6 +69,23 @@ ranges, seeds data, and always closes the database. It refuses missing environme
 confirmation, or path values. Re-running produces the same entity counts and no
 duplicates.
 
+`db:migrate --seed` remains available without extra flags for a loopback
+PostgreSQL target. It always refuses `NODE_ENV=production`. A remote disposable
+demo/test target additionally requires `DEMO_ENV=demo` (or `test`) and
+`DEMO_SEED_CONFIRM=SEED_REMOTE_DEMO_DATABASE`; those flags never override the
+production refusal. Production migrations also fail closed before changing the
+schema if deterministic local-demo identities exist without a current Auth ban.
+On a completely fresh bare PostgreSQL target, where both `auth.users` and the
+`authenticated` role are absent, that preflight permits the compatibility shim
+to install both. A partial Auth catalog (only one is present) is treated as an
+inconsistent target and fails closed.
+The API additionally rejects those identities when `NODE_ENV=production`, but
+that is defense in depth for the service-role API path. A restrictive
+authenticated-role policy also checks `auth.users.banned_until` on every
+RLS-enabled application table and `storage.objects`, so an Auth ban immediately
+blocks direct PostgREST and Storage use by an already-issued JWT. The policy
+does not apply to `anon` public reads or the API's `service_role`.
+
 ## Data and deletion decisions
 
 - Profile IDs are Supabase Auth user UUIDs. The default role is `researcher`; owner

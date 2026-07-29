@@ -46,6 +46,7 @@ const expectedMigrations = [
   '20260728090000_sr01_program_slug_immutable.sql',
   '20260729000100_cp13_arc_escrow_intents.sql',
   '20260729000200_cp13_gateway_subscription_lifecycle.sql',
+  '20260729000300_sec_prod_banned_auth_rls.sql',
 ];
 
 const tableMigrations = new Map([

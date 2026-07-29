@@ -55,6 +55,7 @@ describe('MR-02 report program filter options HTTP contract', () => {
       {
         findProfile: vi.fn().mockImplementation(() => Promise.resolve({ role })),
       } as never,
+      { NODE_ENV: 'test' },
     );
     const repository = new ReportRepository({ rpc } as never);
     const module = await Test.createTestingModule({
@@ -137,9 +138,7 @@ describe('MR-02 report program filter options HTTP contract', () => {
 
   it('always derives the researcher from the session, never from a query override', async () => {
     await request(app.getHttpServer())
-      .get(
-        `/api/reports/filter-options/programs?researcherId=90000000-0000-4000-8000-000000000009`,
-      )
+      .get(`/api/reports/filter-options/programs?researcherId=90000000-0000-4000-8000-000000000009`)
       .set('Authorization', `Bearer ${AUTH_TOKEN_FIXTURES.valid}`)
       .expect(200);
 

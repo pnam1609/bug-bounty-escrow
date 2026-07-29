@@ -57,6 +57,7 @@ describe('RW-02 researcher reward HTTP contract', () => {
       {
         findProfile: vi.fn().mockImplementation(() => Promise.resolve({ role })),
       } as never,
+      { NODE_ENV: 'test' },
     );
     const repository = new RewardRepository({ rpc } as never);
     const module = await Test.createTestingModule({
@@ -316,9 +317,7 @@ describe('RW-02 researcher reward HTTP contract', () => {
     });
 
     rpc.mockClear();
-    await walletUpdate()
-      .send({ address: replacement, researcherId: PROGRAM_ID })
-      .expect(400);
+    await walletUpdate().send({ address: replacement, researcherId: PROGRAM_ID }).expect(400);
     expect(rpc).not.toHaveBeenCalled();
   });
 

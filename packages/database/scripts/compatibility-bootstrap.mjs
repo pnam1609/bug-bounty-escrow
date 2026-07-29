@@ -13,6 +13,8 @@ export const compatibilityBootstrap = `
     id uuid primary key,
     email text,
     encrypted_password text,
+    banned_until timestamp with time zone,
+    updated_at timestamp with time zone not null default now(),
     raw_user_meta_data jsonb not null default '{}'::jsonb
   );
   create function auth.uid()
