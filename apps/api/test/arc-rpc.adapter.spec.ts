@@ -64,6 +64,27 @@ const DEPOSITED_ABI = {
     { name: 'value', type: 'uint256', indexed: false },
   ],
 } as const;
+const REWARD_APPROVED_ABI = {
+  type: 'event',
+  name: 'RewardApproved',
+  anonymous: false,
+  inputs: [
+    { name: 'reportKey', type: 'bytes32', indexed: true },
+    { name: 'approvedContentHash', type: 'bytes32', indexed: true },
+    { name: 'researcher', type: 'address', indexed: true },
+    { name: 'amount', type: 'uint256', indexed: false },
+  ],
+} as const;
+const REWARD_PAID_ABI = {
+  type: 'event',
+  name: 'RewardPaid',
+  anonymous: false,
+  inputs: [
+    { name: 'reportKey', type: 'bytes32', indexed: true },
+    { name: 'researcher', type: 'address', indexed: true },
+    { name: 'amount', type: 'uint256', indexed: false },
+  ],
+} as const;
 
 function config() {
   return parseApiEnvironment({
@@ -88,10 +109,7 @@ function initializedLog(owner = OWNER) {
       eventName: 'EscrowInitialized',
       args: { programKey: PROGRAM_KEY, owner, token: USDC },
     }),
-    data: encodeAbiParameters(
-      [{ type: 'uint256' }, { type: 'address' }],
-      [UNLOCK, RECIPIENT],
-    ),
+    data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }], [UNLOCK, RECIPIENT]),
     logIndex: 0,
   };
 }
@@ -139,6 +157,186 @@ const ARTIFACT = {
 };
 
 describe('Arc RPC escrow verifier', () => {
+  it('accepts exact RewardApproved evidence even when a permissionless payout already advanced state', async () => {
+    const reportKey = `0x${'6'.repeat(64)}` as const;
+    const contentHash = `0x${'7'.repeat(64)}` as const;
+    const amount = 10_000_000n;
+    const client = rpc();
+    client.getTransactionReceipt = vi.fn().mockResolvedValue({
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: ESCROW,
+          topics: encodeEventTopics({
+            abi: [REWARD_APPROVED_ABI],
+            eventName: 'RewardApproved',
+            args: { reportKey, approvedContentHash: contentHash, researcher: RECIPIENT },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 2,
+        },
+      ],
+    });
+    client.readContract = vi
+      .fn()
+      .mockImplementation(({ functionName }: { functionName: string }) => {
+        const values: Record<string, unknown> = {
+          rewards: [contentHash, RECIPIENT, amount, 2],
+          totalPaid: amount,
+          totalApprovedOutstanding: 0n,
+          totalFunded: 50_000_000n,
+          totalWithdrawn: 0n,
+          balanceOf: 40_000_000n,
+        };
+        return Promise.resolve(values[functionName]);
+      });
+    const adapter = new ArcRpcAdapter(config(), client);
+
+    await expect(
+      adapter.verifyRewardApproval({
+        escrowAddress: ESCROW,
+        reportKey,
+        approvedContentHash: contentHash,
+        recipientAddress: RECIPIENT,
+        amountBaseUnits: amount,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).resolves.toMatchObject({ eventLogIndex: 2, blockNumber: 42n });
+  });
+
+  it('requires one exact RewardPaid event and canonical USDC transfer', async () => {
+    const reportKey = `0x${'6'.repeat(64)}` as const;
+    const contentHash = `0x${'7'.repeat(64)}` as const;
+    const amount = 10_000_000n;
+    const client = rpc();
+    client.getTransactionReceipt = vi.fn().mockResolvedValue({
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: ESCROW,
+          topics: encodeEventTopics({
+            abi: [REWARD_PAID_ABI],
+            eventName: 'RewardPaid',
+            args: { reportKey, researcher: RECIPIENT },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 3,
+        },
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: ESCROW, to: RECIPIENT },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 4,
+        },
+      ],
+    });
+    client.readContract = vi
+      .fn()
+      .mockImplementation(({ functionName }: { functionName: string }) => {
+        const values: Record<string, unknown> = {
+          rewards: [contentHash, RECIPIENT, amount, 2],
+          totalPaid: amount,
+          totalApprovedOutstanding: 0n,
+          totalFunded: 50_000_000n,
+          totalWithdrawn: 0n,
+          balanceOf: 40_000_000n,
+        };
+        return Promise.resolve(values[functionName]);
+      });
+    const adapter = new ArcRpcAdapter(config(), client);
+
+    await expect(
+      adapter.verifyRewardPayout({
+        escrowAddress: ESCROW,
+        reportKey,
+        approvedContentHash: contentHash,
+        recipientAddress: RECIPIENT,
+        amountBaseUnits: amount,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).resolves.toMatchObject({
+      eventLogIndex: 3,
+      transferLogIndex: 4,
+      accounting: {
+        totalPaidBaseUnits: amount,
+        totalFundedBaseUnits: 50_000_000n,
+        escrowBalanceBaseUnits: 40_000_000n,
+      },
+    });
+    expect(client.readContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'totalPaid', blockNumber: 42n }),
+    );
+  });
+
+  it('rejects payout evidence when the receipt-block global accounting is inconsistent', async () => {
+    const reportKey = `0x${'6'.repeat(64)}` as const;
+    const contentHash = `0x${'7'.repeat(64)}` as const;
+    const amount = 10_000_000n;
+    const client = rpc();
+    client.getTransactionReceipt = vi.fn().mockResolvedValue({
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: ESCROW,
+          topics: encodeEventTopics({
+            abi: [REWARD_PAID_ABI],
+            eventName: 'RewardPaid',
+            args: { reportKey, researcher: RECIPIENT },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 3,
+        },
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: ESCROW, to: RECIPIENT },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 4,
+        },
+      ],
+    });
+    client.readContract = vi
+      .fn()
+      .mockImplementation(({ functionName }: { functionName: string }) => {
+        const values: Record<string, unknown> = {
+          rewards: [contentHash, RECIPIENT, amount, 2],
+          totalPaid: amount,
+          totalApprovedOutstanding: 0n,
+          totalFunded: 50_000_000n,
+          totalWithdrawn: 0n,
+          balanceOf: 50_000_000n,
+        };
+        return Promise.resolve(values[functionName]);
+      });
+
+    await expect(
+      new ArcRpcAdapter(config(), client).verifyRewardPayout({
+        escrowAddress: ESCROW,
+        reportKey,
+        approvedContentHash: contentHash,
+        recipientAddress: RECIPIENT,
+        amountBaseUnits: amount,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).rejects.toMatchObject({ code: 'reward_payout_accounting_mismatch', retryable: false });
+  });
+
   it('accepts an SCA internal CREATE only after receipt, event, runtime, and immutables match', async () => {
     const adapter = new ArcRpcAdapter(config(), rpc());
     await expect(
@@ -374,26 +572,46 @@ describe('Arc RPC escrow verifier', () => {
     const source = rpc();
     source.getChainId = vi.fn().mockResolvedValue(84_532);
     source.getTransactionReceipt = vi.fn().mockResolvedValue({
-      status: 'success', blockNumber: 42n, blockHash: BLOCK_HASH, contractAddress: null,
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
       logs: [
         {
           address: gateway,
-          topics: encodeEventTopics({ abi: [DEPOSITED_ABI], eventName: 'Deposited', args: { token: baseUsdc, depositor: OWNER, sender: OWNER } }),
-          data: encodeAbiParameters([{ type: 'uint256' }], [amount]), logIndex: 7,
+          topics: encodeEventTopics({
+            abi: [DEPOSITED_ABI],
+            eventName: 'Deposited',
+            args: { token: baseUsdc, depositor: OWNER, sender: OWNER },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 7,
         },
         {
           address: baseUsdc,
-          topics: encodeEventTopics({ abi: [TRANSFER_ABI], eventName: 'Transfer', args: { from: OWNER, to: gateway } }),
-          data: encodeAbiParameters([{ type: 'uint256' }], [amount]), logIndex: 8,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: OWNER, to: gateway },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 8,
         },
       ],
     });
-    await expect(new ArcRpcAdapter(config(), rpc(), { Base_Sepolia: source }).verifySourceDeposit({
-      network: 'Base_Sepolia', walletAddress: OWNER, amountBaseUnits: amount,
+    await expect(
+      new ArcRpcAdapter(config(), rpc(), { Base_Sepolia: source }).verifySourceDeposit({
+        network: 'Base_Sepolia',
+        walletAddress: OWNER,
+        amountBaseUnits: amount,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).resolves.toEqual({
       transactionHash: TRANSACTION_HASH,
-    })).resolves.toEqual({
-      transactionHash: TRANSACTION_HASH, gatewayLogIndex: 7, transferLogIndex: 8,
-      blockNumber: 42n, blockHash: BLOCK_HASH,
+      gatewayLogIndex: 7,
+      transferLogIndex: 8,
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
     });
   });
 
@@ -403,76 +621,108 @@ describe('Arc RPC escrow verifier', () => {
     const source = rpc();
     source.getChainId = vi.fn().mockResolvedValue(84_532);
     source.getTransactionReceipt = vi.fn().mockResolvedValue({
-      status: 'success', blockNumber: 42n, blockHash: BLOCK_HASH, contractAddress: null,
-      logs: [{
-        address: gateway,
-        topics: encodeEventTopics({ abi: [DEPOSITED_ABI], eventName: 'Deposited', args: { token: baseUsdc, depositor: RECIPIENT, sender: OWNER } }),
-        data: encodeAbiParameters([{ type: 'uint256' }], [5_000_000n]), logIndex: 7,
-      }],
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: gateway,
+          topics: encodeEventTopics({
+            abi: [DEPOSITED_ABI],
+            eventName: 'Deposited',
+            args: { token: baseUsdc, depositor: RECIPIENT, sender: OWNER },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [5_000_000n]),
+          logIndex: 7,
+        },
+      ],
     });
-    await expect(new ArcRpcAdapter(config(), rpc(), { Base_Sepolia: source }).verifySourceDeposit({
-      network: 'Base_Sepolia', walletAddress: OWNER, amountBaseUnits: 5_000_000n,
-      transactionHash: TRANSACTION_HASH,
-    })).rejects.toMatchObject({ code: 'source_deposit_evidence_mismatch', retryable: false });
+    await expect(
+      new ArcRpcAdapter(config(), rpc(), { Base_Sepolia: source }).verifySourceDeposit({
+        network: 'Base_Sepolia',
+        walletAddress: OWNER,
+        amountBaseUnits: 5_000_000n,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).rejects.toMatchObject({ code: 'source_deposit_evidence_mismatch', retryable: false });
   });
 
   it('attributes Arc Send to the locked owner even when concurrent payouts invalidate a balance delta', async () => {
     const amount = 5_000_000n;
     const client = rpc();
     client.getTransactionReceipt = vi.fn().mockResolvedValue({
-      status: 'success', blockNumber: 42n, blockHash: BLOCK_HASH, contractAddress: null,
-      logs: [{
-        address: USDC,
-        topics: encodeEventTopics({
-          abi: [TRANSFER_ABI], eventName: 'Transfer',
-          args: { from: OWNER, to: ESCROW },
-        }),
-        data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
-        logIndex: 6,
-      }],
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: OWNER, to: ESCROW },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 6,
+        },
+      ],
     });
     client.readContract = vi.fn().mockResolvedValue(amount);
-    await expect(new ArcRpcAdapter(config(), client).verifyFundingDestination({
-      escrowAddress: ESCROW,
-      routeMode: 'send',
-      walletAddress: OWNER,
-      destinationTransactionHash: TRANSACTION_HASH,
-      preBalanceBaseUnits: 100_000_000n,
-    })).resolves.toMatchObject({ netReceivedBaseUnits: amount, destinationLogIndex: 6 });
+    await expect(
+      new ArcRpcAdapter(config(), client).verifyFundingDestination({
+        escrowAddress: ESCROW,
+        routeMode: 'send',
+        walletAddress: OWNER,
+        destinationTransactionHash: TRANSACTION_HASH,
+        preBalanceBaseUnits: 100_000_000n,
+      }),
+    ).resolves.toMatchObject({ netReceivedBaseUnits: amount, destinationLogIndex: 6 });
 
-    await expect(new ArcRpcAdapter(config(), client).verifyFundingDestination({
-      escrowAddress: ESCROW,
-      routeMode: 'send',
-      walletAddress: RECIPIENT,
-      destinationTransactionHash: TRANSACTION_HASH,
-      preBalanceBaseUnits: 0n,
-    })).rejects.toMatchObject({ code: 'funding_transfer_log_missing' });
+    await expect(
+      new ArcRpcAdapter(config(), client).verifyFundingDestination({
+        escrowAddress: ESCROW,
+        routeMode: 'send',
+        walletAddress: RECIPIENT,
+        destinationTransactionHash: TRANSACTION_HASH,
+        preBalanceBaseUnits: 0n,
+      }),
+    ).rejects.toMatchObject({ code: 'funding_transfer_log_missing' });
   });
 
   it('attributes Bridge and Unified Balance destinations only to canonical mint transfers', async () => {
     const amount = 5_000_000n;
     const client = rpc();
     client.getTransactionReceipt = vi.fn().mockResolvedValue({
-      status: 'success', blockNumber: 42n, blockHash: BLOCK_HASH, contractAddress: null,
-      logs: [{
-        address: USDC,
-        topics: encodeEventTopics({
-          abi: [TRANSFER_ABI], eventName: 'Transfer',
-          args: { from: '0x0000000000000000000000000000000000000000', to: ESCROW },
-        }),
-        data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
-        logIndex: 6,
-      }],
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: '0x0000000000000000000000000000000000000000', to: ESCROW },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [amount]),
+          logIndex: 6,
+        },
+      ],
     });
     client.readContract = vi.fn().mockResolvedValue(amount);
     for (const routeMode of ['bridge', 'unified_balance'] as const) {
-      await expect(new ArcRpcAdapter(config(), client).verifyFundingDestination({
-        escrowAddress: ESCROW,
-        routeMode,
-        walletAddress: OWNER,
-        destinationTransactionHash: TRANSACTION_HASH,
-        preBalanceBaseUnits: 0n,
-      })).resolves.toMatchObject({ netReceivedBaseUnits: amount });
+      await expect(
+        new ArcRpcAdapter(config(), client).verifyFundingDestination({
+          escrowAddress: ESCROW,
+          routeMode,
+          walletAddress: OWNER,
+          destinationTransactionHash: TRANSACTION_HASH,
+          preBalanceBaseUnits: 0n,
+        }),
+      ).resolves.toMatchObject({ netReceivedBaseUnits: amount });
     }
   });
 
@@ -490,19 +740,26 @@ describe('Arc RPC escrow verifier', () => {
 
   it('ignores zero-value late transfers instead of allowing scan grief', async () => {
     const client = rpc() as ReturnType<typeof rpc> & { getLogs: ReturnType<typeof vi.fn> };
-    client.getLogs = vi.fn().mockResolvedValue([{
-      address: USDC,
-      topics: encodeEventTopics({
-        abi: [TRANSFER_ABI], eventName: 'Transfer', args: { from: OWNER, to: ESCROW },
+    client.getLogs = vi.fn().mockResolvedValue([
+      {
+        address: USDC,
+        topics: encodeEventTopics({
+          abi: [TRANSFER_ABI],
+          eventName: 'Transfer',
+          args: { from: OWNER, to: ESCROW },
+        }),
+        data: encodeAbiParameters([{ type: 'uint256' }], [0n]),
+        logIndex: 7,
+        transactionHash: TRANSACTION_HASH,
+        blockNumber: 42n,
+        blockHash: BLOCK_HASH,
+      },
+    ]);
+    await expect(
+      new ArcRpcAdapter(config(), client).findLateFunding({
+        escrowAddress: ESCROW,
+        fromBlock: 42n,
       }),
-      data: encodeAbiParameters([{ type: 'uint256' }], [0n]),
-      logIndex: 7,
-      transactionHash: TRANSACTION_HASH,
-      blockNumber: 42n,
-      blockHash: BLOCK_HASH,
-    }]);
-    await expect(new ArcRpcAdapter(config(), client).findLateFunding({
-      escrowAddress: ESCROW, fromBlock: 42n,
-    })).resolves.toEqual({ events: [], scannedThroughBlock: 42n });
+    ).resolves.toEqual({ events: [], scannedThroughBlock: 42n });
   });
 });

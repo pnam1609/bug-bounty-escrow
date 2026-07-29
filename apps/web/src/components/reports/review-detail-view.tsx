@@ -105,7 +105,10 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
       <nav aria-label="Breadcrumb">
         <ol className="flex flex-wrap items-center gap-sm text-body-sm text-text-muted">
           <li>
-            <Link className="inline-flex min-h-11 items-center rounded-sm hover:text-text" href="/review">
+            <Link
+              className="inline-flex min-h-11 items-center rounded-sm hover:text-text"
+              href="/review"
+            >
               Review inbox
             </Link>
           </li>
@@ -161,9 +164,9 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
       <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_338px] lg:items-start">
         <div className="flex min-w-0 flex-col gap-xl">
           <ReportContent report={report} token={token} />
-      <CommentThread
-        principalId={principalId}
-        reportId={report.id}
+          <CommentThread
+            principalId={principalId}
+            reportId={report.id}
             researcherId={report.researcherId}
             token={token}
             viewerId={viewer.data?.id}
@@ -171,7 +174,12 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
         </div>
 
         <div className="flex flex-col gap-xl lg:sticky lg:top-xl">
-          <ReviewActions principalId={principalId} report={report} token={token} />
+          <ReviewActions
+            principalId={principalId}
+            report={report}
+            token={token}
+            {...(viewer.data === undefined ? {} : { viewerRole: viewer.data.role })}
+          />
 
           <Card className="h-fit gap-xl" padding="lg">
             <CardHeader>

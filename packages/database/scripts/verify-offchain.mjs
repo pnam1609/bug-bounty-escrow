@@ -17,6 +17,14 @@ const escrowRecoveryVerificationPath = new URL(
   'tests/offchain/verify_escrow_recovery.sql',
   packageDirectory,
 );
+const walletControlVerificationPath = new URL(
+  'tests/offchain/verify_wallet_control_and_withdrawal_gate.sql',
+  packageDirectory,
+);
+const rewardSettlementVerificationPath = new URL(
+  'tests/offchain/verify_reward_settlement.sql',
+  packageDirectory,
+);
 const gatewaySubscriptionVerificationPath = new URL(
   'tests/offchain/verify_gateway_subscription_lifecycle.sql',
   packageDirectory,
@@ -82,6 +90,8 @@ const schemaVerificationSql = loadSql(schemaVerificationPath);
 const verificationSql = loadSql(verificationPath);
 const workflowVerificationSql = loadSql(workflowVerificationPath);
 const escrowRecoveryVerificationSql = loadSql(escrowRecoveryVerificationPath);
+const walletControlVerificationSql = loadSql(walletControlVerificationPath);
+const rewardSettlementVerificationSql = loadSql(rewardSettlementVerificationPath);
 const gatewaySubscriptionVerificationSql = loadSql(gatewaySubscriptionVerificationPath);
 let verificationFailed = false;
 
@@ -189,10 +199,14 @@ for (let pass = 1; pass <= 2 && !verificationFailed; pass += 1) {
     }
     currentFile = 'verify_workflows.sql';
     await database.exec(workflowVerificationSql);
+    currentFile = 'verify_wallet_control_and_withdrawal_gate.sql';
+    await database.exec(walletControlVerificationSql);
     currentFile = 'verify_escrow_recovery.sql';
     await database.exec(escrowRecoveryVerificationSql);
     currentFile = 'verify_gateway_subscription_lifecycle.sql';
     await database.exec(gatewaySubscriptionVerificationSql);
+    currentFile = 'verify_reward_settlement.sql';
+    await database.exec(rewardSettlementVerificationSql);
     process.stdout.write(`Off-chain database verification pass ${pass}: passed\n`);
   } catch (error) {
     const databaseDetail =

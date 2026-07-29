@@ -1,4 +1,10 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  GoneException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   ApproveRewardRequest,
   ConfirmPaymentRequest,
@@ -169,14 +175,9 @@ export class ReportService {
         await this.repository.markDuplicate(principal, reportId, input as MarkDuplicateRequest);
         break;
       case 'approve':
-        await this.repository.approveReward(principal, reportId, input as ApproveRewardRequest);
-        break;
       case 'pay':
-        await this.repository.startPayment(principal, reportId, input as StartPaymentRequest);
-        break;
       case 'confirm-payment':
-        await this.repository.confirmPayment(principal, reportId, input as ConfirmPaymentRequest);
-        break;
+        throw new GoneException('reward_settlement_flow_required');
     }
 
     return this.get(principal, reportId);

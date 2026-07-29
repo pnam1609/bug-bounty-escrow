@@ -1,9 +1,19 @@
 import { REPORT_STATUS_TRANSITIONS, type ReportStatus } from '@bug-bounty-escrow/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   ACTIONS_BY_STATUS,
   ACTION_RESULT_STATUS,
+  assertRewardApprovalRecoveryStoreWritable,
+  clearRewardApprovalHash,
+  clearRewardApprovalUncertain,
+  persistRewardApprovalHash,
+  persistRewardApprovalUncertain,
+  readRewardApprovalHash,
+  readRewardApprovalUncertain,
+  rewardApprovalFailureOutcome,
+  rewardApprovalRecoveryKey,
+  rewardSettlementUiMode,
 } from '@/components/reports/review-transitions';
 
 /*
@@ -47,5 +57,117 @@ describe('reviewer action map', () => {
     expect(Object.keys(ACTIONS_BY_STATUS).sort()).toEqual(
       Object.keys(REPORT_STATUS_TRANSITIONS).sort(),
     );
+  });
+
+  it('never offers another owner signature after an uncertain or known approval survives reload', () => {
+    for (const status of ['submission_uncertain', 'submitted', 'confirmed'] as const) {
+      expect(
+        rewardSettlementUiMode({
+          reportStatus: 'validated',
+          intentState: 'loaded',
+          intent: {
+            status: status === 'confirmed' ? 'ready_for_payout' : 'awaiting_approval',
+            operations: [{ operationType: 'approval', status }],
+          },
+        }),
+      ).toBe('resume');
+    }
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'validated',
+        intentState: 'loading',
+      }),
+    ).toBe('loading');
+  });
+
+  it('fails closed on an unknown current-intent query error and only approves an explicit absence', () => {
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'validated',
+        intentState: 'error',
+      }),
+    ).toBe('error');
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'validated',
+        intentState: 'absent',
+      }),
+    ).toBe('approve');
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'reward_approved',
+        intentState: 'absent',
+      }),
+    ).toBe('error');
+  });
+
+  it('continues a reserved pre-sign intent but never signs again when local recovery is known', () => {
+    const intent = {
+      status: 'awaiting_approval',
+      operations: [],
+    };
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'validated',
+        intentState: 'loaded',
+        intent,
+      }),
+    ).toBe('continue');
+    expect(
+      rewardSettlementUiMode({
+        reportStatus: 'validated',
+        intentState: 'loaded',
+        localRecoveryKnown: true,
+        intent,
+      }),
+    ).toBe('resume');
+  });
+
+  it('cancels only explicit wallet rejection and preserves ambiguous outcomes for recovery', () => {
+    expect(rewardApprovalFailureOutcome({ code: 4001 })).toBe('cancel');
+    expect(rewardApprovalFailureOutcome({ code: 'ACTION_REJECTED' })).toBe('cancel');
+    expect(rewardApprovalFailureOutcome({ cause: { code: 4001 } })).toBe('cancel');
+    expect(
+      rewardApprovalFailureOutcome({
+        cause: { cause: { name: 'UserRejectedRequestError' } },
+      }),
+    ).toBe('cancel');
+    expect(rewardApprovalFailureOutcome(new Error('provider disconnected'))).toBe('uncertain');
+    expect(rewardApprovalRecoveryKey('intent-id')).toBe('bbe:reward-approval:intent-id');
+  });
+
+  it('recovers a returned approval hash after a page crash without signing again', () => {
+    const values = new Map<string, string>();
+    const store = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const hash = `0x${'a'.repeat(64)}`;
+    persistRewardApprovalHash(store, 'intent-id', hash);
+    expect(readRewardApprovalHash(store, 'intent-id')).toBe(hash);
+    clearRewardApprovalHash(store, 'intent-id');
+    expect(readRewardApprovalHash(store, 'intent-id')).toBeUndefined();
+    persistRewardApprovalUncertain(store, 'intent-id');
+    expect(readRewardApprovalUncertain(store, 'intent-id')).toBe(true);
+    clearRewardApprovalUncertain(store, 'intent-id');
+    expect(readRewardApprovalUncertain(store, 'intent-id')).toBe(false);
+  });
+
+  it('fails before a wallet transaction when durable recovery storage is not writable', () => {
+    const sendTransaction = vi.fn();
+    const blockedStore = {
+      getItem: vi.fn(() => null),
+      removeItem: vi.fn(),
+      setItem: vi.fn(() => {
+        throw new Error('quota');
+      }),
+    };
+
+    expect(() => {
+      assertRewardApprovalRecoveryStoreWritable(blockedStore, 'intent-id');
+      sendTransaction();
+    }).toThrow('reward_recovery_storage_unavailable');
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 });

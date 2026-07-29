@@ -11,16 +11,17 @@ import { EscrowController } from './escrow.controller.js';
 import { ARC_ESCROW_GATEWAY, CIRCLE_CONTRACTS_GATEWAY } from './escrow-gateways.js';
 import { EscrowRepository } from './escrow.repository.js';
 import { EscrowService } from './escrow.service.js';
-import {
-  GATEWAY_SUBSCRIPTION_REGISTRATION_STORE,
-} from './gateway-subscription-registration.store.js';
+import { RewardSettlementController } from './reward-settlement.controller.js';
+import { RewardSettlementService } from './reward-settlement.service.js';
+import { GATEWAY_SUBSCRIPTION_REGISTRATION_STORE } from './gateway-subscription-registration.store.js';
 import { GatewaySubscriptionLifecycleService } from './gateway-subscription-lifecycle.service.js';
 
 @Module({
-  controllers: [EscrowController, CircleGatewayWebhookController],
+  controllers: [EscrowController, RewardSettlementController, CircleGatewayWebhookController],
   providers: [
     EscrowRepository,
     EscrowService,
+    RewardSettlementService,
     CircleGatewayWebhookVerifier,
     CircleGatewaySubscriptionClient,
     GatewaySubscriptionLifecycleService,

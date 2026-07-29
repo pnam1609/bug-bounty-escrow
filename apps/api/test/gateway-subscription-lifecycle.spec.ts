@@ -362,6 +362,7 @@ describe('EscrowService Gateway registration gate', () => {
       id: INTENT_ID,
       program_id: PROGRAM_ID,
       route_mode: 'unified_balance',
+      funding_phase: 'collecting_deposits',
       wallet_address: WALLET,
       sources: [{ network: 'Base_Sepolia', amountBaseUnits: '1000000' }],
       fee_allocations: [],

@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  NotFoundException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import { EscrowProviderError } from '../src/escrow/escrow-gateways.js';
@@ -17,6 +13,22 @@ const ESCROW = `0x${'b'.repeat(40)}` as const;
 const DESTINATION_HASH = `0x${'c'.repeat(64)}` as const;
 const SYNC_HASH_1 = `0x${'d'.repeat(64)}` as const;
 const SYNC_HASH_2 = `0x${'e'.repeat(64)}` as const;
+const ZERO_COMPONENTS = [
+  {
+    network: 'Arc_Testnet',
+    type: 'provider' as const,
+    token: 'USDC' as const,
+    amountBaseUnits: '0',
+  },
+  { network: 'Arc_Testnet', type: 'gas' as const, token: 'USDC' as const, amountBaseUnits: '0' },
+  { network: 'Arc_Testnet', type: 'kit' as const, token: 'USDC' as const, amountBaseUnits: '0' },
+  {
+    network: 'Arc_Testnet',
+    type: 'forwarder' as const,
+    token: 'USDC' as const,
+    amountBaseUnits: '0',
+  },
+] as const;
 
 function fundingRow(): FundingIntentRow {
   return {
@@ -27,11 +39,14 @@ function fundingRow(): FundingIntentRow {
     route_mode: 'send',
     gross_amount_base_units: '10000000',
     estimated_fee_reserve_base_units: '0',
-    fee_allocations: [{ network: 'Arc_Testnet', amountBaseUnits: '0' }],
+    fee_allocations: [
+      { network: 'Arc_Testnet', amountBaseUnits: '0', components: [...ZERO_COMPONENTS] },
+    ],
     sources: [{ network: 'Arc_Testnet', amountBaseUnits: '10000000' }],
     destination_address: ESCROW,
     pre_balance_base_units: '0',
     pre_total_funded_base_units: '0',
+    funding_phase: 'ready_for_destination',
     status: 'delivery_pending',
     destination_transaction_hash: DESTINATION_HASH,
     transfer_id: null,
@@ -66,25 +81,24 @@ describe('funding sync terminal recovery', () => {
         row = { ...row, status: 'syncing_pool' };
         return true;
       }),
-      storeFundingSyncTransaction: vi.fn().mockImplementation(
-        async (_intentId: string, transactionId: string) => {
+      storeFundingSyncTransaction: vi
+        .fn()
+        .mockImplementation(async (_intentId: string, transactionId: string) => {
           row = { ...row, sync_circle_transaction_id: transactionId };
           return true;
-        },
-      ),
-      markFundingSyncFailed: vi.fn().mockImplementation(
-        async (_intentId: string, transactionId: string) => {
+        }),
+      markFundingSyncFailed: vi
+        .fn()
+        .mockImplementation(async (_intentId: string, transactionId: string) => {
           expect(transactionId).toBe(row.sync_circle_transaction_id);
           row = {
             ...row,
             status: 'sync_failed',
             sync_circle_transaction_id: null,
-            sync_idempotency_key:
-              submittedIds[repository.markFundingSyncFailed.mock.calls.length]!,
+            sync_idempotency_key: submittedIds[repository.markFundingSyncFailed.mock.calls.length]!,
           };
           return true;
-        },
-      ),
+        }),
       reconcileFunding: vi.fn().mockImplementation(async () => {
         row = { ...row, status: 'complete', net_received_base_units: '10000000' };
       }),
@@ -143,9 +157,11 @@ describe('funding sync terminal recovery', () => {
     await expect(service.reconcileFunding(principal, PROGRAM_ID, INTENT_ID)).rejects.toBeInstanceOf(
       ConflictException,
     );
-    await expect(service.reconcileFunding(principal, PROGRAM_ID, INTENT_ID)).resolves.toMatchObject({
-      status: 'complete',
-    });
+    await expect(service.reconcileFunding(principal, PROGRAM_ID, INTENT_ID)).resolves.toMatchObject(
+      {
+        status: 'complete',
+      },
+    );
 
     expect(repository.markFundingSyncFailed).toHaveBeenCalledTimes(2);
     expect(repository.storeFundingSyncTransaction).toHaveBeenCalledTimes(3);
@@ -172,9 +188,9 @@ describe('funding sync terminal recovery', () => {
       role: 'owner' as const,
     };
 
-    await expect(
-      service.getLatestFundingConfirmation(principal, PROGRAM_ID),
-    ).resolves.toBe(artifact);
+    await expect(service.getLatestFundingConfirmation(principal, PROGRAM_ID)).resolves.toBe(
+      artifact,
+    );
     repository.isProgramOwner.mockResolvedValueOnce(false);
     await expect(
       service.getLatestFundingConfirmation(principal, PROGRAM_ID),

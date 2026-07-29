@@ -10,6 +10,7 @@
     "lint": "eslint . --no-error-on-unmatched-pattern",
     "openapi:check": "tsx scripts/openapi.ts check",
     "openapi:generate": "tsx scripts/openapi.ts generate",
+    "qa:arc": "tsx scripts/arc-acceptance.ts",
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",

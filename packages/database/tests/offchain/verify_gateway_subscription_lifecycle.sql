@@ -1,5 +1,25 @@
 begin;
 
+create function pg_temp.funding_fee_allocations(allocations jsonb)
+returns jsonb
+language sql
+immutable
+as $$
+  select jsonb_agg(
+    allocation || jsonb_build_object(
+      'components',
+      jsonb_build_array(
+        jsonb_build_object('network', allocation->>'network', 'type', 'provider', 'token', 'USDC', 'amountBaseUnits', allocation->>'amountBaseUnits'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'gas', 'token', 'USDC', 'amountBaseUnits', '0'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'kit', 'token', 'USDC', 'amountBaseUnits', '0'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'forwarder', 'token', 'USDC', 'amountBaseUnits', '0')
+      )
+    )
+    order by ordinal
+  )
+  from jsonb_array_elements(allocations) with ordinality entry(allocation, ordinal)
+$$;
+
 -- Five independent active UB intents exercise a shared stable subscription. Separate escrows are
 -- intentional: the production schema permits only one active funding intent per escrow.
 insert into public.programs (
@@ -50,11 +70,17 @@ select
   0,
   case series
     when 1 then
-      '[{"network":"Base_Sepolia","amountBaseUnits":"0"},{"network":"Arbitrum_Sepolia","amountBaseUnits":"0"}]'::jsonb
+      pg_temp.funding_fee_allocations(
+        '[{"network":"Base_Sepolia","amountBaseUnits":"0"},{"network":"Arbitrum_Sepolia","amountBaseUnits":"0"}]'::jsonb
+      )
     when 2 then
-      '[{"network":"Ethereum_Sepolia","amountBaseUnits":"0"},{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb
+      pg_temp.funding_fee_allocations(
+        '[{"network":"Ethereum_Sepolia","amountBaseUnits":"0"},{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb
+      )
     else
-      '[{"network":"Base_Sepolia","amountBaseUnits":"0"},{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb
+      pg_temp.funding_fee_allocations(
+        '[{"network":"Base_Sepolia","amountBaseUnits":"0"},{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb
+      )
   end,
   case series
     when 1 then

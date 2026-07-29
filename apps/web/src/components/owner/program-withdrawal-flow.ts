@@ -12,6 +12,7 @@ export type WithdrawalContinuationAction =
   | 'attach_close'
   | 'attach_withdraw'
   | 'new_round'
+  | 'replace'
   | 'support';
 
 const TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -36,7 +37,8 @@ export function withdrawalContinuationAction(
   if (intent.status === 'withdraw_submitted' || intent.status === 'verifying') {
     return 'verify_withdraw';
   }
-  if (intent.status === 'complete' || intent.status === 'failed') return 'new_round';
+  if (intent.status === 'complete') return 'new_round';
+  if (intent.status === 'failed') return 'replace';
   return 'support';
 }
 
@@ -53,7 +55,8 @@ export function persistPendingWithdrawalHash(
   operation: WithdrawalOperation,
   transactionHash: string,
 ): void {
-  if (!TRANSACTION_HASH.test(transactionHash)) throw new Error('Invalid withdrawal transaction hash.');
+  if (!TRANSACTION_HASH.test(transactionHash))
+    throw new Error('Invalid withdrawal transaction hash.');
   storage.setItem(storageKey(programId, intentId, operation), transactionHash.toLowerCase());
 }
 
@@ -74,4 +77,36 @@ export function clearPendingWithdrawalHash(
   operation: WithdrawalOperation,
 ): void {
   storage.removeItem(storageKey(programId, intentId, operation));
+}
+
+export async function persistAndObserveReturnedWithdrawalHash<T>(input: {
+  storage: Storage;
+  programId: string;
+  intentId: string;
+  operation: WithdrawalOperation;
+  transactionHash: string;
+  observe: (transactionHash: string) => Promise<T>;
+  setVolatileHash?: (transactionHash: string | undefined) => void;
+}): Promise<T> {
+  input.setVolatileHash?.(input.transactionHash);
+  try {
+    persistPendingWithdrawalHash(
+      input.storage,
+      input.programId,
+      input.intentId,
+      input.operation,
+      input.transactionHash,
+    );
+  } catch {
+    // The provider already returned a hash. Browser storage is only a recovery
+    // aid and must never prevent the server observation from being attempted.
+  }
+  const observed = await input.observe(input.transactionHash);
+  try {
+    clearPendingWithdrawalHash(input.storage, input.programId, input.intentId, input.operation);
+  } catch {
+    // The durable server observation has succeeded.
+  }
+  input.setVolatileHash?.(undefined);
+  return observed;
 }

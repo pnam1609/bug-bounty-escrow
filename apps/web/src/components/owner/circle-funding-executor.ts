@@ -1,16 +1,12 @@
 import { createViemAdapterFromProvider } from '@circle-fin/adapter-viem-v2';
-import {
-  AppKit,
-  isRetryableError,
-  type BridgeResult,
-} from '@circle-fin/app-kit';
+import { AppKit, isRetryableError, type BridgeResult } from '@circle-fin/app-kit';
 import {
   ArbitrumSepolia,
   ArcTestnet,
   BaseSepolia,
   EthereumSepolia,
 } from '@circle-fin/app-kit/chains';
-import { encodeFunctionData, type EIP1193Provider } from 'viem';
+import { encodeFunctionData, stringToHex, type EIP1193Provider } from 'viem';
 
 import {
   FUNDING_NETWORK_IDS,
@@ -21,6 +17,7 @@ import {
   type FundingDestinationResult,
   type FundingExecutionAdapter,
   type FundingExecutionRequest,
+  type FundingFeeAllocationEvidence,
   type FundingFeeQuote,
   type FundingNetworkId,
   type FundingOperationPhase,
@@ -28,12 +25,7 @@ import {
   type UnifiedBalanceReadinessSnapshot,
 } from './program-funding-flow';
 
-const SUPPORTED_CHAINS = [
-  EthereumSepolia,
-  ArbitrumSepolia,
-  BaseSepolia,
-  ArcTestnet,
-] as const;
+const SUPPORTED_CHAINS = [EthereumSepolia, ArbitrumSepolia, BaseSepolia, ArcTestnet] as const;
 
 const CHAIN_BY_ID = {
   Arc_Testnet: ArcTestnet,
@@ -42,6 +34,18 @@ const CHAIN_BY_ID = {
   Base_Sepolia: BaseSepolia,
 } as const;
 const ESCROW_OWNER_ABI = [
+  {
+    type: 'function',
+    name: 'approveReward',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'reportKey', type: 'bytes32' },
+      { name: 'approvedContentHash', type: 'bytes32' },
+      { name: 'researcher', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
   {
     type: 'function',
     name: 'close',
@@ -209,6 +213,83 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     return this.#executeEscrowOwnerCall(provider, ownerAddress, escrowAddress, 'close');
   }
 
+  async prepareRewardApproval(
+    provider: EIP1193Provider,
+    ownerAddress: string,
+    escrowAddress: string,
+    reportKey: `0x${string}`,
+    approvedContentHash: `0x${string}`,
+    recipientAddress: `0x${string}`,
+    amountBaseUnits: bigint,
+  ): Promise<void> {
+    await assertConnectedWalletAccount(provider, ownerAddress);
+    if (
+      !/^0x[0-9a-fA-F]{40}$/.test(ownerAddress) ||
+      !/^0x[0-9a-fA-F]{40}$/.test(escrowAddress) ||
+      !/^0x[0-9a-fA-F]{40}$/.test(recipientAddress) ||
+      amountBaseUnits <= 0n
+    ) {
+      throw new Error('The server returned invalid reward approval parameters.');
+    }
+    await this.adapter.ensureChain(ArcTestnet);
+    const chainId = await provider.request({ method: 'eth_chainId', params: undefined });
+    if (typeof chainId !== 'string' || Number.parseInt(chainId, 16) !== 5_042_002) {
+      throw new Error('The wallet is not connected to Arc Testnet.');
+    }
+    const data = encodeRewardApprovalCall(
+      reportKey,
+      approvedContentHash,
+      recipientAddress,
+      amountBaseUnits,
+    );
+    await assertProviderTransactionGasReady(provider, {
+      from: ownerAddress,
+      to: escrowAddress,
+      data,
+      value: '0x0',
+    });
+  }
+
+  async approveReward(
+    provider: EIP1193Provider,
+    ownerAddress: string,
+    escrowAddress: string,
+    reportKey: `0x${string}`,
+    approvedContentHash: `0x${string}`,
+    recipientAddress: `0x${string}`,
+    amountBaseUnits: bigint,
+  ): Promise<string> {
+    await this.prepareRewardApproval(
+      provider,
+      ownerAddress,
+      escrowAddress,
+      reportKey,
+      approvedContentHash,
+      recipientAddress,
+      amountBaseUnits,
+    );
+    const result = await provider.request({
+      method: 'eth_sendTransaction',
+      params: [
+        {
+          from: ownerAddress as `0x${string}`,
+          to: escrowAddress as `0x${string}`,
+          data: encodeRewardApprovalCall(
+            reportKey,
+            approvedContentHash,
+            recipientAddress,
+            amountBaseUnits,
+          ),
+          value: '0x0',
+        },
+      ],
+    });
+    if (typeof result !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
+      throw new Error('The wallet did not return a valid Arc transaction hash.');
+    }
+    return result;
+  }
+
   async withdrawRemaining(
     provider: EIP1193Provider,
     ownerAddress: string,
@@ -284,16 +365,21 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
   }
 
   async depositUnifiedBalanceSource(source: FundingSource): Promise<UnifiedBalanceDepositResult> {
+    // prepareUnifiedBalanceDepositSource selected and verified the chain immediately before the
+    // server armed the durable wallet boundary. Never request another chain switch after arming:
+    // a rejected switch is deterministic pre-submission, while any post-arm failure must remain
+    // fail-closed. Revalidate the account directly at the SDK boundary instead.
     await assertConnectedWalletAccount(this.provider, this.connectedAddress);
-    // CP-11 already selected this chain before its durable boundary. Keep the second call as a
-    // defensive no-op in the normal path; if the wallet changed in the tiny race window, the
-    // operation remains uncertain and must not be blindly replayed.
-    await this.adapter.ensureChain(CHAIN_BY_ID[source.network]);
-    const result = await this.#kit.unifiedBalance.deposit({
-      from: { adapter: this.adapter, chain: source.network },
-      amount: source.amount,
-      token: 'USDC',
-    });
+    const result = await executeWithVerifiedFundingAccount(
+      this.provider,
+      this.connectedAddress,
+      () =>
+        this.#kit.unifiedBalance.deposit({
+          from: { adapter: this.adapter, chain: source.network },
+          amount: source.amount,
+          token: 'USDC',
+        }),
+    );
 
     return {
       network: source.network,
@@ -309,6 +395,7 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     await this.assertFundingSourceBalances([source]);
     await this.adapter.ensureChain(CHAIN_BY_ID[source.network]);
     await this.#assertDepositNativeGasReady(source);
+    await assertConnectedWalletAccount(this.provider, this.connectedAddress);
   }
 
   async getUnifiedBalance(): Promise<UnifiedBalanceSnapshot> {
@@ -326,8 +413,7 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
         if (!FUNDING_NETWORK_IDS.includes(chain.chain as FundingNetworkId)) continue;
         const network = chain.chain as FundingNetworkId;
         confirmedByNetwork[network] =
-          (confirmedByNetwork[network] ?? 0n) +
-          (parseUsdcBaseUnits(chain.confirmedBalance) ?? 0n);
+          (confirmedByNetwork[network] ?? 0n) + (parseUsdcBaseUnits(chain.confirmedBalance) ?? 0n);
         pendingByNetwork[network] =
           (pendingByNetwork[network] ?? 0n) +
           (parseUsdcBaseUnits(chain.pendingBalance ?? '0') ?? 0n);
@@ -357,8 +443,12 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     }
 
     let reserveBaseUnits = 0n;
-    let reserveByNetwork: Readonly<Partial<Record<FundingNetworkId, string>>> =
-      Object.fromEntries(selection.sources.map((source) => [source.network, '0']));
+    let reserveByNetwork: Readonly<Partial<Record<FundingNetworkId, string>>> = Object.fromEntries(
+      selection.sources.map((source) => [source.network, '0']),
+    );
+    let feeAllocations: readonly FundingFeeAllocationEvidence[] = selection.sources.map((source) =>
+      feeAllocation(source.network, 0n, 0n),
+    );
     if (selection.routeMode === 'send') {
       await this.adapter.ensureChain(ArcTestnet);
       const estimate = await this.#kit.estimateSend({
@@ -389,7 +479,9 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
       });
       for (const gasFee of estimate.gasFees) {
         if (gasFee.error !== undefined || gasFee.fees === null) {
-          throw new Error(`Circle could not estimate ${gasFee.name} gas. Try again before signing.`);
+          throw new Error(
+            `Circle could not estimate ${gasFee.name} gas. Try again before signing.`,
+          );
         }
       }
       const sourceGas = estimate.gasFees.find(
@@ -405,6 +497,7 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
       reserveByNetwork = {
         [source.network]: formatUsdcBaseUnits(reserveBaseUnits),
       };
+      feeAllocations = [feeAllocation(source.network, reserveBaseUnits, 0n)];
     } else {
       const estimate = await this.#kit.unifiedBalance.estimateSpend({
         amount: selection.grossAmount,
@@ -427,6 +520,10 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
         estimate.fees,
         selection.sources.map((source) => source.network),
       );
+      feeAllocations = unifiedBalanceFeeAllocations(
+        estimate.fees,
+        selection.sources.map((source) => source.network),
+      );
     }
 
     const quotedAt = new Date();
@@ -434,6 +531,7 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
       estimatedFeeReserve: formatUsdcBaseUnits(reserveBaseUnits),
       estimatedFeeReserveBaseUnits: reserveBaseUnits,
       estimatedFeeReserveByNetwork: reserveByNetwork,
+      feeAllocations,
       quotedAt: quotedAt.toISOString(),
       expiresAt: new Date(quotedAt.getTime() + 2 * 60_000).toISOString(),
     };
@@ -494,17 +592,16 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     arcUsdcDebitBaseUnits?: bigint,
   ): Promise<void> {
     if (!/^\d+$/.test(requiredBaseUnits)) {
-      throw new Error(`Circle returned an invalid gas estimate for ${FUNDING_NETWORKS[network].label}.`);
+      throw new Error(
+        `Circle returned an invalid gas estimate for ${FUNDING_NETWORKS[network].label}.`,
+      );
     }
     const chain = CHAIN_BY_ID[network];
     const address = await this.adapter.getAddress(chain);
     const balance = await this.adapter.readNativeBalance(address, chain);
     const required =
       network === 'Arc_Testnet' && arcUsdcDebitBaseUnits !== undefined
-        ? arcCombinedNativeDebitBaseUnits(
-            arcUsdcDebitBaseUnits,
-            BigInt(requiredBaseUnits),
-          )
+        ? arcCombinedNativeDebitBaseUnits(arcUsdcDebitBaseUnits, BigInt(requiredBaseUnits))
         : BigInt(requiredBaseUnits);
     if (balance < required) {
       throw new Error(
@@ -555,6 +652,7 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     result: BridgeResult,
     onPhase: (phase: FundingOperationPhase) => void | Promise<void>,
   ): Promise<FundingDestinationResult> {
+    await assertConnectedWalletAccount(this.provider, this.connectedAddress);
     if (!canRetryBridgeResult(result)) {
       throw new Error(
         'Circle did not classify the incomplete bridge as retryable. The original transfer was preserved.',
@@ -562,10 +660,15 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     }
 
     await onPhase('delivery_pending');
-    const retried = await this.#kit.retryBridge(result, {
-      from: this.adapter,
-      to: this.adapter,
-    });
+    const retried = await executeWithVerifiedFundingAccount(
+      this.provider,
+      this.connectedAddress,
+      () =>
+        this.#kit.retryBridge(result, {
+          from: this.adapter,
+          to: this.adapter,
+        }),
+    );
     await onPhase(retried.state === 'pending' ? 'delivery_pending' : 'destination_submitted');
     return bridgeDestinationResult(retried);
   }
@@ -575,24 +678,26 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     onPhase: (phase: FundingOperationPhase) => void | Promise<void>,
   ): Promise<FundingDestinationResult> {
     await this.adapter.ensureChain(ArcTestnet);
+    await assertConnectedWalletAccount(this.provider, this.connectedAddress);
     // A rejected network switch is not an uncertain transaction submission. Persist the
     // no-replay boundary only after the wallet is already on the required chain.
     await onPhase('awaiting_signature');
-    const result = await this.#kit.send({
-      from: { adapter: this.adapter, chain: 'Arc_Testnet' },
-      to: request.recipientAddress,
-      amount: request.grossAmount,
-      token: 'USDC',
-    });
+    const result = await executeWithVerifiedFundingAccount(
+      this.provider,
+      this.connectedAddress,
+      () =>
+        this.#kit.send({
+          from: { adapter: this.adapter, chain: 'Arc_Testnet' },
+          to: request.recipientAddress,
+          amount: request.grossAmount,
+          token: 'USDC',
+        }),
+    );
     if (result.txHash === undefined) {
       throw new Error('Circle Send completed without a destination transaction hash.');
     }
     await onPhase('destination_submitted');
-    return {
-      routeMode: 'send',
-      destinationTransactionHash: result.txHash,
-      sourceTransactionHashes: [result.txHash],
-    };
+    return sendDestinationResult(result.txHash);
   }
 
   async #bridge(
@@ -605,19 +710,25 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     }
 
     await this.adapter.ensureChain(CHAIN_BY_ID[source.network]);
+    await assertConnectedWalletAccount(this.provider, this.connectedAddress);
     // Keep chain selection outside the durable transaction-submission boundary. The composite
     // Bridge call below may submit approve/burn operations, so errors after this point stay locked.
     await onPhase('awaiting_signature');
-    const result = await this.#kit.bridge({
-      from: { adapter: this.adapter, chain: source.network },
-      to: {
-        adapter: this.adapter,
-        chain: 'Arc_Testnet',
-        recipientAddress: request.recipientAddress,
-      },
-      amount: request.grossAmount,
-      token: 'USDC',
-    });
+    const result = await executeWithVerifiedFundingAccount(
+      this.provider,
+      this.connectedAddress,
+      () =>
+        this.#kit.bridge({
+          from: { adapter: this.adapter, chain: source.network },
+          to: {
+            adapter: this.adapter,
+            chain: 'Arc_Testnet',
+            recipientAddress: request.recipientAddress,
+          },
+          amount: request.grossAmount,
+          token: 'USDC',
+        }),
+    );
     await onPhase(result.state === 'pending' ? 'delivery_pending' : 'destination_submitted');
     return bridgeDestinationResult(result);
   }
@@ -627,36 +738,104 @@ export class CircleAppKitFundingExecutor implements FundingExecutionAdapter {
     onPhase: (phase: FundingOperationPhase) => void | Promise<void>,
   ): Promise<FundingDestinationResult> {
     const balance = await this.getUnifiedBalance();
-    assertSelectedUnifiedBalanceReadiness(
-      request,
-      balance,
-      { estimatedFeeReserveByNetwork: request.estimatedFeeReserveByNetwork },
-    );
-
-    await onPhase('awaiting_signature');
-    const result = await this.#kit.unifiedBalance.spend({
-      amount: request.grossAmount,
-      token: 'USDC',
-      from: {
-        adapter: this.adapter,
-        allocations: request.sources.map((source) => ({
-          amount: source.amount,
-          chain: source.network,
-        })),
-      },
-      to: {
-        adapter: this.adapter,
-        chain: 'Arc_Testnet',
-        recipientAddress: request.recipientAddress,
-      },
+    assertSelectedUnifiedBalanceReadiness(request, balance, {
+      estimatedFeeReserveByNetwork: request.estimatedFeeReserveByNetwork,
     });
+
+    await assertConnectedWalletAccount(this.provider, this.connectedAddress);
+    await onPhase('awaiting_signature');
+    const result = await executeWithVerifiedFundingAccount(
+      this.provider,
+      this.connectedAddress,
+      () =>
+        this.#kit.unifiedBalance.spend({
+          amount: request.grossAmount,
+          token: 'USDC',
+          from: {
+            adapter: this.adapter,
+            allocations: request.sources.map((source) => ({
+              amount: source.amount,
+              chain: source.network,
+            })),
+          },
+          to: {
+            adapter: this.adapter,
+            chain: 'Arc_Testnet',
+            recipientAddress: request.recipientAddress,
+          },
+        }),
+    );
     await onPhase('destination_submitted');
-    return {
+    const destinationResult: FundingDestinationResult = {
       routeMode: 'unified_balance',
       destinationTransactionHash: result.txHash,
       ...(result.transferId === undefined ? {} : { transferId: result.transferId }),
-      sourceTransactionHashes: result.steps?.flatMap((step) => step.txHash ?? []) ?? [],
+      sourceTransactionHashes: [],
     };
+    try {
+      const sourceTransactions = authoritativeUnifiedBalanceSourceTransactions(result);
+      return {
+        ...destinationResult,
+        sourceTransactionHashes: sourceTransactions.map(({ transactionHash }) => transactionHash),
+        ...(sourceTransactions.length === 0 ? {} : { sourceTransactions }),
+      };
+    } catch (error) {
+      if (error instanceof UnifiedBalanceUnboundSourceHashError) {
+        throw new CircleUnifiedBalanceManualRecoveryError(
+          destinationResult,
+          error.unboundTransactionHashes,
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * App Kit 1.10's public SpendResult exposes allocation chains and phase transaction hashes as
+ * separate structures. SpendStep has no chain identity, so pairing those arrays by position would
+ * let a reordered provider response select the wrong recovery RPC. Until App Kit returns a
+ * transaction hash and chain in one authoritative object, only the Arc destination hash is safe to
+ * persist. Any additional unbound hash fails closed into manual recovery.
+ */
+export function authoritativeUnifiedBalanceSourceTransactions(result: {
+  readonly txHash: string;
+  readonly steps?: readonly { readonly txHash?: string }[];
+}): readonly { readonly network: FundingNetworkId; readonly transactionHash: string }[] {
+  const destinationHash = result.txHash.toLowerCase();
+  const unboundHashes = [
+    ...new Set(
+      (result.steps ?? []).flatMap((step) =>
+        step.txHash !== undefined && step.txHash.toLowerCase() !== destinationHash
+          ? [step.txHash.toLowerCase()]
+          : [],
+      ),
+    ),
+  ];
+  if (unboundHashes.length > 0) {
+    throw new UnifiedBalanceUnboundSourceHashError(unboundHashes);
+  }
+  return [];
+}
+
+class UnifiedBalanceUnboundSourceHashError extends Error {
+  constructor(readonly unboundTransactionHashes: readonly string[]) {
+    super(
+      'Circle returned a Unified Balance transaction hash without an authoritative source-network binding. The spend is locked for manual recovery.',
+    );
+    this.name = 'UnifiedBalanceUnboundSourceHashError';
+  }
+}
+
+export class CircleUnifiedBalanceManualRecoveryError extends Error {
+  constructor(
+    readonly result: FundingDestinationResult,
+    readonly unboundTransactionHashes: readonly string[],
+  ) {
+    super(
+      'Circle returned the authoritative Arc destination hash plus source hashes without network identity. The destination was preserved and the spend is locked for manual recovery.',
+    );
+    this.name = 'CircleUnifiedBalanceManualRecoveryError';
   }
 }
 
@@ -678,6 +857,19 @@ function encodeEscrowOwnerCall(
         args: [requireExpectedWithdrawalAmount(expectedAmountBaseUnits)],
       })
     : encodeFunctionData({ abi: ESCROW_OWNER_ABI, functionName });
+}
+
+export function encodeRewardApprovalCall(
+  reportKey: `0x${string}`,
+  approvedContentHash: `0x${string}`,
+  recipientAddress: `0x${string}`,
+  amountBaseUnits: bigint,
+): `0x${string}` {
+  return encodeFunctionData({
+    abi: ESCROW_OWNER_ABI,
+    functionName: 'approveReward',
+    args: [reportKey, approvedContentHash, recipientAddress, amountBaseUnits],
+  });
 }
 
 function requireExpectedWithdrawalAmount(value: bigint | undefined): bigint {
@@ -722,7 +914,11 @@ function parseRpcQuantity(value: unknown, label: string): bigint {
 }
 
 export function sumUsdcFees(
-  fees: readonly { readonly token: string; readonly amount: string | null; readonly error?: unknown }[],
+  fees: readonly {
+    readonly token: string;
+    readonly amount: string | null;
+    readonly error?: unknown;
+  }[],
 ): bigint {
   return fees.reduce((total, fee) => {
     if (fee.error !== undefined || fee.amount === null) {
@@ -753,8 +949,36 @@ export function unifiedBalanceFeeReserveByNetwork(
   }[],
   selectedNetworks: readonly FundingNetworkId[],
 ): Readonly<Partial<Record<FundingNetworkId, string>>> {
-  const totals: Partial<Record<FundingNetworkId, bigint>> = Object.fromEntries(
-    selectedNetworks.map((network) => [network, 0n]),
+  return Object.fromEntries(
+    unifiedBalanceFeeAllocations(fees, selectedNetworks).map((allocation) => [
+      allocation.network,
+      allocation.amount,
+    ]),
+  );
+}
+
+export function unifiedBalanceFeeAllocations(
+  fees: readonly {
+    readonly type: 'provider' | 'gasFee' | 'kit' | 'forwarder';
+    readonly token: string;
+    readonly amount: string | null;
+    readonly error?: unknown;
+    readonly allocations?: readonly {
+      readonly chain: string;
+      readonly amount: string;
+    }[];
+  }[],
+  selectedNetworks: readonly FundingNetworkId[],
+): readonly FundingFeeAllocationEvidence[] {
+  const selected = new Set(selectedNetworks);
+  if (selected.size !== selectedNetworks.length) {
+    throw new Error('Selected funding networks must be unique.');
+  }
+  const componentTotals = new Map<
+    FundingNetworkId,
+    { provider: bigint; gas: bigint; kit: bigint; forwarder: bigint }
+  >(
+    selectedNetworks.map((network) => [network, { provider: 0n, gas: 0n, kit: 0n, forwarder: 0n }]),
   );
   for (const fee of fees) {
     if (fee.error !== undefined || fee.amount === null) {
@@ -764,33 +988,74 @@ export function unifiedBalanceFeeReserveByNetwork(
       if (fee.amount === '0') continue;
       throw new Error(`Unsupported fee token ${fee.token}; funding is blocked before signing.`);
     }
-    if ((fee.type === 'kit' || fee.type === 'forwarder') && fee.amount !== '0') {
-      throw new Error(
-        `Circle ${fee.type} fees are disabled for this funding flow.`,
-      );
+    const topLevel = parseUsdcBaseUnits(fee.amount);
+    if (topLevel === undefined) {
+      throw new Error('Circle returned an invalid USDC fee estimate.');
     }
-    if (fee.type === 'kit' || fee.type === 'forwarder') continue;
+    if ((fee.type === 'kit' || fee.type === 'forwarder') && topLevel !== 0n) {
+      throw new Error(`Circle ${fee.type} fees are disabled for this funding flow.`);
+    }
+    if (fee.type === 'kit' || fee.type === 'forwarder') {
+      if ((fee.allocations?.length ?? 0) > 0) {
+        const allocated = fee.allocations!.reduce((total, allocation) => {
+          const amount = parseUsdcBaseUnits(allocation.amount);
+          if (amount === undefined) throw new Error('Circle returned an invalid allocated fee.');
+          return total + amount;
+        }, 0n);
+        if (allocated !== 0n) {
+          throw new Error(`Circle ${fee.type} fees are disabled for this funding flow.`);
+        }
+      }
+      continue;
+    }
     if (fee.allocations !== undefined && fee.allocations.length > 0) {
+      let allocatedTotal = 0n;
       for (const allocation of fee.allocations) {
         if (!FUNDING_NETWORK_IDS.includes(allocation.chain as FundingNetworkId)) {
           throw new Error(`Circle returned a fee for unsupported chain ${allocation.chain}.`);
         }
         const network = allocation.chain as FundingNetworkId;
+        if (!selected.has(network)) {
+          throw new Error(`Circle returned a fee allocation for unselected chain ${network}.`);
+        }
         const amount = parseUsdcBaseUnits(allocation.amount);
         if (amount === undefined) throw new Error('Circle returned an invalid allocated fee.');
-        totals[network] = (totals[network] ?? 0n) + amount;
+        allocatedTotal += amount;
+        const components = componentTotals.get(network)!;
+        if (fee.type === 'provider') components.provider += amount;
+        else components.gas += amount;
+      }
+      if (allocatedTotal !== topLevel) {
+        throw new Error(`Circle ${fee.type} fee allocations do not equal the quoted fee total.`);
       }
       continue;
     }
-    const amount = parseUsdcBaseUnits(fee.amount);
-    if (amount === undefined) throw new Error('Circle returned an invalid USDC fee estimate.');
-    if (amount > 0n) {
-      throw new Error(
-        `Circle ${fee.type} fee is missing its required per-chain allocation.`,
-      );
+    if (topLevel > 0n) {
+      throw new Error(`Circle ${fee.type} fee is missing its required per-chain allocation.`);
     }
   }
-  return formatNetworkAmounts(totals);
+  return selectedNetworks.map((network) => {
+    const components = componentTotals.get(network)!;
+    return feeAllocation(network, components.provider, components.gas);
+  });
+}
+
+function feeAllocation(
+  network: FundingNetworkId,
+  provider: bigint,
+  gas: bigint,
+): FundingFeeAllocationEvidence {
+  const amount = provider + gas;
+  return {
+    network,
+    amount: formatUsdcBaseUnits(amount),
+    components: [
+      { network, type: 'provider', token: 'USDC', amount: formatUsdcBaseUnits(provider) },
+      { network, type: 'gas', token: 'USDC', amount: formatUsdcBaseUnits(gas) },
+      { network, type: 'kit', token: 'USDC', amount: '0' },
+      { network, type: 'forwarder', token: 'USDC', amount: '0' },
+    ],
+  };
 }
 
 export function unifiedBalanceSourceDebitFeeTotal(
@@ -806,9 +1071,7 @@ export function unifiedBalanceSourceDebitFeeTotal(
       throw new Error(`Circle ${fee.type} fees are disabled for this funding flow.`);
     }
   }
-  return sumUsdcFees(
-    fees.filter((fee) => fee.type === 'provider' || fee.type === 'gasFee'),
-  );
+  return sumUsdcFees(fees.filter((fee) => fee.type === 'provider' || fee.type === 'gasFee'));
 }
 
 function formatNetworkAmounts(
@@ -822,13 +1085,8 @@ function formatNetworkAmounts(
   );
 }
 
-function sumNetworkAmounts(
-  amounts: Readonly<Partial<Record<FundingNetworkId, bigint>>>,
-): bigint {
-  return FUNDING_NETWORK_IDS.reduce(
-    (total, network) => total + (amounts[network] ?? 0n),
-    0n,
-  );
+function sumNetworkAmounts(amounts: Readonly<Partial<Record<FundingNetworkId, bigint>>>): bigint {
+  return FUNDING_NETWORK_IDS.reduce((total, network) => total + (amounts[network] ?? 0n), 0n);
 }
 
 export function requiresSourceWalletBalanceCheck(
@@ -851,26 +1109,94 @@ export async function assertConnectedWalletAccount(
   }
 }
 
-function bridgeDestinationResult(result: BridgeResult): FundingDestinationResult {
+export async function executeWithVerifiedFundingAccount<T>(
+  provider: EIP1193Provider,
+  expectedAddress: string,
+  execute: () => Promise<T>,
+): Promise<T> {
+  await assertConnectedWalletAccount(provider, expectedAddress);
+  return execute();
+}
+
+export async function signEscrowWalletChallenge(
+  provider: EIP1193Provider,
+  expectedAddress: string,
+  message: string,
+): Promise<`0x${string}`> {
+  await assertConnectedWalletAccount(provider, expectedAddress);
+  const signature = await provider.request({
+    method: 'personal_sign',
+    params: [stringToHex(message), expectedAddress],
+  } as never);
+  if (
+    typeof signature !== 'string' ||
+    !/^0x(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$/.test(signature)
+  ) {
+    throw new Error('The wallet did not return a valid authorization signature.');
+  }
+  // An accountChanged event can race the wallet prompt. Never submit a proof
+  // after the active account has moved away from the challenge-bound address.
+  await assertConnectedWalletAccount(provider, expectedAddress);
+  return signature as `0x${string}`;
+}
+
+export function sendDestinationResult(transactionHash: string): FundingDestinationResult {
+  return {
+    routeMode: 'send',
+    destinationTransactionHash: transactionHash,
+    // Send is already executed on Arc. Its sole hash is destination evidence, never a source hash.
+    sourceTransactionHashes: [],
+  };
+}
+
+export function bridgeDestinationResult(result: BridgeResult): FundingDestinationResult {
   const mint = [...result.steps]
     .reverse()
-    .find(
-      (step) =>
-        step.name.toLowerCase() === 'mint' &&
-        step.state !== 'error' &&
-        step.txHash !== undefined,
-    );
-  if (result.state === 'error' || mint?.txHash === undefined) {
+    .find((step) => step.name.toLowerCase() === 'mint' && step.txHash !== undefined);
+  if (mint?.txHash === undefined) {
     // The caller must persist the full BridgeResult and use kit.retryBridge only for a documented
     // retryable soft error. Re-running execute() after burn could create a duplicate transfer.
     throw new CircleBridgeIncompleteError(result);
   }
 
+  const destinationHash = mint.txHash.toLowerCase();
+  const sourceTransactionHashes = bridgeSourceTransactionHashes(result.steps, destinationHash);
+
   return {
     routeMode: 'bridge',
     destinationTransactionHash: mint.txHash,
-    sourceTransactionHashes: result.steps.flatMap((step) => step.txHash ?? []),
+    sourceTransactionHashes,
   };
+}
+
+function bridgeSourceTransactionHashes(
+  steps: BridgeResult['steps'],
+  excludedDestinationHash?: string,
+): string[] {
+  const sourceTransactionHashes: string[] = [];
+  const seenSourceHashes = new Set<string>();
+  for (const step of steps) {
+    const stepName = step.name.toLowerCase();
+    const transactionHash = step.txHash;
+    const normalizedHash = transactionHash?.toLowerCase();
+    if (
+      transactionHash === undefined ||
+      normalizedHash === undefined ||
+      !/^0x[0-9a-f]{64}$/.test(normalizedHash) ||
+      (stepName !== 'approve' && stepName !== 'burn') ||
+      normalizedHash === excludedDestinationHash ||
+      seenSourceHashes.has(normalizedHash)
+    ) {
+      continue;
+    }
+    seenSourceHashes.add(normalizedHash);
+    sourceTransactionHashes.push(transactionHash);
+    // The durable observation contract and local outbox are deliberately bounded. Additional
+    // provider steps remain available through Circle's original in-memory result, but must never
+    // turn JSON parsing or API validation into an unbounded recovery path.
+    if (sourceTransactionHashes.length === 32) break;
+  }
+  return sourceTransactionHashes;
 }
 
 export function canRetryBridgeResult(result: BridgeResult): boolean {
@@ -881,15 +1207,7 @@ export function canRetryBridgeResult(result: BridgeResult): boolean {
 }
 
 export function bridgeRecoveryTelemetry(result: BridgeResult): BridgeRecoveryTelemetry {
-  const sourceTransactionHashes = [
-    ...new Set(
-      result.steps.flatMap((step) =>
-        step.txHash !== undefined && /^0x[0-9a-fA-F]{64}$/.test(step.txHash)
-          ? [step.txHash]
-          : [],
-      ),
-    ),
-  ];
+  const sourceTransactionHashes = bridgeSourceTransactionHashes(result.steps);
   return {
     providerState: result.state,
     retryable: canRetryBridgeResult(result),
@@ -901,9 +1219,7 @@ export function bridgeRecoveryTelemetry(result: BridgeResult): BridgeRecoveryTel
       ...(step.txHash !== undefined && /^0x[0-9a-fA-F]{64}$/.test(step.txHash)
         ? { transactionHash: step.txHash }
         : {}),
-      ...(step.errorCategory === undefined
-        ? {}
-        : { errorCode: step.errorCategory.slice(0, 128) }),
+      ...(step.errorCategory === undefined ? {} : { errorCode: step.errorCategory.slice(0, 128) }),
     })),
   };
 }

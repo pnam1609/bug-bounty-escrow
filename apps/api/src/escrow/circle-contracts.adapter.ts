@@ -20,7 +20,7 @@ import {
 type ContractsClient = Pick<CircleSmartContractPlatformClient, 'deployContract' | 'getContract'>;
 type WalletsClient = Pick<
   CircleDeveloperControlledWalletsClient,
-  'createContractExecutionTransaction' | 'getTransaction'
+  'createContractExecutionTransaction' | 'getTransaction' | 'getWallet'
 >;
 
 const uuidSchema = z.string().uuid();
@@ -57,12 +57,22 @@ const contractSchema = z.object({
   contractAddress: addressSchema.optional(),
 });
 const createdTransactionSchema = z.object({ id: uuidSchema });
+const walletSchema = z.object({
+  id: uuidSchema,
+  address: addressSchema,
+  blockchain: z.literal('ARC-TESTNET'),
+  custodyType: z.literal('DEVELOPER'),
+  accountType: z.literal('SCA'),
+  state: z.literal('LIVE'),
+});
 
-function readCircleConfig(config: ApiEnvironment): {
-  apiKey: string;
-  entitySecret: string;
-  walletId: string;
-} | undefined {
+function readCircleConfig(config: ApiEnvironment):
+  | {
+      apiKey: string;
+      entitySecret: string;
+      walletId: string;
+    }
+  | undefined {
   if (
     !config.CIRCLE_CONTRACTS_ENABLED ||
     config.CIRCLE_API_KEY === undefined ||
@@ -128,6 +138,22 @@ export class CircleContractsAdapter implements CircleContractsGateway {
         baseUrl: config.CIRCLE_API_BASE_URL,
         userAgent: 'bounty-escrow-api/cp13',
       });
+  }
+
+  public async getDeploymentWalletAddress(): Promise<`0x${string}`> {
+    const { wallets, walletId } = this.requireClients();
+    try {
+      const response = await this.withTimeout(wallets.getWallet({ id: walletId }));
+      const wallet = walletSchema.parse(
+        (extractSdkData(response) as { wallet?: unknown } | undefined)?.wallet,
+      );
+      if (wallet.id !== walletId) {
+        throw new EscrowProviderError('circle_deployment_wallet_mismatch', false);
+      }
+      return wallet.address.toLowerCase() as `0x${string}`;
+    } catch (error) {
+      throw this.providerError(error, 'circle_wallet_lookup_failed');
+    }
   }
 
   public async deploy(input: CircleDeployInput): Promise<CircleDeploymentAccepted> {
@@ -242,6 +268,31 @@ export class CircleContractsAdapter implements CircleContractsGateway {
       return { transactionId: parsed.id };
     } catch (error) {
       throw this.providerError(error, 'circle_sync_submit_failed');
+    }
+  }
+
+  public async submitRewardPayout(input: {
+    idempotencyKey: string;
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+  }): Promise<{ transactionId: string }> {
+    const { wallets, walletId } = this.requireClients();
+    try {
+      uuidV4Schema.parse(input.idempotencyKey);
+      const response = await this.withTimeout(
+        wallets.createContractExecutionTransaction({
+          idempotencyKey: input.idempotencyKey,
+          walletId,
+          contractAddress: input.escrowAddress,
+          abiFunctionSignature: 'payReward(bytes32)',
+          abiParameters: [input.reportKey],
+          fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+        }),
+      );
+      const parsed = createdTransactionSchema.parse(extractSdkData(response));
+      return { transactionId: parsed.id };
+    } catch (error) {
+      throw this.providerError(error, 'circle_reward_payout_submit_failed');
     }
   }
 

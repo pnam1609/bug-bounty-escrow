@@ -2,13 +2,14 @@
 
 import {
   approveRewardRequestSchema,
-  confirmPaymentRequestSchema,
+  createRewardSettlementIntentRequestSchema,
   markDuplicateRequestSchema,
   rejectReportRequestSchema,
   reportResponseSchema,
+  rewardSettlementIntentResponseSchema,
   requestInformationRequestSchema,
-  startPaymentRequestSchema,
   validateReportRequestSchema,
+  type ApproveRewardRequest,
   type ReportDetail,
   type Severity,
 } from '@bug-bounty-escrow/shared';
@@ -40,9 +41,9 @@ import {
   SelectValue,
   Textarea,
 } from '@bug-bounty-escrow/ui';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 import {
   describeReportError,
@@ -50,12 +51,21 @@ import {
   SEVERITY_OPTIONS,
   type ReportStatus,
 } from './report-format';
-import { apiRequest } from '@/lib/api-client';
+import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import { connectCircleWallet } from '@/components/owner/circle-funding-executor';
 
+import {
+  executeReservedRewardApproval,
+  resumeRewardApproval,
+  type RewardApprovalOrchestratorDependencies,
+} from './reward-approval-orchestrator';
 import {
   ACTIONS_BY_STATUS,
   ACTION_RESULT_STATUS,
+  readRewardApprovalHash,
+  readRewardApprovalUncertain,
+  rewardSettlementUiMode,
   type ActionId,
 } from './review-transitions';
 
@@ -77,8 +87,6 @@ export type { ActionId };
  *     two different forms behind an explicit choice — never one ambiguous amount box.
  *   - Failures are read from `error.code`. A raw server string is never rendered.
  */
-
-
 
 const WAITING_COPY: Readonly<Partial<Record<ReportStatus, string>>> = Object.freeze({
   needs_information:
@@ -442,7 +450,13 @@ function MarkDuplicateAction({ busy, submit }: ActionProps) {
 
 type RewardMode = 'decided' | 'percentage';
 
-function ApproveRewardAction({ busy, submit }: ActionProps) {
+function ApproveRewardAction({
+  busy,
+  settleReward,
+}: {
+  readonly busy: boolean;
+  readonly settleReward: (input: ApproveRewardRequest) => Promise<SubmitResult>;
+}) {
   const [mode, setMode] = useState<RewardMode>('decided');
   const [amount, setAmount] = useState('');
   const [basis, setBasis] = useState('');
@@ -460,9 +474,7 @@ function ApproveRewardAction({ busy, submit }: ActionProps) {
     // Only the field the chosen tier type actually uses is sent. A percentage tier never carries
     // an amount, so the payload cannot even suggest the client decided the payout.
     const parsed = approveRewardRequestSchema.safeParse(
-      mode === 'decided'
-        ? { amount: amount.trim() }
-        : { calculationBasisAmount: basis.trim() },
+      mode === 'decided' ? { amount: amount.trim() } : { calculationBasisAmount: basis.trim() },
     );
 
     if (!parsed.success) {
@@ -474,7 +486,7 @@ function ApproveRewardAction({ busy, submit }: ActionProps) {
       return;
     }
 
-    const result = await submit('approve-reward', parsed.data);
+    const result = await settleReward(parsed.data);
     if (result.ok) form.close();
     else form.setError(result.message);
   }
@@ -493,9 +505,7 @@ function ApproveRewardAction({ busy, submit }: ActionProps) {
       warning="Approval reserves USDC from the pool and cannot be reversed from this screen."
     >
       <fieldset className="flex flex-col gap-md">
-        <legend className="mb-sm text-label-md text-text">
-          How is this tier calculated?
-        </legend>
+        <legend className="mb-sm text-label-md text-text">How is this tier calculated?</legend>
         <RadioGroup
           onValueChange={(value) => {
             setMode(value as RewardMode);
@@ -549,8 +559,8 @@ function ApproveRewardAction({ busy, submit }: ActionProps) {
           </Field>
           <Callout title="The server decides the amount" variant="info">
             The reward is derived from this basis and the tier&rsquo;s basis points, capped at the
-            tier maximum, and every input is snapshotted with the decision. No reward amount is
-            sent from this screen — the figure shown after approval is the authoritative one.
+            tier maximum, and every input is snapshotted with the decision. No reward amount is sent
+            from this screen — the figure shown after approval is the authoritative one.
           </Callout>
         </>
       )}
@@ -558,167 +568,113 @@ function ApproveRewardAction({ busy, submit }: ActionProps) {
   );
 }
 
-/* ── Pay ──────────────────────────────────────────────────────────────────────────────────── */
-
-function PayAction({ busy, submit }: ActionProps) {
-  const [hash, setHash] = useState('');
-  const [tokenAddress, setTokenAddress] = useState('');
+function ResumeRewardSettlementAction({
+  busy,
+  resume,
+}: {
+  readonly busy: boolean;
+  readonly resume: (recoveryHash?: string) => Promise<SubmitResult>;
+}) {
+  const [recoveryHash, setRecoveryHash] = useState('');
   const [hashError, setHashError] = useState<string | null>(null);
-  const [tokenError, setTokenError] = useState<string | null>(null);
-  const form = useActionForm(() => {
-    setHash('');
-    setTokenAddress('');
-    setHashError(null);
-    setTokenError(null);
-  });
-
-  async function confirm() {
-    setHashError(null);
-    setTokenError(null);
-
-    const parsed = startPaymentRequestSchema.safeParse({
-      transactionHash: hash.trim(),
-      tokenAddress: tokenAddress.trim(),
-    });
-
-    if (!parsed.success) {
-      const paths = new Set(parsed.error.issues.map((issue) => issue.path[0]));
-      if (paths.has('transactionHash')) {
-        setHashError('Enter the 0x-prefixed 64-character transaction hash.');
-      }
-      if (paths.has('tokenAddress')) {
-        setTokenError('Enter the 0x-prefixed 40-character token contract address.');
-      }
-      return;
-    }
-
-    const result = await submit('pay', parsed.data);
-    if (result.ok) form.close();
-    else form.setError(result.message);
-  }
-
+  const form = useActionForm(() => undefined);
   return (
     <ActionDialog
       busy={busy}
-      confirmLabel="Record payment"
-      description="Records the payout transaction and moves the report to Payment pending."
+      confirmLabel="Resume verification"
+      description="Checks the known Arc evidence and resumes the permissionless Circle payout relay. The owner does not sign a second payout transaction."
       error={form.error}
-      onConfirm={() => void confirm()}
+      onConfirm={() => {
+        const candidate = recoveryHash.trim();
+        if (candidate !== '' && !/^0x[0-9a-fA-F]{64}$/.test(candidate)) {
+          setHashError('Enter a valid Arc transaction hash, or leave this empty.');
+          return;
+        }
+        setHashError(null);
+        void resume(candidate === '' ? undefined : candidate).then((result) => {
+          if (result.ok) form.close();
+          else form.setError(result.message);
+        });
+      }}
       onOpenChange={form.change}
       open={form.open}
-      title="Record the payout transaction"
-      trigger={<Button>Record payment</Button>}
-      warning="Record a hash only after the transfer has actually been broadcast. The report cannot go back to Reward approved."
+      title="Resume reward settlement"
+      trigger={<Button>Resume settlement</Button>}
     >
-      <Field error={hashError ?? undefined} label="Transaction hash" required>
-        <Input
-          autoComplete="off"
-          onChange={(event) => setHash(event.target.value)}
-          placeholder="0x…"
-          size="lg"
-          value={hash}
-        />
-      </Field>
       <Field
-        error={tokenError ?? undefined}
-        helperText="The USDC contract the transfer used."
-        label="Token address"
-        required
+        error={hashError ?? undefined}
+        helperText="Optional. Use the hash returned by the owner wallet if the page reloaded before it reached the server."
+        label="Approval recovery hash"
       >
         <Input
           autoComplete="off"
-          onChange={(event) => setTokenAddress(event.target.value)}
+          onChange={(event) => setRecoveryHash(event.target.value)}
           placeholder="0x…"
           size="lg"
-          value={tokenAddress}
+          value={recoveryHash}
         />
       </Field>
     </ActionDialog>
   );
 }
 
-/* ── Confirm payment ──────────────────────────────────────────────────────────────────────── */
-
-function ConfirmPaymentAction({ busy, submit }: ActionProps) {
-  const [blockNumber, setBlockNumber] = useState('');
-  const [blockHash, setBlockHash] = useState('');
-  const [confirmations, setConfirmations] = useState('1');
-  const [numberError, setNumberError] = useState<string | null>(null);
-  const [hashError, setHashError] = useState<string | null>(null);
-  const form = useActionForm(() => {
-    setBlockNumber('');
-    setBlockHash('');
-    setConfirmations('1');
-    setNumberError(null);
-    setHashError(null);
-  });
-
-  async function confirm() {
-    setNumberError(null);
-    setHashError(null);
-
-    const parsed = confirmPaymentRequestSchema.safeParse({
-      blockNumber: Number(blockNumber),
-      blockHash: blockHash.trim(),
-      confirmations: Number(confirmations),
-    });
-
-    if (!parsed.success) {
-      const paths = new Set(parsed.error.issues.map((issue) => issue.path[0]));
-      if (paths.has('blockNumber') || paths.has('confirmations')) {
-        setNumberError('Enter the block number and a confirmation count of at least 1.');
-      }
-      if (paths.has('blockHash')) {
-        setHashError('Enter the 0x-prefixed 64-character block hash.');
-      }
-      return;
-    }
-
-    const result = await submit('confirm-payment', parsed.data);
-    if (result.ok) form.close();
-    else form.setError(result.message);
-  }
+function ContinueRewardApprovalAction({
+  amount,
+  busy,
+  cancel,
+  continueApproval,
+}: {
+  readonly amount: string;
+  readonly busy: boolean;
+  readonly cancel: () => Promise<SubmitResult>;
+  readonly continueApproval: () => Promise<SubmitResult>;
+}) {
+  const continuation = useActionForm(() => undefined);
+  const cancellation = useActionForm(() => undefined);
 
   return (
-    <ActionDialog
-      busy={busy}
-      confirmLabel="Confirm payment"
-      description="Settles the payout: the reserved amount moves to paid and the report closes as Paid."
-      error={form.error}
-      onConfirm={() => void confirm()}
-      onOpenChange={form.change}
-      open={form.open}
-      title="Confirm the payment settled"
-      trigger={<Button>Confirm payment</Button>}
-      warning="Confirming closes the report. Only do this once the transaction has the confirmations your policy requires."
-    >
-      <Field error={numberError ?? undefined} label="Block number" required>
-        <Input
-          inputMode="numeric"
-          onChange={(event) => setBlockNumber(event.target.value)}
-          placeholder="21345678"
-          size="lg"
-          value={blockNumber}
-        />
-      </Field>
-      <Field error={hashError ?? undefined} label="Block hash" required>
-        <Input
-          autoComplete="off"
-          onChange={(event) => setBlockHash(event.target.value)}
-          placeholder="0x…"
-          size="lg"
-          value={blockHash}
-        />
-      </Field>
-      <Field label="Confirmations" required>
-        <Input
-          inputMode="numeric"
-          onChange={(event) => setConfirmations(event.target.value)}
-          size="lg"
-          value={confirmations}
-        />
-      </Field>
-    </ActionDialog>
+    <>
+      <ActionDialog
+        busy={busy}
+        confirmLabel="Continue approval"
+        description={`The server already reserved ${amount} USDC. Continue with that immutable amount; this does not create another reservation.`}
+        error={continuation.error}
+        onConfirm={() => {
+          void continueApproval().then((result) => {
+            if (result.ok) continuation.close();
+            else continuation.setError(result.message);
+          });
+        }}
+        onOpenChange={continuation.change}
+        open={continuation.open}
+        title="Continue the reserved reward"
+        trigger={<Button>Continue approval</Button>}
+      >
+        <Callout title="One owner signature" variant="info">
+          The wallet will sign the locked approveReward call once. If a previous prompt may have
+          submitted, this action is hidden and only recovery is offered.
+        </Callout>
+      </ActionDialog>
+
+      <ActionDialog
+        busy={busy}
+        confirmLabel="Release reservation"
+        description={`Cancels the unsigned ${amount} USDC reward reservation after the server scans Arc for an approval.`}
+        error={cancellation.error}
+        onConfirm={() => {
+          void cancel().then((result) => {
+            if (result.ok) cancellation.close();
+            else cancellation.setError(result.message);
+          });
+        }}
+        onOpenChange={cancellation.change}
+        open={cancellation.open}
+        title="Cancel unsigned reward"
+        tone="destructive"
+        trigger={<Button variant="secondary">Cancel reservation</Button>}
+        warning="Cancellation is allowed only before any known or uncertain approval submission. Arc is checked before the reservation is released."
+      />
+    </>
   );
 }
 
@@ -728,23 +684,155 @@ export interface ReviewActionsProps {
   readonly principalId: string;
   readonly report: ReportDetail;
   readonly token: string | undefined;
+  readonly viewerRole?: 'owner' | 'researcher' | 'reviewer';
 }
 
-export function ReviewActions({ principalId, report, token }: ReviewActionsProps) {
+export function ReviewActions({ principalId, report, token, viewerRole }: ReviewActionsProps) {
   const client = useQueryClient();
+  const rewardIntentQueryKey = ['reward-settlement', principalId, report.id] as const;
+  const settlement = useQuery({
+    queryKey: rewardIntentQueryKey,
+    queryFn: () =>
+      apiRequest(
+        `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/current`,
+        rewardSettlementIntentResponseSchema,
+        { method: 'GET', token },
+      ),
+    enabled:
+      viewerRole === 'owner' &&
+      ['validated', 'reward_approved', 'payment_pending'].includes(report.status),
+    retry: false,
+  });
+  const [localRecoveryIntentId, setLocalRecoveryIntentId] = useState<string | undefined>();
+  const [volatileRecovery, setVolatileRecovery] = useState<
+    { intentId: string; transactionHash: string } | undefined
+  >();
+
+  useEffect(() => {
+    const intentId = settlement.data?.data.id;
+    if (intentId === undefined) {
+      setLocalRecoveryIntentId(undefined);
+      return;
+    }
+    setLocalRecoveryIntentId(
+      readRewardApprovalHash(window.localStorage, intentId) !== undefined ||
+        readRewardApprovalUncertain(window.localStorage, intentId)
+        ? intentId
+        : undefined,
+    );
+  }, [settlement.data?.data.id]);
 
   const mutation = useMutation({
     mutationFn: ({ action, body }: { action: ActionId; body: unknown }) =>
-      apiRequest(
-        `/api/reports/${encodeURIComponent(report.id)}/${action}`,
-        reportResponseSchema,
-        { method: 'POST', token, body },
-      ),
+      apiRequest(`/api/reports/${encodeURIComponent(report.id)}/${action}`, reportResponseSchema, {
+        method: 'POST',
+        token,
+        body,
+      }),
     onSuccess: async (response) => {
       // The transition endpoints return the updated report, so the detail cache is written
       // directly and only the lists need a refetch.
       client.setQueryData(queryKeys.report(principalId, report.id), response);
       await client.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) });
+    },
+  });
+
+  function rewardDependencies(): RewardApprovalOrchestratorDependencies {
+    return {
+      recoveryStore: window.localStorage,
+      connect: connectCircleWallet,
+      current: async () =>
+        (
+          await apiRequest(
+            `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/current`,
+            rewardSettlementIntentResponseSchema,
+            { method: 'GET', token },
+          )
+        ).data,
+      cancel: async (intentId) =>
+        apiRequest(
+          `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/${encodeURIComponent(intentId)}/cancel`,
+          rewardSettlementIntentResponseSchema,
+          { method: 'POST', token },
+        ),
+      observe: async (intentId, input) =>
+        (
+          await apiRequest(
+            `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/${encodeURIComponent(intentId)}/approval-observations`,
+            rewardSettlementIntentResponseSchema,
+            { method: 'POST', token, body: input },
+          )
+        ).data,
+      reconcile: async (intentId) =>
+        (
+          await apiRequest(
+            `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/${encodeURIComponent(intentId)}/reconcile`,
+            rewardSettlementIntentResponseSchema,
+            { method: 'POST', token },
+          )
+        ).data,
+      setRecoveryIntent: setLocalRecoveryIntentId,
+      setVolatileRecovery,
+    };
+  }
+
+  const rewardMutation = useMutation({
+    mutationFn: async (
+      command:
+        { kind: 'create'; input: ApproveRewardRequest } | { kind: 'continue'; intentId: string },
+    ) => {
+      const session = await connectCircleWallet();
+      let intentId: string;
+      if (command.kind === 'create') {
+        const request = createRewardSettlementIntentRequestSchema.parse({
+          idempotencyKey: crypto.randomUUID(),
+          ownerWallet: session.address,
+          ...command.input,
+        });
+        const created = await apiRequest(
+          `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents`,
+          rewardSettlementIntentResponseSchema,
+          { method: 'POST', token, body: request },
+        );
+        intentId = created.data.id;
+      } else {
+        intentId = command.intentId;
+      }
+      return executeReservedRewardApproval(intentId, rewardDependencies(), session);
+    },
+    onSettled: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.report(principalId, report.id) }),
+        client.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) }),
+        client.invalidateQueries({ queryKey: rewardIntentQueryKey }),
+      ]);
+    },
+  });
+
+  const resumeMutation = useMutation({
+    mutationFn: async (recoveryHash?: string) =>
+      resumeRewardApproval(rewardDependencies(), {
+        ...(recoveryHash === undefined ? {} : { recoveryHash }),
+        ...(volatileRecovery === undefined ? {} : { volatileRecovery }),
+      }),
+    onSettled: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: queryKeys.report(principalId, report.id) }),
+        client.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) }),
+        client.invalidateQueries({ queryKey: rewardIntentQueryKey }),
+      ]);
+    },
+  });
+
+  const cancelRewardMutation = useMutation({
+    mutationFn: async (intentId: string) =>
+      apiRequest(
+        `/api/reports/${encodeURIComponent(report.id)}/reward-settlement-intents/${encodeURIComponent(intentId)}/cancel`,
+        rewardSettlementIntentResponseSchema,
+        { method: 'POST', token },
+      ),
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: rewardIntentQueryKey });
     },
   });
 
@@ -763,8 +851,90 @@ export function ReviewActions({ principalId, report, token }: ReviewActionsProps
     }
   }
 
+  async function settleReward(input: ApproveRewardRequest): Promise<SubmitResult> {
+    try {
+      await rewardMutation.mutateAsync({ kind: 'create', input });
+      return { ok: true };
+    } catch (cause) {
+      return {
+        ok: false,
+        message: describeReportError(
+          cause,
+          'Reward approval was not completed. Use Resume settlement if the wallet may have submitted a transaction.',
+        ),
+      };
+    }
+  }
+
+  async function continueReward(intentId: string): Promise<SubmitResult> {
+    try {
+      await rewardMutation.mutateAsync({ kind: 'continue', intentId });
+      return { ok: true };
+    } catch (cause) {
+      return {
+        ok: false,
+        message: describeReportError(
+          cause,
+          'The reserved approval was not completed. No second signature is offered if its outcome is uncertain.',
+        ),
+      };
+    }
+  }
+
+  async function cancelReward(intentId: string): Promise<SubmitResult> {
+    try {
+      await cancelRewardMutation.mutateAsync(intentId);
+      return { ok: true };
+    } catch (cause) {
+      return {
+        ok: false,
+        message: describeReportError(
+          cause,
+          'The reservation was not released. Arc evidence may still need verification.',
+        ),
+      };
+    }
+  }
+
+  async function resumeReward(recoveryHash?: string): Promise<SubmitResult> {
+    try {
+      await resumeMutation.mutateAsync(recoveryHash);
+      return { ok: true };
+    } catch (cause) {
+      return {
+        ok: false,
+        message: describeReportError(
+          cause,
+          'Settlement is still pending or could not be verified. No new owner signature was requested.',
+        ),
+      };
+    }
+  }
+
   const available = ACTIONS_BY_STATUS[report.status];
-  const busy = mutation.isPending;
+  const settlementAbsent =
+    settlement.error instanceof ApiClientError &&
+    settlement.error.status === 404 &&
+    settlement.error.code === 'reward_settlement_not_found';
+  const intentState = settlement.isPending
+    ? 'loading'
+    : settlement.data !== undefined
+      ? 'loaded'
+      : settlementAbsent
+        ? 'absent'
+        : 'error';
+  const settlementMode = rewardSettlementUiMode({
+    reportStatus: report.status,
+    intentState,
+    localRecoveryKnown:
+      settlement.data !== undefined && settlement.data.data.id === localRecoveryIntentId,
+    ...(settlement.data === undefined ? {} : { intent: settlement.data.data }),
+  });
+  const busy =
+    mutation.isPending ||
+    rewardMutation.isPending ||
+    resumeMutation.isPending ||
+    cancelRewardMutation.isPending;
   const props: ActionProps = { busy, submit };
 
   return (
@@ -786,9 +956,44 @@ export function ReviewActions({ principalId, report, token }: ReviewActionsProps
           {available.includes('validate') ? (
             <ValidateAction {...props} proposed={report.proposedSeverity} />
           ) : null}
-          {available.includes('approve-reward') ? <ApproveRewardAction {...props} /> : null}
-          {available.includes('pay') ? <PayAction {...props} /> : null}
-          {available.includes('confirm-payment') ? <ConfirmPaymentAction {...props} /> : null}
+          {viewerRole === 'owner' &&
+          available.includes('approve-reward') &&
+          settlementMode === 'approve' ? (
+            <ApproveRewardAction busy={busy} settleReward={settleReward} />
+          ) : null}
+          {viewerRole === 'owner' &&
+          settlementMode === 'continue' &&
+          settlement.data !== undefined ? (
+            <ContinueRewardApprovalAction
+              amount={settlement.data.data.amount}
+              busy={busy}
+              cancel={() => cancelReward(settlement.data.data.id)}
+              continueApproval={() => continueReward(settlement.data.data.id)}
+            />
+          ) : null}
+          {viewerRole === 'owner' && settlementMode === 'resume' ? (
+            <ResumeRewardSettlementAction busy={busy} resume={resumeReward} />
+          ) : null}
+          {viewerRole === 'owner' && settlementMode === 'loading' ? (
+            <p className="text-body-sm text-text-muted">Checking durable settlement state…</p>
+          ) : null}
+          {viewerRole === 'owner' && settlementMode === 'error' ? (
+            <Callout title="Settlement state could not be verified" variant="danger">
+              <div className="flex flex-col items-start gap-md">
+                <p>
+                  Approval is disabled because the server could not prove whether a durable intent
+                  already exists. Retrying this read never asks the wallet to sign.
+                </p>
+                <Button
+                  disabled={settlement.isFetching}
+                  onClick={() => void settlement.refetch()}
+                  variant="secondary"
+                >
+                  Retry status check
+                </Button>
+              </div>
+            </Callout>
+          ) : null}
           {available.includes('request-information') ? (
             <RequestInformationAction {...props} />
           ) : null}

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import {
   ConflictException,
@@ -10,20 +10,27 @@ import {
 } from '@nestjs/common';
 import {
   ARC_TESTNET_USDC_ADDRESS,
+  ARC_TESTNET_CHAIN_ID,
   FUNDING_NETWORK_CONFIG,
   GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
   formatUsdcBaseUnits,
   type AttachSourceDepositRequest,
+  type AttachFundingRecoveryTelemetryRequest,
   type CircleGatewayDepositFinalizedWebhook,
   type CreateSourceDepositRequest,
   type CreateWithdrawalIntentRequest,
   parseUsdcBaseUnits,
   type ApiEnvironment,
   type CreateFundingIntentRequest,
+  type CreateEscrowWalletChallengeRequest,
   type DeployEscrowWithCircleRequest,
   type EscrowDeployment,
+  type EscrowWalletChallenge,
   type FundingIntent,
+  type FundingOperationHistoryQuery,
+  type FundingOperationHistoryResponse,
   type FundingConfirmationArtifact,
+  type FundingRecoveryCheckRequest,
   type GatewayFundingReadiness,
   type ObserveFundingOperationRequest,
   type ObserveSourceDepositRequest,
@@ -32,9 +39,10 @@ import {
   type RequestPrincipal,
   type WithdrawalIntent,
 } from '@bug-bounty-escrow/shared';
-import { encodeAbiParameters, keccak256, stringToHex, type Hex } from 'viem';
+import { encodeAbiParameters, keccak256, stringToHex, verifyMessage, type Hex } from 'viem';
 
 import { API_CONFIG } from '../config/api-config.module.js';
+import { createApiErrorResponse } from '../common/http/api-error.js';
 import { loadEscrowArtifact } from './escrow-artifact.js';
 import {
   ARC_ESCROW_GATEWAY,
@@ -70,6 +78,33 @@ function asAddress(value: string): `0x${string}` {
   return value as `0x${string}`;
 }
 
+export function buildEscrowWalletControlMessage(input: {
+  programId: string;
+  actorId: string;
+  ownerWallet: string;
+  withdrawRecipient: string;
+  nonce: string;
+  issuedAt: string;
+  expiresAt: string;
+}): string {
+  return [
+    'BountyEscrow wallet authorization',
+    '',
+    'Domain: bountyescrow.xyz',
+    'Action: Deploy BountyEscrow 1.1.0',
+    `Program ID: ${input.programId}`,
+    `Authenticated owner ID: ${input.actorId}`,
+    `Owner wallet: ${input.ownerWallet.toLowerCase()}`,
+    `Withdraw recipient: ${input.withdrawRecipient.toLowerCase()}`,
+    `Chain ID: ${ARC_TESTNET_CHAIN_ID}`,
+    `Nonce: ${input.nonce.toLowerCase()}`,
+    `Issued at: ${input.issuedAt}`,
+    `Expires at: ${input.expiresAt}`,
+    '',
+    'Signing this message does not submit a transaction or grant token approval.',
+  ].join('\n');
+}
+
 @Injectable()
 export class EscrowService {
   public constructor(
@@ -81,12 +116,126 @@ export class EscrowService {
     private readonly gatewaySubscriptions: GatewaySubscriptionLifecycleService,
   ) {}
 
+  public async createWalletChallenge(
+    principal: RequestPrincipal,
+    programId: string,
+    input: CreateEscrowWalletChallengeRequest,
+  ): Promise<EscrowWalletChallenge> {
+    await this.requireOwner(principal, programId);
+    const issuedAt = new Date();
+    const expiresAt = new Date(issuedAt.getTime() + 5 * 60 * 1000);
+    const row = await this.repository.createWalletChallenge({
+      id: randomUUID(),
+      actorId: principal.userId,
+      programId,
+      ownerWallet: input.ownerWallet,
+      withdrawRecipient: input.withdrawRecipient,
+      nonce: `0x${randomBytes(32).toString('hex')}`,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+    return {
+      challengeId: row.id,
+      programId: row.program_id,
+      ownerWallet: row.owner_wallet,
+      withdrawRecipient: row.withdraw_recipient,
+      chainId: ARC_TESTNET_CHAIN_ID,
+      message: buildEscrowWalletControlMessage({
+        programId: row.program_id,
+        actorId: row.actor_id,
+        ownerWallet: row.owner_wallet,
+        withdrawRecipient: row.withdraw_recipient,
+        nonce: row.nonce,
+        issuedAt: row.issued_at,
+        expiresAt: row.expires_at,
+      }),
+      issuedAt: row.issued_at,
+      expiresAt: row.expires_at,
+    };
+  }
+
   public async deploy(
     principal: RequestPrincipal,
     programId: string,
     input: DeployEscrowWithCircleRequest,
   ): Promise<EscrowDeployment> {
     await this.requireOwner(principal, programId);
+    const challenge = await this.repository.findWalletChallenge(input.walletChallengeId);
+    if (
+      challenge === null ||
+      challenge.program_id !== programId ||
+      challenge.actor_id !== principal.userId
+    ) {
+      throw new NotFoundException(
+        createApiErrorResponse(
+          'wallet_control_challenge_not_found',
+          'The wallet authorization challenge was not found.',
+        ),
+      );
+    }
+    if (
+      challenge.owner_wallet.toLowerCase() !== input.ownerWallet.toLowerCase() ||
+      challenge.withdraw_recipient.toLowerCase() !== input.withdrawRecipient.toLowerCase() ||
+      challenge.chain_id !== ARC_TESTNET_CHAIN_ID
+    ) {
+      throw new ConflictException(
+        createApiErrorResponse(
+          'wallet_control_challenge_binding_mismatch',
+          'The wallet authorization does not match this deployment.',
+        ),
+      );
+    }
+    if (challenge.invalidated_at !== null) {
+      throw new ConflictException(
+        createApiErrorResponse(
+          'wallet_control_challenge_invalidated',
+          'The wallet authorization was replaced. Request and sign a new challenge.',
+        ),
+      );
+    }
+    if (challenge.consumed_at !== null) {
+      throw new ConflictException(
+        createApiErrorResponse(
+          'wallet_control_challenge_replayed',
+          'The wallet authorization was already used. Request and sign a new challenge.',
+        ),
+      );
+    }
+    if (Date.parse(challenge.expires_at) <= Date.now()) {
+      throw new ConflictException(
+        createApiErrorResponse(
+          'wallet_control_challenge_expired',
+          'The wallet authorization expired. Request and sign a new challenge.',
+        ),
+      );
+    }
+    const message = buildEscrowWalletControlMessage({
+      programId: challenge.program_id,
+      actorId: challenge.actor_id,
+      ownerWallet: challenge.owner_wallet,
+      withdrawRecipient: challenge.withdraw_recipient,
+      nonce: challenge.nonce,
+      issuedAt: challenge.issued_at,
+      expiresAt: challenge.expires_at,
+    });
+    let ownsWallet: boolean;
+    try {
+      ownsWallet = await verifyMessage({
+        address: asAddress(challenge.owner_wallet),
+        message,
+        signature: input.walletSignature as Hex,
+      });
+    } catch {
+      ownsWallet = false;
+    }
+    if (!ownsWallet) {
+      throw new ForbiddenException(
+        createApiErrorResponse(
+          'wallet_control_signature_invalid',
+          'The signature does not prove control of the selected owner wallet.',
+        ),
+      );
+    }
     const programDeadline = await this.repository.getProgramDeadline(programId);
     if (programDeadline === null) {
       throw new ConflictException('program_deadline_required_for_escrow');
@@ -96,28 +245,36 @@ export class EscrowService {
     }
     const artifact = await loadEscrowArtifact(this.config.BOUNTY_ESCROW_ARTIFACT_PATH);
     const programKey = canonicalProgramKey(programId);
+    const deploymentWalletAddress = await this.circle.getDeploymentWalletAddress();
+    if (
+      deploymentWalletAddress.toLowerCase() === input.ownerWallet.toLowerCase() ||
+      deploymentWalletAddress.toLowerCase() === input.withdrawRecipient.toLowerCase()
+    ) {
+      throw new ConflictException('circle_deployment_wallet_must_not_be_privileged');
+    }
     let deployment = await this.repository.findDeployment(programId);
     if (deployment !== null) {
       this.assertDeploymentParameters(deployment, input, programKey, artifact);
-      if (deployment.deployment_status === 'confirmed' || deployment.deployment_status === 'failed') {
-        return this.repository.toEscrowDeployment(deployment);
-      }
     } else {
       if (new Date(input.refundUnlockAt).getTime() <= Date.now()) {
         throw new ConflictException('refund_unlock_must_be_in_the_future');
       }
-      deployment = await this.repository.createDeploymentRecord({
-        actorId: principal.userId,
-        programId,
-        programKey,
-        ownerWallet: input.ownerWallet,
-        withdrawRecipient: input.withdrawRecipient,
-        refundUnlockAt: input.refundUnlockAt,
-        artifactChecksum: artifact.artifactSha256,
-        runtimeChecksum: artifact.runtimeBytecodeSha256,
-        immutableReferences: artifact.immutableReferences,
-        idempotencyKey: randomUUID(),
-      });
+    }
+    deployment = await this.repository.createDeploymentRecord({
+      actorId: principal.userId,
+      programId,
+      walletChallengeId: input.walletChallengeId,
+      programKey,
+      ownerWallet: input.ownerWallet,
+      withdrawRecipient: input.withdrawRecipient,
+      refundUnlockAt: input.refundUnlockAt,
+      artifactChecksum: artifact.artifactSha256,
+      runtimeChecksum: artifact.runtimeBytecodeSha256,
+      immutableReferences: artifact.immutableReferences,
+      idempotencyKey: deployment?.deploy_idempotency_key ?? randomUUID(),
+    });
+    if (deployment.deployment_status === 'confirmed' || deployment.deployment_status === 'failed') {
+      return this.repository.toEscrowDeployment(deployment);
     }
 
     try {
@@ -150,9 +307,13 @@ export class EscrowService {
       if (result.state === 'pending') {
         return this.repository.toEscrowDeployment(deployment);
       }
-      const refundUnlockAt = BigInt(
-        Math.floor(new Date(input.refundUnlockAt).getTime() / 1000),
-      );
+      if (
+        result.deploymentWalletAddress.toLowerCase() === input.ownerWallet.toLowerCase() ||
+        result.deploymentWalletAddress.toLowerCase() === input.withdrawRecipient.toLowerCase()
+      ) {
+        throw new ConflictException('circle_deployment_wallet_must_not_be_privileged');
+      }
+      const refundUnlockAt = BigInt(Math.floor(new Date(input.refundUnlockAt).getTime() / 1000));
       await this.arc.verifyDeployment({
         artifact,
         contractAddress: result.contractAddress,
@@ -228,6 +389,12 @@ export class EscrowService {
         feeAllocations: input.feeAllocations.map((allocation) => ({
           network: allocation.network,
           amountBaseUnits: parseUsdcBaseUnits(allocation.amount)!.toString(),
+          components: allocation.components.map((component) => ({
+            network: component.network,
+            type: component.type,
+            token: component.token,
+            amountBaseUnits: parseUsdcBaseUnits(component.amount)!.toString(),
+          })),
         })),
         sources: input.sources.map((source) => ({
           network: source.network,
@@ -261,9 +428,32 @@ export class EscrowService {
     intentId: string,
   ): Promise<FundingIntent> {
     await this.requireOwner(principal, programId);
-    return this.repository.toFundingIntent(
-      await this.requireFundingIntent(programId, intentId),
-    );
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async getFundingOperationHistory(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    query: FundingOperationHistoryQuery,
+  ): Promise<FundingOperationHistoryResponse['data']> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    const history = await this.repository.listFundingOperationHistory({
+      intentId,
+      page: query.page,
+      limit: query.limit,
+      kind: query.kind,
+    });
+    return {
+      items: history.rows.map((operation) =>
+        this.repository.toFundingHistoryItem(intent, operation),
+      ),
+      page: query.page,
+      limit: query.limit,
+      total: history.total,
+      hasMore: query.page * query.limit < history.total,
+    };
   }
 
   public async getLatestFundingConfirmation(
@@ -307,11 +497,304 @@ export class EscrowService {
       feeAllocations: input.feeAllocations.map((allocation) => ({
         network: allocation.network,
         amountBaseUnits: parseUsdcBaseUnits(allocation.amount)!.toString(),
+        components: allocation.components.map((component) => ({
+          network: component.network,
+          type: component.type,
+          token: component.token,
+          amountBaseUnits: parseUsdcBaseUnits(component.amount)!.toString(),
+        })),
       })),
       quotedAt: input.quotedAt,
       expiresAt: input.expiresAt,
     });
     return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async prepareFundingDestination(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.route_mode !== 'unified_balance') {
+      throw new ConflictException('funding_destination_handoff_requires_unified_balance');
+    }
+    const readiness = await this.evaluateGatewayFundingReadiness(intent);
+    if (!readiness.ready) {
+      throw new ConflictException('gateway_confirmed_balance_insufficient');
+    }
+    if (intent.quote_quoted_at == null) {
+      throw new ConflictException('funding_quote_missing');
+    }
+    await this.repository.prepareFundingDestination({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      quoteQuotedAt: intent.quote_quoted_at,
+      feeAllocations: intent.fee_allocations,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async reopenFundingSourceCollection(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.route_mode !== 'unified_balance') {
+      throw new ConflictException('funding_source_collection_reopen_requires_unified_balance');
+    }
+    if (intent.quote_quoted_at == null) throw new ConflictException('funding_quote_missing');
+    await this.repository.reopenFundingSourceCollection({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      quoteQuotedAt: intent.quote_quoted_at,
+      feeAllocations: intent.fee_allocations,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async claimFundingDestinationAttempt(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    idempotencyKey: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.funding_phase !== 'ready_for_destination') {
+      throw new ConflictException('funding_destination_not_prepared');
+    }
+    await this.repository.claimFundingDestinationAttempt({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      idempotencyKey,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async armFundingDestinationAttempt(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    claimToken: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    const acquired = await this.repository.armFundingDestinationAttempt({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      claimToken,
+    });
+    if (!acquired) throw new ConflictException('funding_wallet_boundary_already_claimed');
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async armBridgeDeliveryRetry(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    operationId: string,
+    claimToken: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.route_mode !== 'bridge') {
+      throw new ConflictException('bridge_delivery_retry_requires_bridge');
+    }
+    const acquired = await this.repository.armBridgeDeliveryRetry({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      operationId,
+      claimToken,
+    });
+    if (!acquired) throw new ConflictException('bridge_delivery_retry_already_claimed');
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async cancelFundingIntent(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    await this.repository.cancelFundingIntent({
+      actorId: principal.userId,
+      programId,
+      intentId,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async releaseRejectedSendAttempt(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    operationId: string,
+    claimToken: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.route_mode !== 'send') {
+      throw new ConflictException('rejected_send_release_requires_send');
+    }
+    await this.repository.releaseRejectedSendAttempt({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      operationId,
+      claimToken,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async attachFundingDestination(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    operationId: string,
+    transactionHash: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    await this.repository.attachFundingDestination({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      operationId,
+      transactionHash,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async attachFundingRecoveryTelemetry(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    input: AttachFundingRecoveryTelemetryRequest,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    await this.repository.attachFundingRecoveryTelemetry({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      telemetry: input,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async createFundingDestinationReplacement(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    if (intent.route_mode !== 'send') {
+      throw new ConflictException('funding_destination_manual_recovery_required');
+    }
+    await this.repository.createFundingDestinationReplacement({
+      actorId: principal.userId,
+      programId,
+      intentId,
+    });
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
+  public async checkFundingRecovery(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    input: FundingRecoveryCheckRequest,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    const intent = await this.requireFundingIntent(programId, intentId);
+    const operation = await this.repository.findFundingOperation(intentId, input.operationId);
+    if (operation === null) throw new NotFoundException();
+    const transactionHash = input.transactionHash.toLowerCase();
+    const knownHashes = new Set(
+      [
+        operation.transaction_hash,
+        ...operation.steps.map(({ transactionHash: hash }) => hash ?? null),
+      ]
+        .filter((hash): hash is string => hash !== null)
+        .map((hash) => hash.toLowerCase()),
+    );
+    if (!knownHashes.has(transactionHash)) {
+      throw new ConflictException('funding_recovery_hash_not_locked');
+    }
+
+    let network: keyof typeof FUNDING_NETWORK_CONFIG;
+    const isDestination =
+      operation.transaction_hash?.toLowerCase() === transactionHash ||
+      intent.destination_transaction_hash?.toLowerCase() === transactionHash;
+    const matchedSteps = operation.steps.filter(
+      (step) => step.transactionHash?.toLowerCase() === transactionHash,
+    );
+    if (matchedSteps.length > 1) {
+      throw new ConflictException('funding_recovery_hash_identity_ambiguous');
+    }
+    const matchedStep = matchedSteps[0];
+    if (operation.operation_type === 'deposit') {
+      if (operation.source_chain == null) {
+        throw new ConflictException('funding_recovery_network_ambiguous');
+      }
+      network = operation.source_chain;
+    } else if (isDestination) {
+      network = 'Arc_Testnet';
+    } else if (matchedStep?.network !== undefined) {
+      if (!intent.sources.some((source) => source.network === matchedStep.network)) {
+        throw new ConflictException('funding_recovery_network_not_locked');
+      }
+      network = matchedStep.network;
+    } else if (intent.route_mode === 'bridge' && intent.sources.length === 1) {
+      network = intent.sources[0]!.network;
+    } else {
+      // A bounded Unified Balance step without a persisted chain identity cannot safely choose
+      // an RPC. Never accept a client-asserted chain to make this ambiguity disappear.
+      throw new ConflictException('funding_recovery_network_ambiguous');
+    }
+
+    try {
+      const evidence = await this.arc.getTransactionRecoveryEvidence({
+        network,
+        transactionHash: transactionHash as `0x${string}`,
+      });
+      await this.repository.recordFundingRecoveryPoll({
+        actorId: principal.userId,
+        programId,
+        intentId,
+        operationId: input.operationId,
+        transactionHash,
+        state: evidence.state,
+        ...(evidence.state === 'pending'
+          ? {}
+          : {
+              blockNumber: evidence.blockNumber,
+              blockHash: evidence.blockHash,
+            }),
+      });
+      if (evidence.state === 'success') {
+        if (operation.operation_type === 'deposit') {
+          return this.reconcileSourceDeposit(principal, programId, intentId, input.operationId);
+        }
+        if (isDestination) {
+          return this.reconcileFunding(principal, programId, intentId);
+        }
+      }
+      return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+    } catch (error) {
+      this.rethrowProviderError(error);
+    }
   }
 
   public async createSourceDeposit(
@@ -324,6 +807,9 @@ export class EscrowService {
     const intent = await this.requireFundingIntent(programId, intentId);
     if (intent.route_mode !== 'unified_balance') {
       throw new ConflictException('source_deposit_requires_unified_balance');
+    }
+    if (intent.funding_phase !== 'collecting_deposits') {
+      throw new ConflictException('source_deposit_after_destination_handoff');
     }
     const source = intent.sources.find(({ network }) => network === input.network);
     if (source === undefined) throw new ConflictException('source_deposit_network_not_allocated');
@@ -341,8 +827,7 @@ export class EscrowService {
         intent.fee_allocations.find(({ network: feeNetwork }) => feeNetwork === input.network)
           ?.amountBaseUnits ?? '0',
       );
-      const requiredConfirmedBaseUnits =
-        allocationBaseUnits + sourceFeeBaseUnits;
+      const requiredConfirmedBaseUnits = allocationBaseUnits + sourceFeeBaseUnits;
       const depositAmountBaseUnits =
         requiredConfirmedBaseUnits > preGatewayBalance
           ? requiredConfirmedBaseUnits - preGatewayBalance
@@ -387,6 +872,26 @@ export class EscrowService {
     return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
   }
 
+  public async armSourceDeposit(
+    principal: RequestPrincipal,
+    programId: string,
+    intentId: string,
+    depositId: string,
+    claimToken: string,
+  ): Promise<FundingIntent> {
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    const acquired = await this.repository.armSourceDeposit({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      depositId,
+      claimToken,
+    });
+    if (!acquired) throw new ConflictException('funding_wallet_boundary_already_claimed');
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
+  }
+
   public async attachSourceDeposit(
     principal: RequestPrincipal,
     programId: string,
@@ -394,8 +899,13 @@ export class EscrowService {
     depositId: string,
     input: AttachSourceDepositRequest,
   ): Promise<FundingIntent> {
-    await this.observeSourceDeposit(principal, programId, intentId, depositId, {
-      outcome: 'submitted',
+    await this.requireOwner(principal, programId);
+    await this.requireFundingIntent(programId, intentId);
+    await this.repository.attachSourceDeposit({
+      actorId: principal.userId,
+      programId,
+      intentId,
+      depositId,
       transactionHash: input.transactionHash,
     });
     return this.reconcileSourceDeposit(principal, programId, intentId, depositId);
@@ -414,8 +924,12 @@ export class EscrowService {
     if (deposit.status === 'confirmed') {
       return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
     }
-    if (deposit.transaction_hash == null || deposit.source_chain == null ||
-        deposit.source_address == null || deposit.requested_amount_base_units == null) {
+    if (
+      deposit.transaction_hash == null ||
+      deposit.source_chain == null ||
+      deposit.source_address == null ||
+      deposit.requested_amount_base_units == null
+    ) {
       throw new ConflictException('source_deposit_transaction_not_attached');
     }
     try {
@@ -481,11 +995,15 @@ export class EscrowService {
   ): Promise<FundingIntent> {
     await this.requireOwner(principal, programId);
     const current = await this.requireFundingIntent(programId, intentId);
+    if (
+      current.route_mode === 'unified_balance' &&
+      current.funding_phase !== 'ready_for_destination'
+    ) {
+      throw new ConflictException('funding_destination_not_prepared');
+    }
     const hasDestinationBoundary = (current.funding_operations ?? []).some(
       ({ operation_type }) =>
-        operation_type === 'send' ||
-        operation_type === 'bridge' ||
-        operation_type === 'spend',
+        operation_type === 'send' || operation_type === 'bridge' || operation_type === 'spend',
     );
     if (current.route_mode === 'unified_balance' && !hasDestinationBoundary) {
       if (input.submissionUncertain !== true) {
@@ -504,10 +1022,27 @@ export class EscrowService {
     ) {
       throw new ConflictException('funding_intent_expired');
     }
-    await this.repository.observeFundingOperation(intentId, input);
-    return this.repository.toFundingIntent(
-      await this.requireFundingIntent(programId, intentId),
+    const sourceHashes = (input.sourceTransactionHashes ?? []).map((hash) => hash.toLowerCase());
+    const stepHashes = (input.steps ?? []).flatMap((step) =>
+      step.transactionHash === undefined ? [] : [step.transactionHash.toLowerCase()],
     );
+    if (
+      new Set(sourceHashes).size !== sourceHashes.length ||
+      new Set(stepHashes).size !== stepHashes.length ||
+      (input.destinationTransactionHash !== undefined &&
+        sourceHashes.includes(input.destinationTransactionHash.toLowerCase()))
+    ) {
+      throw new ConflictException('funding_operation_hash_identity_ambiguous');
+    }
+    if (current.route_mode === 'unified_balance' && sourceHashes.length > 0) {
+      // App Kit 1.10 exposes allocation chains and SpendStep transaction hashes separately. The
+      // browser cannot manufacture an authoritative association by zipping or annotating them.
+      // Per-network source hashes may only enter through a server-owned source operation that
+      // already carries source_chain; the owner endpoint persists destination evidence only.
+      throw new ConflictException('funding_operation_source_network_binding_unavailable');
+    }
+    await this.repository.observeFundingOperation(principal.userId, programId, intentId, input);
+    return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
   }
 
   public async reconcileFunding(
@@ -524,9 +1059,7 @@ export class EscrowService {
     const leaseId = randomUUID();
     const leaseDuration = Math.min(
       14 * 60 * 1000,
-      this.config.CIRCLE_POLL_TIMEOUT_MS +
-        this.config.CIRCLE_REQUEST_TIMEOUT_MS * 2 +
-        60_000,
+      this.config.CIRCLE_POLL_TIMEOUT_MS + this.config.CIRCLE_REQUEST_TIMEOUT_MS * 2 + 60_000,
     );
     const claimed = await this.repository.claimFundingReconciliation(
       intentId,
@@ -614,9 +1147,7 @@ export class EscrowService {
         syncBlockNumber: sync.blockNumber,
         syncBlockHash: sync.blockHash,
       });
-      return this.repository.toFundingIntent(
-        await this.requireFundingIntent(programId, intentId),
-      );
+      return this.repository.toFundingIntent(await this.requireFundingIntent(programId, intentId));
     } catch (error) {
       if (error instanceof EscrowProviderError && error.code === 'funding_destination_reverted') {
         await this.repository.failFundingDestinationReverted(
@@ -644,75 +1175,40 @@ export class EscrowService {
     programId: string,
     input: CreateWithdrawalIntentRequest,
   ): Promise<WithdrawalIntent> {
-    await this.requireOwner(principal, programId);
-    const escrow = await this.repository.findConfirmedEscrow(programId);
-    if (
-      escrow === null ||
-      escrow.owner_wallet === null ||
-      escrow.withdraw_recipient === null ||
-      escrow.refund_unlock_at === null
-    ) {
-      throw new ConflictException('verified_arc_escrow_required');
-    }
-    if (escrow.owner_wallet.toLowerCase() !== input.walletAddress.toLowerCase()) {
-      throw new ConflictException('withdrawal_owner_wallet_mismatch');
-    }
-    let state;
-    try {
-      // Keep a contiguous direct-transfer scan cursor separate from normal
-      // funding/sync checkpoints. The inclusive one-block overlap is idempotent.
-      const deploymentBlock = BigInt(escrow.deployment_block_number ?? '0');
-      const persistedCursor = BigInt(
-        escrow.late_funding_scanned_through_block ?? escrow.deployment_block_number ?? '0',
-      );
-      const scanFrom =
-        persistedCursor > deploymentBlock ? persistedCursor - 1n : deploymentBlock;
-      const lateFunding = await this.arc.findLateFunding({
-        escrowAddress: escrow.contract_address,
-        fromBlock: scanFrom,
-      });
-      for (let offset = 0; offset < lateFunding.events.length; offset += LATE_FUNDING_BATCH_SIZE) {
-        await this.repository.reconcileLateFunding({
-          actorId: principal.userId,
-          programId,
-          escrowId: escrow.id,
-          scannedThroughBlock: lateFunding.scannedThroughBlock,
-          events: lateFunding.events.slice(offset, offset + LATE_FUNDING_BATCH_SIZE),
-          advanceCursor: false,
-        });
-      }
-      // Advance only after every contiguous event batch succeeds. A crash before
-      // this write leaves the old inclusive cursor, so the next scan safely dedupes.
-      await this.repository.reconcileLateFunding({
-        actorId: principal.userId,
-        programId,
-        escrowId: escrow.id,
-        scannedThroughBlock: lateFunding.scannedThroughBlock,
-        events: [],
-        advanceCursor: true,
-      });
-      state = await this.arc.getWithdrawalState(escrow.contract_address);
-    } catch (error) {
-      this.rethrowProviderError(error);
-    }
-    if (state.refundUnlockAt > BigInt(Math.floor(Date.now() / 1000))) {
-      throw new ConflictException('withdrawal_refund_unlock_not_reached');
-    }
-    if (state.totalApprovedOutstandingBaseUnits !== 0n) {
-      throw new ConflictException('withdrawal_outstanding_rewards_exist');
-    }
-    if (state.balanceBaseUnits <= 0n) {
-      throw new ConflictException('withdrawal_no_remaining_funds');
-    }
-    if (
-      state.withdrawRecipient.toLowerCase() !== escrow.withdraw_recipient.toLowerCase()
-    ) {
-      throw new ConflictException('withdrawal_recipient_mismatch');
-    }
+    const { state } = await this.prepareWithdrawalCreation(principal, programId, input);
     return this.repository.toWithdrawalIntent(
       await this.repository.createWithdrawalIntent({
         actorId: principal.userId,
         programId,
+        idempotencyKey: input.idempotencyKey,
+        walletAddress: input.walletAddress,
+        amountBaseUnits: state.balanceBaseUnits,
+        preTotalWithdrawnBaseUnits: state.totalWithdrawnBaseUnits,
+        escrowAlreadyClosed: state.closed,
+      }),
+    );
+  }
+
+  public async createWithdrawalReplacement(
+    principal: RequestPrincipal,
+    programId: string,
+    failedIntentId: string,
+    input: CreateWithdrawalIntentRequest,
+  ): Promise<WithdrawalIntent> {
+    await this.requireOwner(principal, programId);
+    const failed = await this.requireWithdrawalIntent(programId, failedIntentId);
+    if (failed.status !== 'failed') {
+      throw new ConflictException('withdrawal_replacement_requires_failed_intent');
+    }
+    if (failed.close_transaction_hash === null && failed.withdraw_transaction_hash === null) {
+      throw new ConflictException('withdrawal_replacement_requires_verified_failure');
+    }
+    const { state } = await this.prepareWithdrawalCreation(principal, programId, input);
+    return this.repository.toWithdrawalIntent(
+      await this.repository.createWithdrawalReplacement({
+        actorId: principal.userId,
+        programId,
+        failedIntentId,
         idempotencyKey: input.idempotencyKey,
         walletAddress: input.walletAddress,
         amountBaseUnits: state.balanceBaseUnits,
@@ -802,8 +1298,7 @@ export class EscrowService {
       );
     } catch (error) {
       if (error instanceof EscrowProviderError && !error.retryable) {
-        const transactionHash =
-          row.withdraw_transaction_hash ?? row.close_transaction_hash;
+        const transactionHash = row.withdraw_transaction_hash ?? row.close_transaction_hash;
         if (transactionHash !== null) {
           await this.repository.failWithdrawalIntent(intentId, transactionHash, error.code);
         }
@@ -817,6 +1312,81 @@ export class EscrowService {
     if (!(await this.repository.isProgramOwner(programId, principal.userId))) {
       throw new NotFoundException();
     }
+  }
+
+  private async prepareWithdrawalCreation(
+    principal: RequestPrincipal,
+    programId: string,
+    input: CreateWithdrawalIntentRequest,
+  ) {
+    await this.requireOwner(principal, programId);
+    const programStatus = await this.repository.getProgramStatus(programId);
+    if (programStatus !== 'expired' && programStatus !== 'closed') {
+      throw new ConflictException(
+        createApiErrorResponse(
+          'withdrawal_program_not_ended',
+          'Remaining escrow funds can only be withdrawn after the program has ended.',
+        ),
+      );
+    }
+    const escrow = await this.repository.findConfirmedEscrow(programId);
+    if (
+      escrow === null ||
+      escrow.owner_wallet === null ||
+      escrow.withdraw_recipient === null ||
+      escrow.refund_unlock_at === null
+    ) {
+      throw new ConflictException('verified_arc_escrow_required');
+    }
+    if (escrow.owner_wallet.toLowerCase() !== input.walletAddress.toLowerCase()) {
+      throw new ConflictException('withdrawal_owner_wallet_mismatch');
+    }
+    let state;
+    try {
+      const deploymentBlock = BigInt(escrow.deployment_block_number ?? '0');
+      const persistedCursor = BigInt(
+        escrow.late_funding_scanned_through_block ?? escrow.deployment_block_number ?? '0',
+      );
+      const scanFrom = persistedCursor > deploymentBlock ? persistedCursor - 1n : deploymentBlock;
+      const lateFunding = await this.arc.findLateFunding({
+        escrowAddress: escrow.contract_address,
+        fromBlock: scanFrom,
+      });
+      for (let offset = 0; offset < lateFunding.events.length; offset += LATE_FUNDING_BATCH_SIZE) {
+        await this.repository.reconcileLateFunding({
+          actorId: principal.userId,
+          programId,
+          escrowId: escrow.id,
+          scannedThroughBlock: lateFunding.scannedThroughBlock,
+          events: lateFunding.events.slice(offset, offset + LATE_FUNDING_BATCH_SIZE),
+          advanceCursor: false,
+        });
+      }
+      await this.repository.reconcileLateFunding({
+        actorId: principal.userId,
+        programId,
+        escrowId: escrow.id,
+        scannedThroughBlock: lateFunding.scannedThroughBlock,
+        events: [],
+        advanceCursor: true,
+      });
+      state = await this.arc.getWithdrawalState(escrow.contract_address);
+    } catch (error) {
+      this.rethrowProviderError(error);
+    }
+    if (state.refundUnlockAt > BigInt(Math.floor(Date.now() / 1000))) {
+      throw new ConflictException('withdrawal_refund_unlock_not_reached');
+    }
+    if (state.totalApprovedOutstandingBaseUnits !== 0n) {
+      throw new ConflictException('withdrawal_outstanding_rewards_exist');
+    }
+    if (state.balanceBaseUnits <= 0n) {
+      throw new ConflictException('withdrawal_no_remaining_funds');
+    }
+    if (state.withdrawRecipient.toLowerCase() !== escrow.withdraw_recipient.toLowerCase()) {
+      throw new ConflictException('withdrawal_recipient_mismatch');
+    }
+    return { escrow, state };
   }
 
   private async evaluateGatewayFundingReadiness(
@@ -850,8 +1420,7 @@ export class EscrowService {
         deficit: formatUsdcBaseUnits(deficit),
       };
     });
-    const requiredConfirmedTotal =
-      BigInt(intent.gross_amount_base_units) + feeReserve;
+    const requiredConfirmedTotal = BigInt(intent.gross_amount_base_units) + feeReserve;
     const confirmedSelectedTotal = balances.reduce((sum, value) => sum + value, 0n);
     return {
       intentId: intent.id,

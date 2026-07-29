@@ -42,6 +42,7 @@ function clients(overrides?: {
   deployData?: unknown;
   transaction?: unknown;
   contract?: unknown;
+  wallet?: unknown;
 }) {
   return {
     contracts: {
@@ -64,6 +65,20 @@ function clients(overrides?: {
       }),
     },
     wallets: {
+      getWallet: vi.fn().mockResolvedValue({
+        data: {
+          wallet:
+            overrides?.wallet ??
+            ({
+              id: WALLET_ID,
+              address: DEPLOYER,
+              blockchain: 'ARC-TESTNET',
+              custodyType: 'DEVELOPER',
+              accountType: 'SCA',
+              state: 'LIVE',
+            } as const),
+        },
+      }),
       createContractExecutionTransaction: vi.fn().mockResolvedValue({
         data: { id: TRANSACTION_ID, state: 'INITIATED' },
       }),
@@ -139,6 +154,42 @@ describe('Circle Contracts adapter', () => {
         ],
       }),
     );
+  });
+
+  it('accepts only the configured LIVE developer-controlled Arc SCA as deployer', async () => {
+    const adapter = new CircleContractsAdapter(config(), clients());
+    await expect(adapter.getDeploymentWalletAddress()).resolves.toBe(DEPLOYER);
+
+    for (const wallet of [
+      {
+        id: WALLET_ID,
+        address: DEPLOYER,
+        blockchain: 'ARC-TESTNET',
+        custodyType: 'ENDUSER',
+        accountType: 'SCA',
+        state: 'LIVE',
+      },
+      {
+        id: WALLET_ID,
+        address: DEPLOYER,
+        blockchain: 'ARC-TESTNET',
+        custodyType: 'DEVELOPER',
+        accountType: 'EOA',
+        state: 'LIVE',
+      },
+      {
+        id: WALLET_ID,
+        address: DEPLOYER,
+        blockchain: 'ARC-TESTNET',
+        custodyType: 'DEVELOPER',
+        accountType: 'SCA',
+        state: 'FROZEN',
+      },
+    ]) {
+      await expect(
+        new CircleContractsAdapter(config(), clients({ wallet })).getDeploymentWalletAddress(),
+      ).rejects.toMatchObject({ code: 'circle_response_invalid', retryable: false });
+    }
   });
 
   it('polls both Circle records and binds chain, wallet, address, hash, and block', async () => {

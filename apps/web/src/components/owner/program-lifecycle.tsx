@@ -3,21 +3,30 @@
 import {
   createFundingIntentRequestSchema,
   attachSourceDepositRequestSchema,
+  attachFundingDestinationRequestSchema,
+  attachFundingRecoveryTelemetryRequestSchema,
   createSourceDepositRequestSchema,
   createWithdrawalIntentRequestSchema,
+  createEscrowWalletChallengeRequestSchema,
   deployEscrowWithCircleRequestSchema,
+  escrowWalletChallengeResponseSchema,
   escrowDeploymentResponseSchema,
   fundingConfirmationArtifactResponseSchema,
+  fundingDestinationAttemptRequestSchema,
   fundingIntentResponseSchema,
   gatewayFundingReadinessResponseSchema,
   observeFundingOperationRequestSchema,
   observeSourceDepositRequestSchema,
   refreshFundingQuoteRequestSchema,
+  releaseRejectedSendAttemptRequestSchema,
+  walletBoundaryClaimRequestSchema,
+  bridgeDeliveryRetryClaimRequestSchema,
   observeWithdrawalRequestSchema,
   programResponseSchema,
   withdrawalIntentResponseSchema,
   type FundingIntent as ApiFundingIntent,
   type FundingConfirmationArtifact,
+  type GatewayFundingReadiness,
   type Program,
   type WithdrawalIntent,
 } from '@bug-bounty-escrow/shared';
@@ -46,7 +55,9 @@ import {
   bridgeRecoveryTelemetry,
   canRetryBridgeResult,
   CircleBridgeIncompleteError,
+  CircleUnifiedBalanceManualRecoveryError,
   connectCircleWallet,
+  signEscrowWalletChallenge,
   type CircleWalletSession,
 } from './circle-funding-executor';
 import { GuidancePanel, WorkspaceHeading } from './owner-workspace';
@@ -62,22 +73,34 @@ import {
   fundingSourceSubmittedRecoveryMessage,
   fundingContinuationAction,
   fundingSubmissionFailurePhase,
+  fundingReadinessFingerprint,
+  isExplicitWalletRejection,
+  isFundingReadinessCurrent,
   clearPendingFundingResult,
+  clearPendingBridgeRecovery,
   clearPendingSourceDepositHash,
   persistPendingFundingResult,
+  persistPendingBridgeRecovery,
   persistPendingSourceDepositHash,
   readPendingFundingResult,
+  readPendingBridgeRecovery,
   readPendingSourceDepositHash,
   sourceDepositContinuationAction,
-  selectedUnifiedBalanceDeficientNetworks,
+  shouldRenderFundingPending,
+  shouldRemainInCp11AfterUnifiedIntentLock,
   parseUsdcBaseUnits,
   validateFundingSelection,
   type FundingDestinationResult,
+  type FundingNetworkId,
   type FundingOperationPhase,
+  type FundingRecoveryAttempt,
   type FundingSource,
+  type FundingReadinessSnapshot,
+  type PendingBridgeRecovery,
   type ValidatedFundingSelection,
   type VerifiedFundingIntent,
 } from './program-funding-flow';
+import { isWithdrawalPanelAvailable } from './program-withdrawal-availability';
 import {
   FundingAllocations,
   FundingConfirmationEvidence,
@@ -87,16 +110,13 @@ import {
 import {
   assertWithdrawalRecoveryStorage,
   clearPendingWithdrawalHash,
-  persistPendingWithdrawalHash,
+  persistAndObserveReturnedWithdrawalHash,
   readPendingWithdrawalHash,
   withdrawalContinuationAction,
 } from './program-withdrawal-flow';
 import { CREATE_PROGRAM_STEPS } from './program-wizard';
 import { formatUsdc, shortenAddress } from './program-draft';
-import {
-  buildProgramReadiness,
-  type ProgramReadinessItem,
-} from './program-readiness-model';
+import { buildProgramReadiness, type ProgramReadinessItem } from './program-readiness-model';
 import { FormCard, StepLayout, SummaryRow, WizardShell } from './wizard-parts';
 import { apiRequest, ApiClientError } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
@@ -116,29 +136,71 @@ function fundingSourcesFromApi(intent: ApiFundingIntent): FundingSource[] {
 }
 
 function verifiedIntentFromApi(intent: ApiFundingIntent): VerifiedFundingIntent {
-  const recovery =
-    intent.recovery === undefined
-      ? undefined
+  const mapRecovery = (
+    candidate: NonNullable<ApiFundingIntent['recovery']>,
+  ): FundingRecoveryAttempt => ({
+    operationRecordId: candidate.operationRecordId,
+    status: candidate.status,
+    operationType: candidate.operationType,
+    ...(candidate.attemptNo === undefined ? {} : { attemptNo: candidate.attemptNo }),
+    ...(candidate.replacesOperationId === undefined
+      ? {}
+      : { replacesOperationId: candidate.replacesOperationId }),
+    ...(candidate.operationId === undefined ? {} : { operationId: candidate.operationId }),
+    ...(candidate.transactionHash === undefined
+      ? {}
+      : { transactionHash: candidate.transactionHash }),
+    ...(candidate.transferId === undefined ? {} : { transferId: candidate.transferId }),
+    ...(candidate.failureCode === undefined ? {} : { failureCode: candidate.failureCode }),
+    ...(candidate.providerState === undefined ? {} : { providerState: candidate.providerState }),
+    retryable: candidate.retryable,
+    submissionUncertain: candidate.submissionUncertain,
+    sourceTransactionHashes: candidate.sourceTransactionHashes,
+    ...(candidate.unboundTransactionHashes === undefined
+      ? {}
+      : { unboundTransactionHashes: candidate.unboundTransactionHashes }),
+    steps: candidate.steps.map((step) => ({
+      name: step.name,
+      state: step.state,
+      ...(step.network === undefined ? {} : { network: step.network }),
+      ...(step.transactionHash === undefined ? {} : { transactionHash: step.transactionHash }),
+      ...(step.errorCode === undefined ? {} : { errorCode: step.errorCode }),
+    })),
+    ...(candidate.createdAt === undefined ? {} : { createdAt: candidate.createdAt }),
+    ...(candidate.updatedAt === undefined ? {} : { updatedAt: candidate.updatedAt }),
+    ...(candidate.recoveryCheckedAt === undefined
+      ? {}
+      : { recoveryCheckedAt: candidate.recoveryCheckedAt }),
+    ...(candidate.recoveryTransactionHash === undefined
+      ? {}
+      : { recoveryTransactionHash: candidate.recoveryTransactionHash }),
+    ...(candidate.recoveryState === undefined ? {} : { recoveryState: candidate.recoveryState }),
+    ...(candidate.recoveryBlockNumber === undefined
+      ? {}
+      : { recoveryBlockNumber: candidate.recoveryBlockNumber }),
+    ...(candidate.recoveryBlockHash === undefined
+      ? {}
+      : { recoveryBlockHash: candidate.recoveryBlockHash }),
+    ...(candidate.recoveryChecks === undefined
+      ? {}
       : {
-          ...(intent.recovery.providerState === undefined
-            ? {}
-            : { providerState: intent.recovery.providerState }),
-          retryable: intent.recovery.retryable,
-          submissionUncertain: intent.recovery.submissionUncertain,
-          sourceTransactionHashes: intent.recovery.sourceTransactionHashes,
-          steps: intent.recovery.steps.map((step) => ({
-            name: step.name,
-            state: step.state,
-            ...(step.transactionHash === undefined
-              ? {}
-              : { transactionHash: step.transactionHash }),
-            ...(step.errorCode === undefined ? {} : { errorCode: step.errorCode }),
+          recoveryChecks: candidate.recoveryChecks.map((check) => ({
+            transactionHash: check.transactionHash,
+            evidenceRole: check.evidenceRole,
+            network: check.network,
+            state: check.state,
+            ...(check.blockNumber === undefined ? {} : { blockNumber: check.blockNumber }),
+            ...(check.blockHash === undefined ? {} : { blockHash: check.blockHash }),
+            checkedAt: check.checkedAt,
           })),
-        };
+        }),
+  });
+  const recovery = intent.recovery === undefined ? undefined : mapRecovery(intent.recovery);
   return {
     id: intent.id,
     walletAddress: intent.walletAddress,
     routeMode: intent.routeMode,
+    fundingPhase: intent.fundingPhase,
     grossAmount: intent.grossAmount,
     estimatedFeeReserve: intent.estimatedFeeReserve,
     feeAllocations: intent.feeAllocations.map((allocation) => ({ ...allocation })),
@@ -162,28 +224,118 @@ function verifiedIntentFromApi(intent: ApiFundingIntent): VerifiedFundingIntent 
         ? {}
         : { transactionHash: deposit.transactionHash }),
       ...(deposit.failureCode === undefined ? {} : { failureCode: deposit.failureCode }),
+      ...(deposit.recoveryCheckedAt === undefined
+        ? {}
+        : { recoveryCheckedAt: deposit.recoveryCheckedAt }),
+      ...(deposit.recoveryTransactionHash === undefined
+        ? {}
+        : { recoveryTransactionHash: deposit.recoveryTransactionHash }),
+      ...(deposit.recoveryState === undefined ? {} : { recoveryState: deposit.recoveryState }),
+      ...(deposit.recoveryBlockNumber === undefined
+        ? {}
+        : { recoveryBlockNumber: deposit.recoveryBlockNumber }),
+      ...(deposit.recoveryBlockHash === undefined
+        ? {}
+        : { recoveryBlockHash: deposit.recoveryBlockHash }),
+      ...(deposit.recoveryChecks === undefined
+        ? {}
+        : {
+            recoveryChecks: deposit.recoveryChecks.map((check) => ({
+              transactionHash: check.transactionHash,
+              evidenceRole: check.evidenceRole,
+              network: check.network,
+              state: check.state,
+              ...(check.blockNumber === undefined ? {} : { blockNumber: check.blockNumber }),
+              ...(check.blockHash === undefined ? {} : { blockHash: check.blockHash }),
+              checkedAt: check.checkedAt,
+            })),
+          }),
       canAttach: deposit.canAttach,
       canRetry: deposit.canRetry,
     })),
+    ...(intent.sourceDepositsTotal === undefined
+      ? {}
+      : { sourceDepositsTotal: intent.sourceDepositsTotal }),
+    ...(intent.sourceDepositsTruncated === undefined
+      ? {}
+      : { sourceDepositsTruncated: intent.sourceDepositsTruncated }),
     destinationChain: intent.destinationChain,
     recipientAddress: intent.recipientAddress,
     recipientVerified: true,
+    ...(intent.destinationTransactionHash === undefined
+      ? {}
+      : { destinationTransactionHash: intent.destinationTransactionHash }),
+    ...(intent.transferId === undefined ? {} : { transferId: intent.transferId }),
     ...(recovery === undefined ? {} : { recovery }),
+    ...(intent.recoveryAttempts === undefined
+      ? {}
+      : { recoveryAttempts: intent.recoveryAttempts.map(mapRecovery) }),
+    ...(intent.recoveryAttemptsTotal === undefined
+      ? {}
+      : { recoveryAttemptsTotal: intent.recoveryAttemptsTotal }),
+    ...(intent.recoveryAttemptsTruncated === undefined
+      ? {}
+      : { recoveryAttemptsTruncated: intent.recoveryAttemptsTruncated }),
+    expiresAt: intent.expiresAt,
   };
 }
 
-function depositStatusesFromIntent(
+function fundingQuoteFromIntent(intent: VerifiedFundingIntent) {
+  if (intent.quoteQuotedAt === undefined || intent.quoteExpiresAt === undefined) {
+    throw new Error('The locked funding quote is missing. Return to CP-11 and check readiness.');
+  }
+  const estimatedFeeReserveBaseUnits = parseUsdcBaseUnits(intent.estimatedFeeReserve);
+  if (estimatedFeeReserveBaseUnits === undefined) {
+    throw new Error('The locked funding fee evidence is invalid.');
+  }
+  return {
+    estimatedFeeReserve: intent.estimatedFeeReserve,
+    estimatedFeeReserveBaseUnits,
+    estimatedFeeReserveByNetwork: Object.fromEntries(
+      intent.feeAllocations.map((allocation) => [allocation.network, allocation.amount]),
+    ),
+    feeAllocations: intent.feeAllocations,
+    quotedAt: intent.quoteQuotedAt,
+    expiresAt: intent.quoteExpiresAt,
+  };
+}
+
+export function depositStatusesFromIntent(
   intent: ApiFundingIntent,
   intentSources: readonly FundingSource[],
+  readiness?: GatewayFundingReadiness,
 ): Readonly<Record<string, SourceDepositStatus>> {
   return Object.fromEntries(
     intentSources.map((source) => {
       const deposit = intent.sourceDeposits
         .filter((candidate) => candidate.network === source.network)
         .sort((left, right) => right.attemptNo - left.attemptNo)[0];
-      return [source.rowId, sourceDepositStatusFromApi(deposit)];
+      const deficit = readiness?.sources.find(
+        (candidate) => candidate.network === source.network,
+      )?.deficit;
+      const status =
+        deposit?.status === 'confirmed' && (parseUsdcBaseUnits(deficit ?? '0') ?? 0n) > 0n
+          ? 'top_up_required'
+          : sourceDepositStatusFromApi(deposit);
+      return [source.rowId, status];
     }),
   );
+}
+
+function topUpAmountsFromReadiness(
+  intentSources: readonly FundingSource[],
+  readiness?: GatewayFundingReadiness,
+): Readonly<Record<string, string>> {
+  const amounts: Record<string, string> = {};
+  for (const source of intentSources) {
+    const deficit = readiness?.sources.find(
+      (candidate) => candidate.network === source.network,
+    )?.deficit;
+    if (deficit !== undefined && (parseUsdcBaseUnits(deficit) ?? 0n) > 0n) {
+      amounts[source.rowId] = deficit;
+    }
+  }
+  return amounts;
 }
 
 function sourceDepositStatusFromApi(
@@ -307,37 +459,63 @@ export function ProgramLifecycle({
   const [fundingWorking, setFundingWorking] = useState(false);
   const [fundingError, setFundingError] = useState<string>();
   const [fundingResult, setFundingResult] = useState<FundingDestinationResult>();
+  const [fundingRecoveryHash, setFundingRecoveryHash] = useState('');
+  const [fundingReadiness, setFundingReadiness] = useState<FundingReadinessSnapshot>();
+  const [fundingPendingDismissed, setFundingPendingDismissed] = useState(false);
   const [bridgeRecoveryResult, setBridgeRecoveryResult] =
     useState<CircleBridgeIncompleteError['result']>();
-  const [verifiedFundingIntent, setVerifiedFundingIntent] =
-    useState<VerifiedFundingIntent>();
+  const bridgeRecoveryObservationPending = useRef(false);
+  const [verifiedFundingIntent, setVerifiedFundingIntent] = useState<VerifiedFundingIntent>();
   const fundingIdempotencyKey = useRef<string | undefined>(undefined);
+  const fundingDestinationAttemptKey = useRef<string | undefined>(undefined);
+  const destinationWalletClaimTokens = useRef<Record<string, string>>({});
+  const bridgeDeliveryRetryClaimTokens = useRef<Record<string, string>>({});
+  const sourceWalletClaimTokens = useRef<Record<string, string>>({});
+  const volatileSourceDepositHashes = useRef<Record<string, string>>({});
   const withdrawalIdempotencyKey = useRef<string | undefined>(undefined);
+  const withdrawalReplacementKey = useRef<
+    { failedIntentId: string; idempotencyKey: string } | undefined
+  >(undefined);
   const [depositStatuses, setDepositStatuses] = useState<
     Readonly<Record<string, SourceDepositStatus>>
   >({});
+  const [depositTopUpAmounts, setDepositTopUpAmounts] = useState<Readonly<Record<string, string>>>(
+    {},
+  );
   const [depositRecoveryHashes, setDepositRecoveryHashes] = useState<
     Readonly<Record<string, string>>
   >({});
   const [confirmedUnifiedBalance, setConfirmedUnifiedBalance] = useState<string>();
   const [pendingUnifiedBalance, setPendingUnifiedBalance] = useState<string>();
-  const [fundingConfirmation, setFundingConfirmation] =
-    useState<FundingConfirmationArtifact>();
+  const [fundingConfirmation, setFundingConfirmation] = useState<FundingConfirmationArtifact>();
   const [fundingConfirmationError, setFundingConfirmationError] = useState<string>();
   const [withdrawalIntent, setWithdrawalIntent] = useState<WithdrawalIntent>();
   const [withdrawalWorking, setWithdrawalWorking] = useState(false);
   const [withdrawalError, setWithdrawalError] = useState<string>();
   const [withdrawalRecoveryHash, setWithdrawalRecoveryHash] = useState('');
+  const [volatileWithdrawalHashes, setVolatileWithdrawalHashes] = useState<
+    Readonly<Record<'close' | 'withdraw', string | undefined>>
+  >({ close: undefined, withdraw: undefined });
   const [formError, setFormError] = useState<Record<string, string>>({});
 
   const chainLabel = 'Arc Testnet';
   const deployed = program.contractAddress !== undefined;
+
+  useEffect(() => {
+    if (fundingReadiness === undefined) return;
+    const remaining = Date.parse(fundingReadiness.quote.expiresAt) - Date.now();
+    if (remaining <= 0) {
+      setFundingReadiness(undefined);
+      return;
+    }
+    const timeout = globalThis.setTimeout(
+      () => setFundingReadiness(undefined),
+      Math.min(remaining, 2_147_483_647),
+    );
+    return () => globalThis.clearTimeout(timeout);
+  }, [fundingReadiness]);
   const funded = Number(program.totalPool) > 0;
-  const withdrawalAvailable =
-    program.status === 'expired' ||
-    program.status === 'closed' ||
-    (program.deadline !== undefined && Date.parse(program.deadline) <= Date.now()) ||
-    withdrawalIntent !== undefined;
+  const withdrawalAvailable = isWithdrawalPanelAvailable(program.status, withdrawalIntent);
   const walletMatchesVerifiedIntent =
     walletSession === undefined ||
     verifiedFundingIntent === undefined ||
@@ -351,19 +529,37 @@ export function ProgramLifecycle({
       fundingIntentResponseSchema,
       { token: session.access_token },
     )
-      .then((response) => {
+      .then(async (response) => {
         if (cancelled) return;
         const intent = response.data;
         const intentSources = fundingSourcesFromApi(intent);
         const validation = validateFundingSelection(intent.grossAmount, intentSources);
         if (validation.selection === undefined) return;
+        let readiness: GatewayFundingReadiness | undefined;
+        if (intent.routeMode === 'unified_balance') {
+          try {
+            readiness = (
+              await apiRequest(
+                `/api/programs/${program.id}/funding-intents/${intent.id}/gateway-readiness`,
+                gatewayFundingReadinessResponseSchema,
+                { token: session.access_token },
+              )
+            ).data;
+          } catch {
+            // Intent hydration remains authoritative even when provider readiness is temporarily
+            // unavailable. A later Check readiness will derive the exact deficit again.
+          }
+        }
+        if (cancelled) return;
         setVerifiedFundingIntent(verifiedIntentFromApi(intent));
         setGrossAmount(intent.grossAmount);
         setSources(intentSources);
-        setDepositStatuses(depositStatusesFromIntent(intent, intentSources));
-        if (intent.routeMode !== 'unified_balance' || intent.status !== 'ready_to_sign') {
-          setFundingSelection(validation.selection);
-        }
+        setDepositStatuses(depositStatusesFromIntent(intent, intentSources, readiness));
+        setDepositTopUpAmounts(topUpAmountsFromReadiness(intentSources, readiness));
+        setFundingSelection(
+          intent.fundingPhase === 'ready_for_destination' ? validation.selection : undefined,
+        );
+        setFundingPendingDismissed(false);
         setFundingPhase(fundingPhaseFromApi(intent.status));
         setView('fund');
       })
@@ -382,9 +578,7 @@ export function ProgramLifecycle({
   useEffect(() => {
     if (session?.access_token === undefined || !funded) return;
     let cancelled = false;
-    setFundingConfirmation((current) =>
-      current?.programId === program.id ? current : undefined,
-    );
+    setFundingConfirmation((current) => (current?.programId === program.id ? current : undefined));
     setFundingConfirmationError(undefined);
     void apiRequest(
       `/api/programs/${program.id}/funding-confirmations/latest`,
@@ -432,10 +626,10 @@ export function ProgramLifecycle({
   }, [deployed, program.id, session?.access_token]);
 
   function cacheProgram(saved: Program) {
-    client.setQueryData(
-      queryKeys.ownerProgram(session?.user.id ?? 'no-session', saved.id),
-      { success: true, data: saved },
-    );
+    client.setQueryData(queryKeys.ownerProgram(session?.user.id ?? 'no-session', saved.id), {
+      success: true,
+      data: saved,
+    });
     return client.invalidateQueries({ queryKey: ['programs'] });
   }
 
@@ -447,11 +641,31 @@ export function ProgramLifecycle({
       if (program.deadline === undefined) {
         throw new Error('Set a program deadline before deploying the escrow.');
       }
+      const challengeBody = createEscrowWalletChallengeRequestSchema.parse({
+        ownerWallet: walletSession.address,
+        withdrawRecipient: walletSession.address,
+      });
+      const challenge = await apiRequest(
+        `/api/programs/${program.id}/escrow-wallet-challenges`,
+        escrowWalletChallengeResponseSchema,
+        {
+          method: 'POST',
+          token: session?.access_token,
+          body: challengeBody,
+        },
+      );
+      const walletSignature = await signEscrowWalletChallenge(
+        walletSession.wallet.provider,
+        walletSession.address,
+        challenge.data.message,
+      );
       const body = deployEscrowWithCircleRequestSchema.parse({
         ownerWallet: walletSession.address,
         withdrawRecipient: walletSession.address,
         refundUnlockAt: program.deadline,
         artifactVersion: '1.1.0',
+        walletChallengeId: challenge.data.challengeId,
+        walletSignature,
       });
       const deployment = await apiRequest(
         `/api/programs/${program.id}/escrow-deployments`,
@@ -510,18 +724,36 @@ export function ProgramLifecycle({
   });
 
   const readiness = buildProgramReadiness(program);
-  const collateralReady =
-    readiness.find((item) => item.id === 'funding')?.complete === true;
-  const publishingReady =
-    readiness.find((item) => item.id === 'publishing')?.status === 'Ready';
-  const depositRequiredAmounts = Object.fromEntries(
-    sources.flatMap((source) => {
-      const latest = verifiedFundingIntent?.sourceDeposits
-        .filter((deposit) => deposit.network === source.network)
-        .sort((left, right) => right.attemptNo - left.attemptNo)[0];
-      return latest === undefined ? [] : [[source.rowId, latest.amount]];
-    }),
-  );
+  const collateralReady = readiness.find((item) => item.id === 'funding')?.complete === true;
+  const publishingReady = readiness.find((item) => item.id === 'publishing')?.status === 'Ready';
+  const currentFundingValidation = validateFundingSelection(grossAmount, sources);
+  const canSubmitFundingPlan =
+    currentFundingValidation.selection !== undefined &&
+    walletSession !== undefined &&
+    walletMatchesVerifiedIntent &&
+    program.contractAddress !== undefined &&
+    fundingReadiness !== undefined &&
+    walletSession !== undefined &&
+    currentFundingValidation.selection !== undefined &&
+    isFundingReadinessCurrent(fundingReadiness, {
+      walletAddress: walletSession.address,
+      escrowAddress: program.contractAddress,
+      selection: currentFundingValidation.selection,
+      quote: fundingReadiness.quote,
+    }) &&
+    !fundingWorking;
+  const depositRequiredAmounts = sources.reduce<Record<string, string>>((amounts, source) => {
+    const topUpAmount = depositTopUpAmounts[source.rowId];
+    if (depositStatuses[source.rowId] === 'top_up_required' && topUpAmount !== undefined) {
+      amounts[source.rowId] = topUpAmount;
+      return amounts;
+    }
+    const latest = verifiedFundingIntent?.sourceDeposits
+      .filter((deposit) => deposit.network === source.network)
+      .sort((left, right) => right.attemptNo - left.attemptNo)[0];
+    if (latest !== undefined) amounts[source.rowId] = latest.amount;
+    return amounts;
+  }, {});
 
   async function connectFundingWallet() {
     setWalletPending(true);
@@ -539,6 +771,7 @@ export function ProgramLifecycle({
         setConfirmedUnifiedBalance(undefined);
         setPendingUnifiedBalance(undefined);
       }
+      setFundingReadiness(undefined);
       setWalletSession(connected);
       if (
         verifiedFundingIntent !== undefined &&
@@ -554,7 +787,9 @@ export function ProgramLifecycle({
         setFormError({});
       }
     } catch (error) {
-      setWalletError(error instanceof Error ? error.message : 'The wallet connection was declined.');
+      setWalletError(
+        error instanceof Error ? error.message : 'The wallet connection was declined.',
+      );
     } finally {
       setWalletPending(false);
     }
@@ -566,6 +801,7 @@ export function ProgramLifecycle({
       return;
     }
     setGrossAmount(nextAmount);
+    setFundingReadiness(undefined);
     setFormError({});
     setFundingError(undefined);
     setSources((current) => {
@@ -586,6 +822,7 @@ export function ProgramLifecycle({
     setSources((current) =>
       current.map((source) => (source.rowId === rowId ? { ...source, ...patch } : source)),
     );
+    setFundingReadiness(undefined);
     setDepositStatuses((current) => ({ ...current, [rowId]: 'not_started' }));
     setFormError({});
     setFundingError(undefined);
@@ -604,6 +841,7 @@ export function ProgramLifecycle({
       ...current,
       { rowId: `source-${sourceSequence.current}`, network: nextNetwork, amount: '' },
     ]);
+    setFundingReadiness(undefined);
     setFormError({});
     setFundingError(undefined);
   }
@@ -614,6 +852,7 @@ export function ProgramLifecycle({
       return;
     }
     setSources((current) => current.filter((source) => source.rowId !== rowId));
+    setFundingReadiness(undefined);
     setDepositStatuses((current) => {
       const next = { ...current };
       delete next[rowId];
@@ -679,8 +918,7 @@ export function ProgramLifecycle({
         .filter((candidate) => candidate.network === source.network)
         .sort((left, right) => right.attemptNo - left.attemptNo)[0];
       const topUpRequired =
-        deposit?.status === 'confirmed' &&
-        depositStatuses[source.rowId] === 'top_up_required';
+        deposit?.status === 'confirmed' && depositStatuses[source.rowId] === 'top_up_required';
       if (deposit?.status === 'confirmed' && !topUpRequired) {
         setDepositStatuses((current) => ({ ...current, [source.rowId]: 'confirmed' }));
         return;
@@ -688,28 +926,43 @@ export function ProgramLifecycle({
       if (topUpRequired) deposit = undefined;
       if (deposit !== undefined) {
         depositId = deposit.id;
-        const localHash = readPendingSourceDepositHash(
-          window.localStorage,
-          program.id,
-          activeIntent.id,
-          deposit.id,
-        );
+        const localHash =
+          volatileSourceDepositHashes.current[deposit.id] ??
+          readPendingSourceDepositHash(
+            window.localStorage,
+            program.id,
+            activeIntent.id,
+            deposit.id,
+          );
         let depositAction = sourceDepositContinuationAction(
           deposit,
           localHash,
           depositRecoveryHashes[source.rowId],
         );
+        if (
+          depositAction === 'recovery_required' &&
+          sourceWalletClaimTokens.current[deposit.id] !== undefined
+        ) {
+          // The same mounted client saw an ambiguous arm response before the wallet callback ran.
+          // Reusing that exact token is idempotent; a reload has no such proof and stays fail-closed.
+          depositAction = 'execute_claimed';
+        }
         if (depositAction === 'observe_local_hash' && localHash !== undefined) {
+          const localClaimToken = sourceWalletClaimTokens.current[deposit.id];
           const observed = await apiRequest(
-            `/api/programs/${program.id}/funding-intents/${activeIntent.id}/source-deposits/${deposit.id}/observations`,
+            `/api/programs/${program.id}/funding-intents/${activeIntent.id}/source-deposits/${deposit.id}/${localClaimToken === undefined ? 'attach' : 'observations'}`,
             fundingIntentResponseSchema,
             {
               method: 'POST',
               token: session?.access_token,
-              body: observeSourceDepositRequestSchema.parse({
-                outcome: 'submitted',
-                transactionHash: localHash,
-              }),
+              body:
+                localClaimToken === undefined
+                  ? attachSourceDepositRequestSchema.parse({ transactionHash: localHash })
+                  : observeSourceDepositRequestSchema.parse({
+                      claimToken: localClaimToken,
+                      outcome: 'submitted',
+                      transactionHash: localHash,
+                    }),
             },
           );
           activeIntent = verifiedIntentFromApi(observed.data);
@@ -719,6 +972,8 @@ export function ProgramLifecycle({
             activeIntent.id,
             deposit.id,
           );
+          delete volatileSourceDepositHashes.current[deposit.id];
+          delete sourceWalletClaimTokens.current[deposit.id];
           deposit = activeIntent.sourceDeposits.find((candidate) => candidate.id === depositId);
           depositAction = sourceDepositContinuationAction(
             deposit,
@@ -741,9 +996,7 @@ export function ProgramLifecycle({
               },
             );
             activeIntent = verifiedIntentFromApi(attached.data);
-            deposit = activeIntent.sourceDeposits.find(
-              (candidate) => candidate.id === depositId,
-            );
+            deposit = activeIntent.sourceDeposits.find((candidate) => candidate.id === depositId);
             setDepositRecoveryHashes((current) => ({
               ...current,
               [source.rowId]: '',
@@ -766,8 +1019,7 @@ export function ProgramLifecycle({
           deposit = activeIntent.sourceDeposits
             .filter(
               (candidate) =>
-                candidate.network === source.network &&
-                candidate.status === 'awaiting_signature',
+                candidate.network === source.network && candidate.status === 'awaiting_signature',
             )
             .sort((left, right) => right.attemptNo - left.attemptNo)[0];
           if (deposit === undefined) {
@@ -821,6 +1073,9 @@ export function ProgramLifecycle({
         const claimedIntentId = activeIntent.id;
         const claimedDepositId = depositId;
         const exactDepositSource = claimedDepositSource;
+        const sourceWalletClaimToken =
+          sourceWalletClaimTokens.current[claimedDepositId] ??
+          (sourceWalletClaimTokens.current[claimedDepositId] = globalThis.crypto.randomUUID());
         // For a restored awaiting_signature operation storage and all wallet readiness checks
         // still occur before the durable wallet boundary. A rejected chain switch therefore
         // remains safely retryable instead of being mislabeled as an uncertain transaction.
@@ -829,13 +1084,13 @@ export function ProgramLifecycle({
           () => walletSession.executor.prepareUnifiedBalanceDepositSource(exactDepositSource),
           async () => {
             const locked = await apiRequest(
-              `/api/programs/${program.id}/funding-intents/${claimedIntentId}/source-deposits/${claimedDepositId}/observations`,
+              `/api/programs/${program.id}/funding-intents/${claimedIntentId}/source-deposits/${claimedDepositId}/arm`,
               fundingIntentResponseSchema,
               {
                 method: 'POST',
                 token: session?.access_token,
-                body: observeSourceDepositRequestSchema.parse({
-                  outcome: 'submission_uncertain',
+                body: walletBoundaryClaimRequestSchema.parse({
+                  claimToken: sourceWalletClaimToken,
                 }),
               },
             );
@@ -846,13 +1101,19 @@ export function ProgramLifecycle({
           () => walletSession.executor.depositUnifiedBalanceSource(exactDepositSource),
         );
         returnedHash = result.transactionHash;
-        persistPendingSourceDepositHash(
-          window.localStorage,
-          program.id,
-          activeIntent.id,
-          depositId,
-          returnedHash,
-        );
+        volatileSourceDepositHashes.current[depositId] = returnedHash;
+        setDepositRecoveryHashes((current) => ({ ...current, [source.rowId]: returnedHash! }));
+        try {
+          persistPendingSourceDepositHash(
+            window.localStorage,
+            program.id,
+            activeIntent.id,
+            depositId,
+            returnedHash,
+          );
+        } catch {
+          // Keep going with the volatile provider result so the server records the exact hash.
+        }
         const observed = await apiRequest(
           `/api/programs/${program.id}/funding-intents/${activeIntent.id}/source-deposits/${depositId}/observations`,
           fundingIntentResponseSchema,
@@ -860,18 +1121,17 @@ export function ProgramLifecycle({
             method: 'POST',
             token: session?.access_token,
             body: observeSourceDepositRequestSchema.parse({
+              claimToken: sourceWalletClaimToken,
               outcome: 'submitted',
               transactionHash: returnedHash,
             }),
           },
         );
         activeIntent = verifiedIntentFromApi(observed.data);
-        clearPendingSourceDepositHash(
-          window.localStorage,
-          program.id,
-          activeIntent.id,
-          depositId,
-        );
+        clearPendingSourceDepositHash(window.localStorage, program.id, activeIntent.id, depositId);
+        delete volatileSourceDepositHashes.current[depositId];
+        delete sourceWalletClaimTokens.current[depositId];
+        setDepositRecoveryHashes((current) => ({ ...current, [source.rowId]: '' }));
       }
 
       const reconciled = await apiRequest(
@@ -934,13 +1194,13 @@ export function ProgramLifecycle({
           ? 'Arc verified that the original source deposit reverted. A linked replacement attempt is now safe.'
           : restoredStatus === 'recovery_required'
             ? `${error instanceof Error ? error.message : 'The Unified Balance deposit result is unavailable.'} Attach the original transaction hash; no automatic replacement deposit will be submitted.`
-          : returnedHash !== undefined
-          ? 'The deposit hash is preserved locally. Use Check deposit to persist and reconcile that same transaction.'
-          : submissionBoundaryLocked
-          ? `${error instanceof Error ? error.message : 'The Unified Balance deposit result is unavailable.'} No automatic replacement deposit will be submitted.`
-          : error instanceof Error
-            ? error.message
-            : 'The source is not ready for a Unified Balance deposit.',
+            : returnedHash !== undefined
+              ? 'The deposit hash is preserved in this mounted session. Use Check deposit to persist and reconcile that same transaction.'
+              : submissionBoundaryLocked
+                ? `${error instanceof Error ? error.message : 'The Unified Balance deposit result is unavailable.'} No automatic replacement deposit will be submitted.`
+                : error instanceof Error
+                  ? error.message
+                  : 'The source is not ready for a Unified Balance deposit.',
       );
     } finally {
       setFundingWorking(false);
@@ -949,6 +1209,7 @@ export function ProgramLifecycle({
 
   async function ensureServerFundingIntent(
     selection: ValidatedFundingSelection,
+    quote?: FundingReadinessSnapshot['quote'],
   ): Promise<VerifiedFundingIntent> {
     if (verifiedFundingIntent !== undefined) {
       if (
@@ -967,20 +1228,16 @@ export function ProgramLifecycle({
     if (program.contractAddress === undefined) {
       throw new Error('Deploy and verify the Arc escrow before estimating funding.');
     }
-    const quote = await walletSession.executor.estimateFunding(
-      selection,
-      program.contractAddress,
-    );
+    if (quote === undefined) {
+      throw new Error('Check readiness before creating a funding intent.');
+    }
     fundingIdempotencyKey.current ??= globalThis.crypto.randomUUID();
     const body = createFundingIntentRequestSchema.parse({
       idempotencyKey: fundingIdempotencyKey.current,
       walletAddress: walletSession.address,
       grossAmount: selection.grossAmount,
       estimatedFeeReserve: quote.estimatedFeeReserve,
-      feeAllocations: selection.sources.map((source) => ({
-        network: source.network,
-        amount: quote.estimatedFeeReserveByNetwork[source.network] ?? '0',
-      })),
+      feeAllocations: quote.feeAllocations,
       quoteQuotedAt: quote.quotedAt,
       quoteExpiresAt: quote.expiresAt,
       sources: selection.sources.map(({ network, amount }) => ({ network, amount })),
@@ -999,6 +1256,7 @@ export function ProgramLifecycle({
   async function refreshServerFundingQuote(
     intent: VerifiedFundingIntent,
     selection: ValidatedFundingSelection,
+    suppliedQuote?: FundingReadinessSnapshot['quote'],
   ): Promise<{
     intent: VerifiedFundingIntent;
     quote: Awaited<ReturnType<CircleWalletSession['executor']['estimateFunding']>>;
@@ -1006,10 +1264,9 @@ export function ProgramLifecycle({
     if (walletSession === undefined || program.contractAddress === undefined) {
       throw new Error('Connect the locked wallet and verify the Arc escrow before quoting.');
     }
-    const quote = await walletSession.executor.estimateFunding(
-      selection,
-      program.contractAddress,
-    );
+    const quote =
+      suppliedQuote ??
+      (await walletSession.executor.estimateFunding(selection, program.contractAddress));
     const response = await apiRequest(
       `/api/programs/${program.id}/funding-intents/${intent.id}/quote`,
       fundingIntentResponseSchema,
@@ -1018,10 +1275,7 @@ export function ProgramLifecycle({
         token: session?.access_token,
         body: refreshFundingQuoteRequestSchema.parse({
           estimatedFeeReserve: quote.estimatedFeeReserve,
-          feeAllocations: selection.sources.map((source) => ({
-            network: source.network,
-            amount: quote.estimatedFeeReserveByNetwork[source.network] ?? '0',
-          })),
+          feeAllocations: quote.feeAllocations,
           quotedAt: quote.quotedAt,
           expiresAt: quote.expiresAt,
         }),
@@ -1043,6 +1297,102 @@ export function ProgramLifecycle({
     ).data;
   }
 
+  async function checkFundingReadiness() {
+    const validation = validateFundingSelection(grossAmount, sources);
+    const nextErrors = { ...validation.errors };
+    if (walletSession === undefined) nextErrors['wallet'] = 'Connect the owner wallet first.';
+    if (!walletMatchesVerifiedIntent) {
+      nextErrors['wallet'] = 'The connected wallet does not match the active funding intent.';
+    }
+    if (program.contractAddress === undefined) {
+      nextErrors['escrow'] = 'Deploy and verify the program escrow before funding.';
+    }
+    setFormError(nextErrors);
+    if (
+      Object.keys(nextErrors).length > 0 ||
+      validation.selection === undefined ||
+      walletSession === undefined ||
+      program.contractAddress === undefined
+    ) {
+      setFundingReadiness(undefined);
+      return;
+    }
+    const selectedFunding = validation.selection;
+    setFundingWorking(true);
+    setFundingError(undefined);
+    try {
+      const quote = await walletSession.executor.estimateFunding(
+        selectedFunding,
+        program.contractAddress,
+      );
+      if (Date.parse(quote.expiresAt) <= Date.now()) {
+        throw new Error('Circle returned an expired funding quote.');
+      }
+      let checkedQuote = quote;
+      if (verifiedFundingIntent !== undefined) {
+        const refreshed = await refreshServerFundingQuote(
+          verifiedFundingIntent,
+          selectedFunding,
+          quote,
+        );
+        checkedQuote = refreshed.quote;
+        if (selectedFunding.routeMode === 'unified_balance') {
+          const balance = await walletSession.executor.getUnifiedBalance();
+          const serverReadiness = await getGatewayReadiness(refreshed.intent.id);
+          setDepositTopUpAmounts(
+            topUpAmountsFromReadiness(selectedFunding.sources, serverReadiness),
+          );
+          setDepositStatuses((current) => {
+            const next = { ...current };
+            for (const source of selectedFunding.sources) {
+              const serverSource = serverReadiness.sources.find(
+                (candidate) => candidate.network === source.network,
+              );
+              const latestDeposit = refreshed.intent.sourceDeposits
+                .filter((candidate) => candidate.network === source.network)
+                .sort((left, right) => right.attemptNo - left.attemptNo)[0];
+              if (
+                latestDeposit?.status === 'confirmed' &&
+                (parseUsdcBaseUnits(serverSource?.deficit ?? '0') ?? 0n) > 0n
+              ) {
+                next[source.rowId] = 'top_up_required';
+              } else if (latestDeposit?.status === 'confirmed') {
+                next[source.rowId] = 'confirmed';
+              }
+            }
+            return next;
+          });
+          if (!serverReadiness.ready) {
+            throw new Error(
+              'Selected Gateway domains do not yet cover their locked allocations and source fee headroom.',
+            );
+          }
+          assertSelectedUnifiedBalanceReadiness(selectedFunding, balance, checkedQuote);
+          setConfirmedUnifiedBalance(balance.confirmedAmount);
+          setPendingUnifiedBalance(balance.pendingAmount);
+        }
+      }
+      setFundingReadiness({
+        checkedAt: new Date().toISOString(),
+        quote: checkedQuote,
+        fingerprint: fundingReadinessFingerprint({
+          walletAddress: walletSession.address,
+          escrowAddress: program.contractAddress,
+          selection: selectedFunding,
+          quote: checkedQuote,
+        }),
+      });
+      setFormError({});
+    } catch (error) {
+      setFundingReadiness(undefined);
+      setFundingError(
+        error instanceof Error ? error.message : 'Funding readiness could not be verified.',
+      );
+    } finally {
+      setFundingWorking(false);
+    }
+  }
+
   async function submitFundingPlan() {
     const validation = validateFundingSelection(grossAmount, sources);
     const nextErrors = { ...validation.errors };
@@ -1055,6 +1405,20 @@ export function ProgramLifecycle({
     }
 
     setFormError(nextErrors);
+    const readinessCurrent =
+      fundingReadiness !== undefined &&
+      walletSession !== undefined &&
+      program.contractAddress !== undefined &&
+      validation.selection !== undefined &&
+      isFundingReadinessCurrent(fundingReadiness, {
+        walletAddress: walletSession.address,
+        escrowAddress: program.contractAddress,
+        selection: validation.selection,
+        quote: fundingReadiness.quote,
+      });
+    if (!readinessCurrent) {
+      nextErrors['readiness'] = 'Check readiness again before submitting.';
+    }
     if (
       Object.keys(nextErrors).length > 0 ||
       validation.selection === undefined ||
@@ -1063,72 +1427,39 @@ export function ProgramLifecycle({
       return;
     }
     const selection = validation.selection;
+    const hadVerifiedIntentBeforeSubmit = verifiedFundingIntent !== undefined;
+    const readinessQuote = fundingReadiness!.quote;
 
     setFundingWorking(true);
     try {
-      const intent = await ensureServerFundingIntent(selection);
+      const intent = await ensureServerFundingIntent(selection, readinessQuote);
+      setFundingReadiness(undefined);
       if (selection.routeMode === 'unified_balance') {
-        const refreshed = await refreshServerFundingQuote(
-          intent,
-          selection,
+        if (
+          shouldRemainInCp11AfterUnifiedIntentLock(
+            selection.routeMode,
+            hadVerifiedIntentBeforeSubmit,
+            intent.fundingPhase,
+          )
+        ) {
+          setFundingSelection(undefined);
+          setFundingPendingDismissed(false);
+          setFundingError(undefined);
+          return;
+        }
+        // The explicit Check readiness action already bound a fresh quote plus client/server
+        // per-domain balances to this exact fingerprint. Submit must not repeat wallet/network
+        // prompts or introduce a second mutable readiness result.
+        assertFreshFundingQuoteMatchesIntent(intent, readinessQuote);
+        const prepared = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${intent.id}/prepare-destination`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
         );
-        const balance = await walletSession.executor.getUnifiedBalance();
-        setConfirmedUnifiedBalance(balance.confirmedAmount);
-        setPendingUnifiedBalance(balance.pendingAmount);
-        const serverReadiness = await getGatewayReadiness(refreshed.intent.id);
-        if (!serverReadiness.ready) {
-          const deficient = new Set(
-            serverReadiness.sources
-              .filter((source) => parseUsdcBaseUnits(source.deficit) !== 0n)
-              .map((source) => source.network),
-          );
-          setDepositStatuses((current) => ({
-            ...current,
-            ...Object.fromEntries(
-              selection.sources
-                .filter((source) => deficient.has(source.network))
-                .map((source) => [source.rowId, 'top_up_required' as const]),
-            ),
-          }));
-          setFormError({
-            unifiedBalance:
-              'Selected Gateway domains do not yet cover their locked allocations and source fee headroom.',
-          });
-          setFundingError(undefined);
-          return;
-        }
-        try {
-          assertSelectedUnifiedBalanceReadiness(
-            selection,
-            balance,
-            refreshed.quote,
-          );
-        } catch (error) {
-          const deficient = new Set(
-            selectedUnifiedBalanceDeficientNetworks(
-              selection,
-              balance,
-              refreshed.quote,
-            ),
-          );
-          setDepositStatuses((current) => ({
-            ...current,
-            ...Object.fromEntries(
-              selection.sources
-                .filter((source) => deficient.has(source.network))
-                .map((source) => [source.rowId, 'top_up_required' as const]),
-            ),
-          }));
-          setFormError({
-            unifiedBalance:
-              error instanceof Error
-                ? error.message
-                : 'A selected source does not have enough confirmed Unified Balance.',
-          });
-          setFundingError(undefined);
-          return;
-        }
+        const preparedIntent = verifiedIntentFromApi(prepared.data);
+        setVerifiedFundingIntent(preparedIntent);
       }
+      setFundingPendingDismissed(false);
       setFundingSelection(selection);
       setFundingResult(undefined);
       setBridgeRecoveryResult(undefined);
@@ -1147,12 +1478,27 @@ export function ProgramLifecycle({
     intent: VerifiedFundingIntent,
     result: FundingDestinationResult,
     providerState: 'pending' | 'success',
+    operationRecordId: string,
+    claimToken: string,
   ): Promise<VerifiedFundingIntent> {
     const body = observeFundingOperationRequestSchema.parse({
+      operationRecordId,
+      claimToken,
+      outcome: 'submitted',
       ...(result.operationId === undefined ? {} : { operationId: result.operationId }),
       destinationTransactionHash: result.destinationTransactionHash,
       ...(result.transferId === undefined ? {} : { transferId: result.transferId }),
       sourceTransactionHashes: result.sourceTransactionHashes,
+      ...(result.sourceTransactions === undefined
+        ? {}
+        : {
+            steps: result.sourceTransactions.map((source) => ({
+              name: 'source_transaction',
+              state: 'success' as const,
+              network: source.network,
+              transactionHash: source.transactionHash,
+            })),
+          }),
       providerState,
     });
     const observed = await apiRequest(
@@ -1165,12 +1511,18 @@ export function ProgramLifecycle({
     return verified;
   }
 
-  async function observeIncompleteBridge(
+  async function observeBridgeRecoveryTelemetry(
     intent: VerifiedFundingIntent,
-    error: CircleBridgeIncompleteError,
+    telemetry: PendingBridgeRecovery,
+    operationRecordId: string,
+    claimToken: string,
   ): Promise<VerifiedFundingIntent> {
-    const telemetry = bridgeRecoveryTelemetry(error.result);
-    const body = observeFundingOperationRequestSchema.parse(telemetry);
+    const body = observeFundingOperationRequestSchema.parse({
+      ...telemetry,
+      operationRecordId,
+      claimToken,
+      outcome: 'provider_progress' as const,
+    });
     const observed = await apiRequest(
       `/api/programs/${program.id}/funding-intents/${intent.id}/operations`,
       fundingIntentResponseSchema,
@@ -1181,10 +1533,53 @@ export function ProgramLifecycle({
     return verified;
   }
 
+  async function attachRecoveryOnlyTelemetry(
+    intent: VerifiedFundingIntent,
+    operationRecordId: string,
+    input: {
+      providerState: 'pending' | 'success' | 'error';
+      retryable: boolean;
+      sourceTransactionHashes?: readonly string[];
+      unboundTransactionHashes?: readonly string[];
+      steps?: readonly {
+        name: string;
+        state: 'pending' | 'success' | 'error';
+        network?: FundingNetworkId;
+        transactionHash?: string;
+        errorCode?: string;
+      }[];
+    },
+  ): Promise<VerifiedFundingIntent> {
+    const attached = await apiRequest(
+      `/api/programs/${program.id}/funding-intents/${intent.id}/destination-attempts/recovery-telemetry`,
+      fundingIntentResponseSchema,
+      {
+        method: 'POST',
+        token: session?.access_token,
+        body: attachFundingRecoveryTelemetryRequestSchema.parse({
+          operationRecordId,
+          providerState: input.providerState,
+          retryable: input.retryable,
+          sourceTransactionHashes: input.sourceTransactionHashes ?? [],
+          unboundTransactionHashes: input.unboundTransactionHashes ?? [],
+          steps: input.steps ?? [],
+        }),
+      },
+    );
+    const verified = verifiedIntentFromApi(attached.data);
+    setVerifiedFundingIntent(verified);
+    return verified;
+  }
+
   async function observeUncertainSubmission(
     intent: VerifiedFundingIntent,
+    operationRecordId: string,
+    claimToken: string,
   ): Promise<VerifiedFundingIntent> {
     const body = observeFundingOperationRequestSchema.parse({
+      operationRecordId,
+      claimToken,
+      outcome: 'submission_uncertain',
       operationId: `uncertain-after-sign:${intent.id}`,
       providerState: 'pending',
       retryable: false,
@@ -1223,6 +1618,7 @@ export function ProgramLifecycle({
       setVerifiedFundingIntent(undefined);
       fundingIdempotencyKey.current = undefined;
       setFundingSelection(undefined);
+      setFundingPendingDismissed(false);
       setView('readiness');
     } else {
       setVerifiedFundingIntent(verified);
@@ -1242,9 +1638,7 @@ export function ProgramLifecycle({
     ) {
       return;
     }
-    if (
-      verifiedFundingIntent.walletAddress.toLowerCase() !== walletSession.address.toLowerCase()
-    ) {
+    if (verifiedFundingIntent.walletAddress.toLowerCase() !== walletSession.address.toLowerCase()) {
       setFundingError(
         `This intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
       );
@@ -1255,28 +1649,154 @@ export function ProgramLifecycle({
     setFundingError(undefined);
     let latestPhase: FundingOperationPhase = fundingPhase;
     let submissionLocked = false;
+    let deliveryRetryLocked = false;
+    let claimedOperationRecordId: string | undefined =
+      verifiedFundingIntent.recovery?.status === 'awaiting_signature' ||
+      (verifiedFundingIntent.recovery?.operationRecordId !== undefined &&
+        destinationWalletClaimTokens.current[verifiedFundingIntent.recovery.operationRecordId] !==
+          undefined)
+        ? verifiedFundingIntent.recovery.operationRecordId
+        : undefined;
+    let destinationWalletClaimToken: string | undefined =
+      claimedOperationRecordId === undefined
+        ? undefined
+        : destinationWalletClaimTokens.current[claimedOperationRecordId];
     let safeLinkedSendRetry = false;
+    let activeIntent = verifiedFundingIntent;
     try {
-      let activeIntent = verifiedFundingIntent;
-      const pendingDestinationResult = readPendingFundingResult(
-        window.localStorage,
-        program.id,
-        activeIntent.id,
-      );
+      const manualDestinationHash = fundingRecoveryHash.trim();
+      if (
+        (activeIntent.recovery?.status === 'submission_uncertain' ||
+          (activeIntent.routeMode === 'bridge' && activeIntent.recovery?.status === 'pending')) &&
+        manualDestinationHash !== ''
+      ) {
+        const attached = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts/attach`,
+          fundingIntentResponseSchema,
+          {
+            method: 'POST',
+            token: session?.access_token,
+            body: attachFundingDestinationRequestSchema.parse({
+              operationRecordId: activeIntent.recovery.operationRecordId,
+              transactionHash: manualDestinationHash,
+            }),
+          },
+        );
+        activeIntent = verifiedIntentFromApi(attached.data);
+        setVerifiedFundingIntent(activeIntent);
+        setFundingRecoveryHash('');
+        setFundingPhase('destination_submitted');
+        await reconcileFundingIntent(activeIntent);
+        return;
+      }
+      const pendingBridgeTelemetry =
+        bridgeRecoveryObservationPending.current && bridgeRecoveryResult !== undefined
+          ? bridgeRecoveryTelemetry(bridgeRecoveryResult)
+          : readPendingBridgeRecovery(window.localStorage, program.id, activeIntent.id);
+      if (pendingBridgeTelemetry !== undefined) {
+        const operationRecordId = activeIntent.recovery?.operationRecordId;
+        if (operationRecordId === undefined) {
+          throw new Error('The durable Bridge operation is missing for recovery observation.');
+        }
+        activeIntent =
+          destinationWalletClaimToken === undefined
+            ? await attachRecoveryOnlyTelemetry(activeIntent, operationRecordId, {
+                providerState: pendingBridgeTelemetry.providerState,
+                retryable: pendingBridgeTelemetry.retryable,
+                sourceTransactionHashes: pendingBridgeTelemetry.sourceTransactionHashes,
+                steps: pendingBridgeTelemetry.steps,
+              })
+            : await observeBridgeRecoveryTelemetry(
+                activeIntent,
+                pendingBridgeTelemetry,
+                operationRecordId,
+                destinationWalletClaimToken,
+              );
+        setVerifiedFundingIntent(activeIntent);
+        bridgeRecoveryObservationPending.current = false;
+        try {
+          clearPendingBridgeRecovery(window.localStorage, program.id, activeIntent.id);
+        } catch {
+          // The server already owns the bounded evidence. A stale local outbox is idempotent.
+        }
+        setFundingPhase('source_submitted');
+        setFundingError(
+          bridgeRecoveryResult === undefined
+            ? 'The original Bridge approve/burn evidence was restored and persisted. Raw provider retry state is unavailable after reload, so no replacement Bridge will be submitted.'
+            : 'The original Bridge evidence is now persisted. Continue again to retry only Circle’s documented failed delivery step.',
+        );
+        return;
+      }
+      const pendingDestinationResult =
+        fundingResult ?? readPendingFundingResult(window.localStorage, program.id, activeIntent.id);
 
       const continuation = fundingContinuationAction(
         fundingPhase,
         bridgeRecoveryResult !== undefined && canRetryBridgeResult(bridgeRecoveryResult),
         pendingDestinationResult !== undefined,
       );
-      if (continuation !== 'execute') {
+      const heldDestinationClaimToken =
+        activeIntent.recovery?.operationRecordId === undefined
+          ? undefined
+          : destinationWalletClaimTokens.current[activeIntent.recovery.operationRecordId];
+      const safeAmbiguousArmRetry =
+        continuation === 'recovery_required' && heldDestinationClaimToken !== undefined;
+      if (continuation !== 'execute' && !safeAmbiguousArmRetry) {
         if (continuation === 'observe_destination' && pendingDestinationResult !== undefined) {
           setFundingResult(pendingDestinationResult);
-          activeIntent = await observeDestinationResult(
-            activeIntent,
-            pendingDestinationResult,
-            'success',
-          );
+          const operationRecordId =
+            activeIntent.recovery?.operationRecordId ??
+            (() => {
+              throw new Error('The durable destination operation is missing.');
+            })();
+          if (destinationWalletClaimToken === undefined) {
+            const attached = await apiRequest(
+              `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts/attach`,
+              fundingIntentResponseSchema,
+              {
+                method: 'POST',
+                token: session?.access_token,
+                body: attachFundingDestinationRequestSchema.parse({
+                  operationRecordId,
+                  transactionHash: pendingDestinationResult.destinationTransactionHash,
+                }),
+              },
+            );
+            activeIntent = verifiedIntentFromApi(attached.data);
+            if (
+              pendingDestinationResult.sourceTransactionHashes.length > 0 ||
+              (pendingDestinationResult.unboundTransactionHashes?.length ?? 0) > 0
+            ) {
+              activeIntent = await attachRecoveryOnlyTelemetry(activeIntent, operationRecordId, {
+                providerState: 'success',
+                retryable: false,
+                sourceTransactionHashes: pendingDestinationResult.sourceTransactionHashes,
+                ...(pendingDestinationResult.sourceTransactions === undefined
+                  ? {}
+                  : {
+                      steps: pendingDestinationResult.sourceTransactions.map((source) => ({
+                        name: 'source_transaction',
+                        state: 'success' as const,
+                        network: source.network,
+                        transactionHash: source.transactionHash,
+                      })),
+                    }),
+                ...(pendingDestinationResult.unboundTransactionHashes === undefined
+                  ? {}
+                  : {
+                      unboundTransactionHashes: pendingDestinationResult.unboundTransactionHashes,
+                    }),
+              });
+            }
+          } else {
+            activeIntent = await observeDestinationResult(
+              activeIntent,
+              pendingDestinationResult,
+              'success',
+              operationRecordId,
+              destinationWalletClaimToken,
+            );
+          }
           clearPendingFundingResult(window.localStorage, program.id, activeIntent.id);
           await reconcileFundingIntent(activeIntent);
           return;
@@ -1291,49 +1811,128 @@ export function ProgramLifecycle({
           setVerifiedFundingIntent(activeIntent);
           setFundingPhase(fundingPhaseFromApi(restored.data.status));
           if (restored.data.status === 'source_submitted') {
-            setFundingError(
-              fundingSourceSubmittedRecoveryMessage(fundingSelection.routeMode),
-            );
+            setFundingError(fundingSourceSubmittedRecoveryMessage(fundingSelection.routeMode));
             return;
           }
         }
         if (continuation === 'retry_bridge' && bridgeRecoveryResult !== undefined) {
-          const recovered = await walletSession.executor.retryBridge(
-            bridgeRecoveryResult,
-            (phase) => {
-              latestPhase = phase;
-              setFundingPhase(phase);
-            },
-          );
+          const operationRecordId =
+            activeIntent.recovery?.operationRecordId ??
+            (() => {
+              throw new Error('The durable destination operation is missing.');
+            })();
+          const retryClaimToken =
+            bridgeDeliveryRetryClaimTokens.current[operationRecordId] ??
+            (bridgeDeliveryRetryClaimTokens.current[operationRecordId] =
+              globalThis.crypto.randomUUID());
+          const retryInput = bridgeRecoveryResult;
+          let retryArmed = false;
+          const recovered = await walletSession.executor.retryBridge(retryInput, async (phase) => {
+            if (!retryArmed) {
+              if (phase !== 'delivery_pending') {
+                throw new Error('The Bridge delivery retry reached an invalid submission phase.');
+              }
+              // Circle's executor verifies the live account before invoking this callback and
+              // verifies it again immediately before the SDK call. Persist the one-shot retry
+              // boundary between those checks so a wallet changed before retry consumes nothing.
+              const armedRetry = await apiRequest(
+                `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts/delivery-retry/arm`,
+                fundingIntentResponseSchema,
+                {
+                  method: 'POST',
+                  token: session?.access_token,
+                  body: bridgeDeliveryRetryClaimRequestSchema.parse({
+                    operationRecordId,
+                    claimToken: retryClaimToken,
+                  }),
+                },
+              );
+              activeIntent = verifiedIntentFromApi(armedRetry.data);
+              setVerifiedFundingIntent(activeIntent);
+              submissionLocked = true;
+              deliveryRetryLocked = true;
+              retryArmed = true;
+              // Once the retry boundary is durable, never retain a callable BridgeResult that
+              // could issue a second delivery retry after an accepted-but-lost provider response.
+              setBridgeRecoveryResult(undefined);
+            }
+            latestPhase = phase;
+            setFundingPhase(phase);
+          });
           setFundingResult(recovered);
-          setBridgeRecoveryResult(undefined);
+          try {
+            persistPendingFundingResult(
+              window.localStorage,
+              program.id,
+              activeIntent.id,
+              recovered,
+            );
+          } catch {
+            // Volatile result remains visible and is attached to the server immediately below.
+          }
           activeIntent = await observeDestinationResult(
             activeIntent,
             recovered,
             latestPhase === 'delivery_pending' ? 'pending' : 'success',
+            operationRecordId,
+            destinationWalletClaimToken ??
+              (() => {
+                throw new Error('The Bridge wallet claim is unavailable for delivery recovery.');
+              })(),
           );
+          clearPendingFundingResult(window.localStorage, program.id, activeIntent.id);
+          delete bridgeDeliveryRetryClaimTokens.current[operationRecordId];
         }
         await reconcileFundingIntent(activeIntent);
         return;
       }
 
-      const refreshed = await refreshServerFundingQuote(activeIntent, fundingSelection);
-      activeIntent = refreshed.intent;
+      if (
+        fundingSelection.routeMode === 'send' &&
+        activeIntent.recovery?.status === 'failed' &&
+        activeIntent.recovery.failureCode === 'server.funding_destination_reverted'
+      ) {
+        const replacement = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-replacement`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
+        );
+        activeIntent = verifiedIntentFromApi(replacement.data);
+        claimedOperationRecordId = activeIntent.recovery?.operationRecordId;
+        setVerifiedFundingIntent(activeIntent);
+      }
+
+      const lockedQuote = fundingQuoteFromIntent(activeIntent);
+      assertFreshFundingQuoteMatchesIntent(activeIntent, lockedQuote);
       if (fundingSelection.routeMode === 'unified_balance') {
         const balance = await walletSession.executor.getUnifiedBalance();
         setConfirmedUnifiedBalance(balance.confirmedAmount);
         setPendingUnifiedBalance(balance.pendingAmount);
         const serverReadiness = await getGatewayReadiness(activeIntent.id);
         if (!serverReadiness.ready) {
-          throw new Error(
-            'Selected Gateway domains no longer cover their locked allocations and source fee headroom. No signature was requested.',
+          const reopened = await apiRequest(
+            `/api/programs/${program.id}/funding-intents/${activeIntent.id}/reopen-source-collection`,
+            fundingIntentResponseSchema,
+            { method: 'POST', token: session?.access_token },
           );
+          activeIntent = verifiedIntentFromApi(reopened.data);
+          setVerifiedFundingIntent(activeIntent);
+          setDepositStatuses(
+            depositStatusesFromIntent(reopened.data, fundingSelection.sources, serverReadiness),
+          );
+          setDepositTopUpAmounts(
+            topUpAmountsFromReadiness(fundingSelection.sources, serverReadiness),
+          );
+          setFundingSelection(undefined);
+          setFundingReadiness(undefined);
+          setFundingPendingDismissed(false);
+          setFundingPhase('ready_to_sign');
+          setFundingError(
+            'Gateway balance changed after handoff. Source collection was safely reopened for the exact server-derived top-up; no destination signature was requested.',
+          );
+          return;
         }
-        assertSelectedUnifiedBalanceReadiness(
-          fundingSelection,
-          balance,
-          refreshed.quote,
-        );
+        assertSelectedUnifiedBalanceReadiness(fundingSelection, balance, lockedQuote);
       }
       assertFundingRecoveryStorage(window.localStorage);
       const result = await executeVerifiedFundingIntent(
@@ -1343,47 +1942,239 @@ export function ProgramLifecycle({
         walletSession.executor,
         async (phase) => {
           if (phase === 'awaiting_signature' && !submissionLocked) {
-            activeIntent = await observeUncertainSubmission(activeIntent);
+            if (claimedOperationRecordId === undefined) {
+              fundingDestinationAttemptKey.current ??= globalThis.crypto.randomUUID();
+              const claimed = await apiRequest(
+                `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts`,
+                fundingIntentResponseSchema,
+                {
+                  method: 'POST',
+                  token: session?.access_token,
+                  body: fundingDestinationAttemptRequestSchema.parse({
+                    idempotencyKey: fundingDestinationAttemptKey.current,
+                  }),
+                },
+              );
+              activeIntent = verifiedIntentFromApi(claimed.data);
+              claimedOperationRecordId = activeIntent.recovery?.operationRecordId;
+              if (claimedOperationRecordId === undefined) {
+                throw new Error('The server did not return the claimed destination operation.');
+              }
+              setVerifiedFundingIntent(activeIntent);
+            }
+            // Arm the durable no-replay boundary in the same claimed row immediately before the
+            // App Kit call. A process crash after broadcast but before the SDK returns must hydrate
+            // into recovery, never another wallet invocation.
+            destinationWalletClaimToken ??= globalThis.crypto.randomUUID();
+            destinationWalletClaimToken =
+              destinationWalletClaimTokens.current[claimedOperationRecordId] ??
+              (destinationWalletClaimTokens.current[claimedOperationRecordId] =
+                destinationWalletClaimToken);
+            const armed = await apiRequest(
+              `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts/arm`,
+              fundingIntentResponseSchema,
+              {
+                method: 'POST',
+                token: session?.access_token,
+                body: walletBoundaryClaimRequestSchema.parse({
+                  claimToken: destinationWalletClaimToken,
+                }),
+              },
+            );
+            activeIntent = verifiedIntentFromApi(armed.data);
+            setVerifiedFundingIntent(activeIntent);
             submissionLocked = true;
           }
           latestPhase = phase;
           setFundingPhase(phase);
         },
-        refreshed.quote,
+        lockedQuote,
       );
-      persistPendingFundingResult(window.localStorage, program.id, activeIntent.id, result);
+      try {
+        persistPendingFundingResult(window.localStorage, program.id, activeIntent.id, result);
+      } catch {
+        // The returned hash is authoritative volatile evidence. Server observation must still run;
+        // local recovery storage is only a fallback for a crash between these two statements.
+      }
       setFundingResult(result);
       activeIntent = await observeDestinationResult(
         activeIntent,
         result,
         latestPhase === 'delivery_pending' ? 'pending' : 'success',
+        claimedOperationRecordId ??
+          (() => {
+            throw new Error('The durable destination operation is missing.');
+          })(),
+        destinationWalletClaimToken ??
+          (() => {
+            throw new Error('The destination wallet claim is unavailable for auto-observation.');
+          })(),
       );
       clearPendingFundingResult(window.localStorage, program.id, activeIntent.id);
       await reconcileFundingIntent(activeIntent);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The funding operation failed.';
-      if (error instanceof CircleBridgeIncompleteError) {
-        setBridgeRecoveryResult(error.result);
+      if (error instanceof CircleUnifiedBalanceManualRecoveryError) {
+        const recoveryResult: FundingDestinationResult = {
+          ...error.result,
+          unboundTransactionHashes: error.unboundTransactionHashes.slice(0, 32),
+        };
+        setFundingResult(recoveryResult);
         try {
-          await observeIncompleteBridge(verifiedFundingIntent, error);
+          persistPendingFundingResult(
+            window.localStorage,
+            program.id,
+            activeIntent.id,
+            recoveryResult,
+          );
+        } catch {
+          // Server observation remains authoritative; storage is only crash-recovery evidence.
+        }
+        try {
+          if (claimedOperationRecordId === undefined) throw error;
+          activeIntent = await observeDestinationResult(
+            activeIntent,
+            recoveryResult,
+            'pending',
+            claimedOperationRecordId,
+            destinationWalletClaimToken ??
+              (() => {
+                throw new Error(
+                  'The destination wallet claim is unavailable for auto-observation.',
+                );
+              })(),
+          );
+          activeIntent = await attachRecoveryOnlyTelemetry(activeIntent, claimedOperationRecordId, {
+            providerState: 'success',
+            retryable: false,
+            ...(recoveryResult.unboundTransactionHashes === undefined
+              ? {}
+              : { unboundTransactionHashes: recoveryResult.unboundTransactionHashes }),
+          });
+          clearPendingFundingResult(window.localStorage, program.id, activeIntent.id);
+        } catch {
+          // Preserve the local result and the durable claimed operation. Hydration will retry
+          // observation without ever deriving source networks or replaying the spend.
+        }
+        setFundingPhase('destination_submitted');
+        setFundingError(
+          `${message} Keep this page open until the server persists the original destination hash ${error.result.destinationTransactionHash}; never sign a replacement spend.`,
+        );
+        return;
+      }
+      if (error instanceof CircleBridgeIncompleteError) {
+        if (!deliveryRetryLocked) setBridgeRecoveryResult(error.result);
+        const telemetry = bridgeRecoveryTelemetry(error.result);
+        bridgeRecoveryObservationPending.current = true;
+        try {
+          persistPendingBridgeRecovery(window.localStorage, program.id, activeIntent.id, telemetry);
+        } catch {
+          // Keep the bounded telemetry in this mounted session and show the source hashes below.
+        }
+        try {
+          if (claimedOperationRecordId === undefined) throw error;
+          await observeBridgeRecoveryTelemetry(
+            activeIntent,
+            telemetry,
+            claimedOperationRecordId,
+            destinationWalletClaimToken ??
+              (() => {
+                throw new Error('The Bridge wallet claim is unavailable for recovery observation.');
+              })(),
+          );
+          bridgeRecoveryObservationPending.current = false;
+          try {
+            clearPendingBridgeRecovery(window.localStorage, program.id, activeIntent.id);
+          } catch {
+            // Server persistence succeeded; stale local outbox replay is idempotent.
+          }
           setFundingPhase('source_submitted');
         } catch {
           setFundingPhase('source_submitted');
         }
         setFundingError(
-          canRetryBridgeResult(error.result)
-            ? `${message} Continue delivery retries only Circle's failed step; the original burn will not be repeated.`
-            : `${message} Circle did not mark the failed step retryable, so no replacement bridge will be submitted.`,
+          `${deliveryRetryLocked ? `${message} The bounded delivery retry result is incomplete, so automatic retry is now locked for manual recovery.` : canRetryBridgeResult(error.result) ? `${message} Continue delivery retries only Circle's failed step; the original burn will not be repeated.` : `${message} Circle did not mark the failed step retryable, so no replacement bridge will be submitted.`}${
+            telemetry.sourceTransactionHashes.length === 0
+              ? ''
+              : ` Keep this page open until the server persists these original source hashes: ${telemetry.sourceTransactionHashes.join(', ')}.`
+          }`,
         );
         return;
       }
-      const rejectedBeforeSubmission = /reject|denied|cancel/i.test(message);
+      if (
+        submissionLocked &&
+        fundingSelection.routeMode === 'send' &&
+        claimedOperationRecordId !== undefined &&
+        isExplicitWalletRejection(error)
+      ) {
+        try {
+          const released = await apiRequest(
+            `/api/programs/${program.id}/funding-intents/${activeIntent.id}/destination-attempts/rejected`,
+            fundingIntentResponseSchema,
+            {
+              method: 'POST',
+              token: session?.access_token,
+              body: releaseRejectedSendAttemptRequestSchema.parse({
+                operationRecordId: claimedOperationRecordId,
+                claimToken: destinationWalletClaimToken,
+              }),
+            },
+          );
+          const releasedIntent = verifiedIntentFromApi(released.data);
+          setVerifiedFundingIntent(releasedIntent);
+          setFundingPhase('awaiting_signature');
+          setFundingError(
+            'The Send signature was rejected before broadcast. Resume to retry the same locked signature step.',
+          );
+          return;
+        } catch {
+          try {
+            const restored = await apiRequest(
+              `/api/programs/${program.id}/funding-intents/${activeIntent.id}`,
+              fundingIntentResponseSchema,
+              { token: session?.access_token },
+            );
+            const releasedAttempt = restored.data.recoveryAttempts?.find(
+              (attempt) => attempt.operationRecordId === claimedOperationRecordId,
+            );
+            if (
+              restored.data.status === 'awaiting_signature' &&
+              releasedAttempt?.status === 'awaiting_signature' &&
+              releasedAttempt.transactionHash === undefined &&
+              releasedAttempt.sourceTransactionHashes.length === 0
+            ) {
+              setVerifiedFundingIntent(verifiedIntentFromApi(restored.data));
+              setFundingPhase('awaiting_signature');
+              setFundingError(
+                'The Send signature was rejected before broadcast. Resume to retry the same locked signature step.',
+              );
+              return;
+            }
+          } catch {
+            // A second lost response remains fail-closed; the claim-bound observation RPC rejects
+            // a row whose rejection release already cleared its wallet claim.
+          }
+        }
+      }
       if (submissionLocked) {
+        if (claimedOperationRecordId !== undefined) {
+          try {
+            const uncertainIntent = await observeUncertainSubmission(
+              verifiedFundingIntent,
+              claimedOperationRecordId,
+              destinationWalletClaimToken ??
+                (() => {
+                  throw new Error('The destination wallet claim is unavailable.');
+                })(),
+            );
+            setVerifiedFundingIntent(uncertainIntent);
+          } catch {
+            // The claimed operation remains durable; a reload will recover it without replay.
+          }
+        }
         setFundingPhase(fundingSubmissionFailurePhase(true));
         setFundingError(
-          rejectedBeforeSubmission
-            ? `${message} The signing boundary was durably locked before the wallet prompt. No retry will run automatically; support can release or recover this intent after confirming no transaction was submitted.`
-            : `${message} The wallet submission result is uncertain and has been durably locked for recovery. Reloading will not submit another transaction.`,
+          `${message} The wallet submission result is uncertain and has been durably locked for recovery. Reloading will not submit another transaction.`,
         );
         return;
       }
@@ -1398,8 +2189,7 @@ export function ProgramLifecycle({
           setVerifiedFundingIntent(restoredIntent);
           setFundingPhase(fundingPhaseFromApi(restored.data.status));
           safeLinkedSendRetry =
-            fundingSelection.routeMode === 'send' &&
-            restored.data.status === 'ready_to_sign';
+            fundingSelection.routeMode === 'send' && restored.data.status === 'ready_to_sign';
         } catch {
           setFundingPhase('sync_failed');
         }
@@ -1410,12 +2200,101 @@ export function ProgramLifecycle({
         safeLinkedSendRetry
           ? `${message} Arc verified that the original Send reverted. Continue creates a linked retry after refreshing the quote; it does not reuse the reverted transaction.`
           : latestPhase === 'ready_to_sign' || latestPhase === 'awaiting_signature'
-          ? `${message} No destination transaction was submitted.`
-          : `${message} Operation state is uncertain after ${latestPhase}; do not submit a new transfer.`,
+            ? `${message} No destination transaction was submitted.`
+            : `${message} Operation state is uncertain after ${latestPhase}; do not submit a new transfer.`,
       );
     } finally {
       setFundingWorking(false);
     }
+  }
+
+  async function leaveFundingConfirmation() {
+    const cancellationHasNoIrreversibleEvidence =
+      verifiedFundingIntent !== undefined &&
+      verifiedFundingIntent.sourceDeposits.every(
+        (deposit) =>
+          deposit.transactionHash === undefined &&
+          (deposit.status === 'awaiting_signature' || deposit.status === 'failed'),
+      ) &&
+      (verifiedFundingIntent.recovery === undefined ||
+        (verifiedFundingIntent.recovery.status === 'awaiting_signature' &&
+          !verifiedFundingIntent.recovery.submissionUncertain &&
+          verifiedFundingIntent.recovery.sourceTransactionHashes.length === 0 &&
+          verifiedFundingIntent.recovery.steps.every(
+            (step) => step.transactionHash === undefined,
+          )));
+    if (
+      verifiedFundingIntent !== undefined &&
+      fundingSelection !== undefined &&
+      cancellationHasNoIrreversibleEvidence &&
+      (fundingPhase === 'ready_to_sign' || fundingPhase === 'awaiting_signature')
+    ) {
+      setFundingWorking(true);
+      setFundingError(undefined);
+      try {
+        await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${verifiedFundingIntent.id}/cancel`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
+        );
+        setVerifiedFundingIntent(undefined);
+        fundingIdempotencyKey.current = undefined;
+        fundingDestinationAttemptKey.current = undefined;
+        setFundingSelection(undefined);
+        setFundingPendingDismissed(true);
+        setFundingPhase('ready_to_sign');
+        return;
+      } catch (error) {
+        setFundingError(
+          error instanceof Error
+            ? error.message
+            : 'The funding intent could not be cancelled safely.',
+        );
+        return;
+      } finally {
+        setFundingWorking(false);
+      }
+    }
+    if (
+      verifiedFundingIntent?.routeMode === 'unified_balance' &&
+      verifiedFundingIntent.fundingPhase === 'ready_for_destination'
+    ) {
+      // A UB intent that already owns deposit evidence cannot be discarded. Back returns to the
+      // same locked source collection so a fresh quote/deficit can be checked without rewriting
+      // confirmed attempts. The evidence-free branch above is the only path allowed to cancel.
+      setFundingWorking(true);
+      setFundingError(undefined);
+      try {
+        const reopened = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${verifiedFundingIntent.id}/reopen-source-collection`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
+        );
+        const reopenedIntent = verifiedIntentFromApi(reopened.data);
+        setVerifiedFundingIntent(reopenedIntent);
+        setDepositStatuses(
+          depositStatusesFromIntent(reopened.data, fundingSourcesFromApi(reopened.data)),
+        );
+        setFundingSelection(undefined);
+        setFundingReadiness(undefined);
+        setFundingPendingDismissed(true);
+        setFundingPhase('ready_to_sign');
+        return;
+      } catch (error) {
+        setFundingError(
+          error instanceof Error
+            ? error.message
+            : 'Source collection could not be reopened safely.',
+        );
+        return;
+      } finally {
+        setFundingWorking(false);
+      }
+    }
+    setFundingSelection(undefined);
+    setFundingPendingDismissed(true);
+    setFundingError(undefined);
+    setFundingPhase('ready_to_sign');
   }
 
   async function createWithdrawalIntent(): Promise<WithdrawalIntent | undefined> {
@@ -1430,6 +2309,32 @@ export function ProgramLifecycle({
     });
     const response = await apiRequest(
       `/api/programs/${program.id}/withdrawal-intents`,
+      withdrawalIntentResponseSchema,
+      { method: 'POST', token: session?.access_token, body },
+    );
+    setWithdrawalIntent(response.data);
+    return response.data;
+  }
+
+  async function createWithdrawalReplacement(
+    failedIntent: WithdrawalIntent,
+  ): Promise<WithdrawalIntent | undefined> {
+    if (walletSession === undefined) {
+      setWithdrawalError('Connect the contract owner wallet first.');
+      return undefined;
+    }
+    if (withdrawalReplacementKey.current?.failedIntentId !== failedIntent.id) {
+      withdrawalReplacementKey.current = {
+        failedIntentId: failedIntent.id,
+        idempotencyKey: globalThis.crypto.randomUUID(),
+      };
+    }
+    const body = createWithdrawalIntentRequestSchema.parse({
+      idempotencyKey: withdrawalReplacementKey.current.idempotencyKey,
+      walletAddress: walletSession.address,
+    });
+    const response = await apiRequest(
+      `/api/programs/${program.id}/withdrawal-intents/${failedIntent.id}/replacement`,
       withdrawalIntentResponseSchema,
       { method: 'POST', token: session?.access_token, body },
     );
@@ -1477,10 +2382,13 @@ export function ProgramLifecycle({
     let recoveryIntentId = withdrawalIntent?.id;
     try {
       let intent = withdrawalIntent;
-      if (intent?.status === 'complete' || intent?.status === 'failed') {
+      if (intent?.status === 'complete') {
         withdrawalIdempotencyKey.current = undefined;
+        withdrawalReplacementKey.current = undefined;
         setWithdrawalIntent(undefined);
         intent = undefined;
+      } else if (intent?.status === 'failed') {
+        intent = await createWithdrawalReplacement(intent);
       }
       intent ??= await createWithdrawalIntent();
       if (intent === undefined) return;
@@ -1496,18 +2404,12 @@ export function ProgramLifecycle({
         return;
       }
       const storage = window.localStorage;
-      let pendingCloseHash = readPendingWithdrawalHash(
-        storage,
-        program.id,
-        intent.id,
-        'close',
-      );
-      let pendingWithdrawHash = readPendingWithdrawalHash(
-        storage,
-        program.id,
-        intent.id,
-        'withdraw',
-      );
+      let pendingCloseHash =
+        volatileWithdrawalHashes.close ??
+        readPendingWithdrawalHash(storage, program.id, intent.id, 'close');
+      let pendingWithdrawHash =
+        volatileWithdrawalHashes.withdraw ??
+        readPendingWithdrawalHash(storage, program.id, intent.id, 'withdraw');
       let action = withdrawalContinuationAction(intent, pendingCloseHash, pendingWithdrawHash);
 
       if (action === 'attach_close' || action === 'attach_withdraw') {
@@ -1539,8 +2441,21 @@ export function ProgramLifecycle({
           walletSession.address,
           intent.escrowAddress,
         );
-        persistPendingWithdrawalHash(storage, program.id, intent.id, 'close', pendingCloseHash);
-        action = 'observe_close';
+        intent = await persistAndObserveReturnedWithdrawalHash({
+          storage,
+          programId: program.id,
+          intentId: intent.id,
+          operation: 'close',
+          transactionHash: pendingCloseHash,
+          observe: (transactionHash) => observeWithdrawal(intent!, 'close', transactionHash),
+          setVolatileHash: (transactionHash) =>
+            setVolatileWithdrawalHashes((current) => ({
+              ...current,
+              close: transactionHash,
+            })),
+        });
+        pendingCloseHash = undefined;
+        action = 'verify_close';
       }
       if (action === 'observe_close' && pendingCloseHash !== undefined) {
         intent = await observeWithdrawal(intent, 'close', pendingCloseHash);
@@ -1571,14 +2486,21 @@ export function ProgramLifecycle({
           intent.escrowAddress,
           expectedWithdrawalAmount,
         );
-        persistPendingWithdrawalHash(
+        intent = await persistAndObserveReturnedWithdrawalHash({
           storage,
-          program.id,
-          intent.id,
-          'withdraw',
-          pendingWithdrawHash,
-        );
-        action = 'observe_withdraw';
+          programId: program.id,
+          intentId: intent.id,
+          operation: 'withdraw',
+          transactionHash: pendingWithdrawHash,
+          observe: (transactionHash) => observeWithdrawal(intent!, 'withdraw', transactionHash),
+          setVolatileHash: (transactionHash) =>
+            setVolatileWithdrawalHashes((current) => ({
+              ...current,
+              withdraw: transactionHash,
+            })),
+        });
+        pendingWithdrawHash = undefined;
+        action = 'verify_withdraw';
       }
       if (action === 'observe_withdraw' && pendingWithdrawHash !== undefined) {
         intent = await observeWithdrawal(intent, 'withdraw', pendingWithdrawHash);
@@ -1670,10 +2592,14 @@ export function ProgramLifecycle({
 
   /* CP-12 — Funding pending remains inside the existing owner edit route. */
   if (
+    verifiedFundingIntent !== undefined &&
     fundingSelection !== undefined &&
-    fundingPhase !== 'complete' &&
-    walletSession !== undefined &&
-    walletMatchesVerifiedIntent
+    shouldRenderFundingPending(
+      verifiedFundingIntent,
+      fundingSelection,
+      fundingPhase,
+      fundingPendingDismissed,
+    )
   ) {
     return (
       <WizardShell>
@@ -1708,17 +2634,18 @@ export function ProgramLifecycle({
           <FundingPending
             error={fundingError}
             estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve ?? '0'}
-            onBack={() => {
-              setFundingSelection(undefined);
-              setFundingError(undefined);
-              setFundingPhase('ready_to_sign');
-            }}
+            onBack={() => void leaveFundingConfirmation()}
+            onConnectWallet={() => void connectFundingWallet()}
             onContinue={() => void continueFundingOperation()}
+            onRecoveryHashChange={setFundingRecoveryHash}
             phase={fundingPhase}
             result={fundingResult}
+            recoveryHash={fundingRecoveryHash}
             selection={fundingSelection}
+            intent={verifiedFundingIntent}
             verifiedRecipient={verifiedFundingIntent?.recipientAddress}
-            walletAddress={walletSession.address}
+            walletAddress={walletSession?.address}
+            walletMatchesIntent={walletMatchesVerifiedIntent}
             working={fundingWorking}
             executionAvailable={verifiedFundingIntent !== undefined}
           />
@@ -1756,11 +2683,13 @@ export function ProgramLifecycle({
           {formError['wallet'] === undefined &&
           formError['escrow'] === undefined &&
           formError['unifiedBalance'] === undefined &&
+          formError['readiness'] === undefined &&
           fundingError === undefined ? null : (
             <Callout title="Funding plan is not ready" variant="danger">
               {formError['wallet'] ??
                 formError['escrow'] ??
                 formError['unifiedBalance'] ??
+                formError['readiness'] ??
                 fundingError}
             </Callout>
           )}
@@ -1770,6 +2699,8 @@ export function ProgramLifecycle({
             depositRecoveryHashes={depositRecoveryHashes}
             depositStatuses={depositStatuses}
             estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve}
+            canSubmit={canSubmitFundingPlan}
+            readinessChecked={fundingReadiness !== undefined}
             errors={formError}
             grossAmount={grossAmount}
             onAddSource={addFundingSource}
@@ -1784,12 +2715,12 @@ export function ProgramLifecycle({
             onRemoveSource={removeFundingSource}
             onSourceChange={updateFundingSource}
             onSubmit={() => void submitFundingPlan()}
+            onCheckReadiness={() => void checkFundingReadiness()}
             pendingUnifiedBalance={pendingUnifiedBalance}
             program={program}
             sources={sources}
-            transactionsEnabled={
-              verifiedFundingIntent !== undefined && walletMatchesVerifiedIntent
-            }
+            transactionsEnabled={verifiedFundingIntent !== undefined && walletMatchesVerifiedIntent}
+            working={fundingWorking}
             walletAddress={walletSession?.address}
             walletError={walletError}
             walletName={walletSession?.wallet.name}
@@ -1856,11 +2787,7 @@ export function ProgramLifecycle({
           steps={CREATE_PROGRAM_STEPS}
         />
 
-        <Callout
-          role="status"
-          title="Canonical funding confirmed"
-          variant="escrow"
-        >
+        <Callout role="status" title="Canonical funding confirmed" variant="escrow">
           {`${formatUsdc(fundingConfirmation.netReceivedAmount)} was verified on Arc. The immutable reconciliation captured ${formatUsdc(fundingConfirmation.accounting.totalPool)} total pool and ${formatUsdc(fundingConfirmation.accounting.availablePool)} available.`}
         </Callout>
 
@@ -1976,10 +2903,7 @@ export function ProgramLifecycle({
               </div>
               {withdrawalIntent?.status !== 'close_submission_uncertain' &&
               withdrawalIntent?.status !== 'withdraw_submission_uncertain' ? null : (
-                <Field
-                  htmlFor="withdrawal-recovery-hash"
-                  label="Original Arc transaction hash"
-                >
+                <Field htmlFor="withdrawal-recovery-hash" label="Original Arc transaction hash">
                   <Input
                     id="withdrawal-recovery-hash"
                     onChange={(event) => setWithdrawalRecoveryHash(event.currentTarget.value)}
@@ -2002,9 +2926,7 @@ export function ProgramLifecycle({
                   {walletSession === undefined ? 'Connect owner wallet' : 'Change wallet'}
                 </Button>
                 <Button
-                  disabled={
-                    walletSession === undefined
-                  }
+                  disabled={walletSession === undefined}
                   loading={withdrawalWorking}
                   onClick={() => void continueWithdrawal()}
                   size="lg"
@@ -2047,10 +2969,7 @@ export function ProgramLifecycle({
 
       <StepLayout
         aside={
-          <GuidancePanel
-            eyebrow="Private draft"
-            title="Not visible to researchers"
-          >
+          <GuidancePanel eyebrow="Private draft" title="Not visible to researchers">
             <p className="text-label-sm uppercase text-text-muted">Escrow pool</p>
             <p className="text-h2 text-text">{formatUsdc(program.totalPool)}</p>
             <div className="flex flex-col">
@@ -2097,20 +3016,12 @@ export function ProgramLifecycle({
               Edit program
             </Button>
             {deployed ? null : (
-              <Button
-                className="w-full sm:w-auto"
-                onClick={() => setDeployOpen(true)}
-                size="lg"
-              >
+              <Button className="w-full sm:w-auto" onClick={() => setDeployOpen(true)} size="lg">
                 Deploy escrow
               </Button>
             )}
             {deployed ? (
-              <Button
-                className="w-full sm:w-auto"
-                onClick={() => setView('fund')}
-                size="lg"
-              >
+              <Button className="w-full sm:w-auto" onClick={() => setView('fund')} size="lg">
                 Fund rewards
               </Button>
             ) : null}

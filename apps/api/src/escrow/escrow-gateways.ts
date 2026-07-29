@@ -40,6 +40,7 @@ export type CircleDeploymentResult =
     };
 
 export interface CircleContractsGateway {
+  getDeploymentWalletAddress(): Promise<`0x${string}`>;
   deploy(input: CircleDeployInput): Promise<CircleDeploymentAccepted>;
   waitForDeployment(
     accepted: CircleDeploymentAccepted,
@@ -48,6 +49,11 @@ export interface CircleContractsGateway {
   submitSyncExternalFunding(input: {
     idempotencyKey: string;
     escrowAddress: `0x${string}`;
+  }): Promise<{ transactionId: string }>;
+  submitRewardPayout(input: {
+    idempotencyKey: string;
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
   }): Promise<{ transactionId: string }>;
   waitForTransaction(
     transactionId: string,
@@ -74,6 +80,14 @@ export interface VerifiedSourceDeposit {
   blockNumber: bigint;
   blockHash: `0x${string}`;
 }
+
+export type TransactionRecoveryEvidence =
+  | { state: 'pending' }
+  | {
+      state: 'success' | 'reverted';
+      blockNumber: bigint;
+      blockHash: `0x${string}`;
+    };
 
 export interface VerifiedSync {
   transactionHash: `0x${string}`;
@@ -118,11 +132,36 @@ export interface VerifiedLateFundingEvent {
   blockHash: `0x${string}`;
 }
 
+export interface VerifiedRewardApproval {
+  transactionHash: `0x${string}`;
+  eventLogIndex: number;
+  blockNumber: bigint;
+  blockHash: `0x${string}`;
+}
+
+export interface VerifiedRewardPayout extends VerifiedRewardApproval {
+  transferLogIndex: number;
+  accounting: {
+    totalPaidBaseUnits: bigint;
+    totalApprovedOutstandingBaseUnits: bigint;
+    totalFundedBaseUnits: bigint;
+    totalWithdrawnBaseUnits: bigint;
+    escrowBalanceBaseUnits: bigint;
+  };
+}
+
 export interface ArcEscrowGateway {
   assertArcChain(): Promise<void>;
   getCanonicalUsdcBalance(address: `0x${string}`): Promise<bigint>;
   getEscrowTotalFunded(address: `0x${string}`): Promise<bigint>;
-  getGatewayConfirmedBalance(network: import('@bug-bounty-escrow/shared').FundingNetworkId, wallet: `0x${string}`): Promise<bigint>;
+  getGatewayConfirmedBalance(
+    network: import('@bug-bounty-escrow/shared').FundingNetworkId,
+    wallet: `0x${string}`,
+  ): Promise<bigint>;
+  getTransactionRecoveryEvidence(input: {
+    network: import('@bug-bounty-escrow/shared').FundingNetworkId;
+    transactionHash: `0x${string}`;
+  }): Promise<TransactionRecoveryEvidence>;
   verifySourceDeposit(input: {
     network: import('@bug-bounty-escrow/shared').FundingNetworkId;
     walletAddress: `0x${string}`;
@@ -152,6 +191,38 @@ export interface ArcEscrowGateway {
     transactionHash: `0x${string}`;
     minimumTotalFundedBaseUnits: bigint;
   }): Promise<VerifiedSync>;
+  verifyRewardApproval(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    transactionHash: `0x${string}`;
+  }): Promise<VerifiedRewardApproval>;
+  findRewardApproval(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    fromBlock: bigint;
+  }): Promise<VerifiedRewardApproval | null>;
+  verifyRewardPayout(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    transactionHash: `0x${string}`;
+  }): Promise<VerifiedRewardPayout>;
+  findRewardPayout(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    fromBlock: bigint;
+  }): Promise<VerifiedRewardPayout | null>;
   getWithdrawalState(address: `0x${string}`): Promise<EscrowWithdrawalState>;
   verifyClose(input: {
     escrowAddress: `0x${string}`;

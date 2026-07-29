@@ -1,4 +1,12 @@
-import { Controller, Get, Inject, Patch, Post, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  GoneException,
+  Inject,
+  Patch,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   approveRewardRequestSchema,
   commentListQuerySchema,
@@ -158,7 +166,10 @@ export class ReportController {
     input: ApproveRewardRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ReportResponse> {
-    return this.review('approve', principal, params.id, input);
+    void params;
+    void input;
+    void principal;
+    throw new GoneException('reward_settlement_flow_required');
   }
 
   /** Records the submitted payout transaction and moves the report to payment_pending. */
@@ -171,7 +182,10 @@ export class ReportController {
     input: StartPaymentRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ReportResponse> {
-    return this.review('pay', principal, params.id, input);
+    void params;
+    void input;
+    void principal;
+    throw new GoneException('reward_settlement_flow_required');
   }
 
   /** Settles the payout: moves the amount from reserved to paid and marks the report paid. */
@@ -184,7 +198,10 @@ export class ReportController {
     input: ConfirmPaymentRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ReportResponse> {
-    return this.review('confirm-payment', principal, params.id, input);
+    void params;
+    void input;
+    void principal;
+    throw new GoneException('reward_settlement_flow_required');
   }
 
   /** Owner decision on whether a resolved report becomes a public known issue. */

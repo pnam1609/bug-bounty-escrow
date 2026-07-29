@@ -584,6 +584,132 @@ curl --fail http://127.0.0.1:7831/api/health
 curl --fail http://127.0.0.1:7830/
 ```
 
+### Arc escrow Release A / Release B boundary
+
+The CP-12/CP-13/CP-14 rollout uses an expand-and-contract deployment. Database
+migrations are forward-only, while `deploy.sh` can roll back only the API and
+web images. Keep the compatibility grants until the first feature image has
+been proven healthy and has become the only supported rollback baseline.
+
+#### Release A prerequisites and snapshot
+
+`SEC-PROD-001` is a separate prerequisite, not part of the Arc feature rollout.
+Before Release A, its reviewed security image and migration must already be
+deployed and verified: all seven repository-known demo Auth identities are
+disabled, their refresh sessions are revoked, password login and pre-ban JWT
+access are rejected, and the recorded profile/program/report/attachment and
+other business-row counts are unchanged. This production mutation still
+requires explicit owner approval. Do not infer approval from a Release A
+request, and do not delete Auth, profile, program, report, or attachment rows.
+
+The last recorded read-only inventory found 9 Auth users, with 7 exact demo
+targets, 0 targets banned, 1 active target session, and 1 unrevoked target
+refresh row. The preserved demo references were 7 profiles, 10 programs, 15
+reviewer assignments, 60 reports, 36 attachments, 60 comments, 52 reviews, 2
+disclosures, and 112 notifications. Treat those values as comparison evidence,
+not as permission to mutate: immediately before remediation, take a backup and
+refresh the read-only inventory without selecting or logging credentials,
+tokens, hashes, or signed URLs. Stop for review if the target set or any count
+differs. After rotating and banning only the approved exact UUID allow-list,
+prove all refreshed business counts are unchanged, target sessions and refresh
+rows are zero, password login fails, a pre-ban JWT is denied by API,
+PostgREST, and Storage, and any pre-ban signed download URL has expired.
+
+A partial identity batch is resumed only for the remaining exact approved
+UUIDs; already-disabled identities stay disabled. Never unban a demo identity
+as an application rollback. If a preserved demo-owned program later needs a
+human operator, create a non-demo Auth principal and use a separately reviewed,
+audited, foreign-key-safe ownership reassignment. Do not recover access by
+restoring the discarded demo password, changing historical report authorship,
+or deleting referenced rows.
+
+Release A is the feature snapshot that adds these seven migrations, in order:
+
+```text
+20260729000400_cp12_durable_funding_phase.sql
+20260729000500_cp13_wallet_control_and_withdrawal_gate.sql
+20260729000600_cp13_reward_settlement.sql
+20260729000700_cp14_durable_funding_recovery.sql
+20260729000800_cp13_completion_gaps.sql
+20260729000900_cp14_recovery_integrity_hardening.sql
+20260729001000_cp14_recovery_rpc_boundary.sql
+```
+
+Do not release only `004` through `007`: migrations `008` through `010` are
+part of the same reviewed snapshot and contain required completion, integrity,
+and RPC-boundary fixes. Before deploying, the quality image must pass against
+all 47 ordered migrations, generated database types and OpenAPI must be
+current, and CP-12, CP-13, CP-14, and QA-ARC-01 must have their required offline
+or live evidence. Keep the current production application tag available; it is
+the rollback image for Release A because the Release A schema intentionally
+retains the old service-role RPC grants.
+
+Deploy Release A in this order:
+
+1. Confirm the separate `SEC-PROD-001` deployment evidence and unchanged
+   preservation counts. Stop if that evidence is absent or stale.
+2. Build and verify immutable API, web, and migration images from one Release A
+   SHA. Confirm that the migration image contains the exact `004`-through-`010`
+   set above and no Release B revoke migration.
+3. Let `deploy.sh` validate configuration, apply the forward-only migrations,
+   start the new images, and complete health and Circle phase-2 verification.
+4. Run the redacted Arc acceptance sequence for deployment, Send, Bridge,
+   Unified Balance, reward settlement, and withdrawal. Verify all legacy reward
+   HTTP mutation routes return `410` before a service/repository mutation.
+5. Observe application, reconciliation, webhook, and database health for the
+   agreed window. Record the Release A SHA, migration ledger, acceptance
+   evidence, start/end timestamps, and the prior application tag. Only after
+   this window may the Release A SHA be designated as the application image
+   that Release B can roll back to.
+
+Stop Release A and restore the prior application image if health, Circle
+verification, or acceptance fails. Do not revert database migrations. Do not
+start Release B while an unresolved funding, settlement, withdrawal,
+reconciliation, or security discrepancy remains.
+
+#### Release B legacy-RPC retirement
+
+Release B is a later deployment after the Release A observation window; it must
+not be folded into Release A. Add one new forward-only migration without
+editing migrations already applied in production. That migration may revoke
+`EXECUTE` from `service_role` for exactly these previous-image compatibility
+functions:
+
+```text
+public.create_escrow_deployment_atomic(
+  uuid,uuid,text,text,text,timestamp with time zone,text,text,jsonb,uuid
+)
+public.approve_report_reward_atomic(uuid,uuid,numeric,numeric)
+public.start_report_payment_atomic(uuid,uuid,text,text)
+public.confirm_report_payment_atomic(uuid,uuid,bigint,text,integer)
+```
+
+`anon` and `authenticated` must already be unable to execute all four. Release
+B must preserve `service_role` execution of
+`public.confirm_escrow_deployment_atomic(uuid,text,text,bigint,text,text)`:
+the current API still uses that confirmation RPC. It must also preserve every
+wallet-proof deployment, funding, reward-settlement, recovery, and withdrawal
+RPC used by the Release A image.
+
+Before applying the revoke migration to production, use an isolated copy of
+the post-Release-A schema to run the Release A application image with the
+proposed post-Release-B grants. Prove deployment, funding, reward settlement,
+and withdrawal still work and prove the four functions above are denied. Stop
+before production revocation if the Release A image invokes any of them, if the
+grant catalog differs from the expected signatures, or if any smoke or
+rollback check fails.
+
+After Release B, repeat the production health, Circle phase-2, deployment,
+funding, reward-settlement, and withdrawal smoke tests. Verify legacy reward
+HTTP routes remain `410`, the four legacy RPCs are denied to `service_role`,
+`anon`, and `authenticated`, and
+`confirm_escrow_deployment_atomic` remains executable by `service_role` only.
+If the Release B application image fails, roll the application back only to the
+recorded Release A SHA; the database stays at the Release B schema. Never roll
+back to a pre-Release-A image after the revoke migration and never restore the
+legacy grants ad hoc. Stop and ship a reviewed forward fix if the recorded
+Release A image is not compatible.
+
 ## Operations
 
 Every commit creates three local image tags. Monitor disk space:

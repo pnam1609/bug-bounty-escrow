@@ -47,6 +47,13 @@ const expectedMigrations = [
   '20260729000100_cp13_arc_escrow_intents.sql',
   '20260729000200_cp13_gateway_subscription_lifecycle.sql',
   '20260729000300_sec_prod_banned_auth_rls.sql',
+  '20260729000400_cp12_durable_funding_phase.sql',
+  '20260729000500_cp13_wallet_control_and_withdrawal_gate.sql',
+  '20260729000600_cp13_reward_settlement.sql',
+  '20260729000700_cp14_durable_funding_recovery.sql',
+  '20260729000800_cp13_completion_gaps.sql',
+  '20260729000900_cp14_recovery_integrity_hardening.sql',
+  '20260729001000_cp14_recovery_rpc_boundary.sql',
 ];
 
 const tableMigrations = new Map([

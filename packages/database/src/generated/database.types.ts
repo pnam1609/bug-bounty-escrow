@@ -508,6 +508,76 @@ export type Database = {
           },
         ]
       }
+      escrow_wallet_control_challenges: {
+        Row: {
+          actor_id: string
+          chain_id: number
+          consumed_at: string | null
+          created_at: string
+          deployment_id: string | null
+          expires_at: string
+          id: string
+          invalidated_at: string | null
+          issued_at: string
+          nonce: string
+          owner_wallet: string
+          program_id: string
+          withdraw_recipient: string
+        }
+        Insert: {
+          actor_id: string
+          chain_id?: number
+          consumed_at?: string | null
+          created_at?: string
+          deployment_id?: string | null
+          expires_at: string
+          id: string
+          invalidated_at?: string | null
+          issued_at: string
+          nonce: string
+          owner_wallet: string
+          program_id: string
+          withdraw_recipient: string
+        }
+        Update: {
+          actor_id?: string
+          chain_id?: number
+          consumed_at?: string | null
+          created_at?: string
+          deployment_id?: string | null
+          expires_at?: string
+          id?: string
+          invalidated_at?: string | null
+          issued_at?: string
+          nonce?: string
+          owner_wallet?: string
+          program_id?: string
+          withdraw_recipient?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "escrow_wallet_control_challenges_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "escrow_wallet_control_challenges_deployment_id_fkey"
+            columns: ["deployment_id"]
+            isOneToOne: true
+            referencedRelation: "escrow_contracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "escrow_wallet_control_challenges_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: false
+            referencedRelation: "programs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       funding_confirmation_artifacts: {
         Row: {
           artifact_checksum: string
@@ -639,6 +709,7 @@ export type Database = {
           expires_at: string
           failure_code: string | null
           fee_allocations: Json
+          funding_phase: string
           gross_amount_base_units: number
           id: string
           idempotency_key: string
@@ -671,6 +742,7 @@ export type Database = {
           expires_at: string
           failure_code?: string | null
           fee_allocations: Json
+          funding_phase?: string
           gross_amount_base_units: number
           id?: string
           idempotency_key: string
@@ -703,6 +775,7 @@ export type Database = {
           expires_at?: string
           failure_code?: string | null
           fee_allocations?: Json
+          funding_phase?: string
           gross_amount_base_units?: number
           id?: string
           idempotency_key?: string
@@ -747,23 +820,73 @@ export type Database = {
           },
         ]
       }
+      funding_operation_recovery_checks: {
+        Row: {
+          block_hash: string | null
+          block_number: number | null
+          checked_at: string
+          evidence_role: string
+          funding_operation_id: string
+          network: string
+          state: string
+          transaction_hash: string
+        }
+        Insert: {
+          block_hash?: string | null
+          block_number?: number | null
+          checked_at?: string
+          evidence_role: string
+          funding_operation_id: string
+          network: string
+          state: string
+          transaction_hash: string
+        }
+        Update: {
+          block_hash?: string | null
+          block_number?: number | null
+          checked_at?: string
+          evidence_role?: string
+          funding_operation_id?: string
+          network?: string
+          state?: string
+          transaction_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "funding_operation_recovery_checks_funding_operation_id_fkey"
+            columns: ["funding_operation_id"]
+            isOneToOne: false
+            referencedRelation: "funding_operations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       funding_operations: {
         Row: {
           attempt_no: number
           block_hash: string | null
           block_number: number | null
           created_at: string
+          delivery_retry_attempt_no: number
+          delivery_retry_claim_token: string | null
           event_chain_id: number | null
           failure_code: string | null
           funding_intent_id: string
           gateway_wallet_address: string | null
           id: string
+          idempotency_key: string
           log_index: number | null
           net_received_base_units: number | null
           operation_id: string | null
           operation_type: string
           pre_gateway_balance_base_units: number | null
           provider_state: string | null
+          recovery_block_hash: string | null
+          recovery_block_number: number | null
+          recovery_checked_at: string | null
+          recovery_state: string | null
+          recovery_transaction_hash: string | null
+          released_wallet_claim_token: string | null
           replaces_operation_id: string | null
           requested_amount_base_units: number | null
           retryable: boolean
@@ -777,24 +900,35 @@ export type Database = {
           transaction_hash: string | null
           transfer_id: string | null
           transfer_log_index: number | null
+          unbound_transaction_hashes: Json
           updated_at: string
+          wallet_claim_token: string | null
         }
         Insert: {
           attempt_no?: number
           block_hash?: string | null
           block_number?: number | null
           created_at?: string
+          delivery_retry_attempt_no?: number
+          delivery_retry_claim_token?: string | null
           event_chain_id?: number | null
           failure_code?: string | null
           funding_intent_id: string
           gateway_wallet_address?: string | null
           id?: string
+          idempotency_key: string
           log_index?: number | null
           net_received_base_units?: number | null
           operation_id?: string | null
           operation_type: string
           pre_gateway_balance_base_units?: number | null
           provider_state?: string | null
+          recovery_block_hash?: string | null
+          recovery_block_number?: number | null
+          recovery_checked_at?: string | null
+          recovery_state?: string | null
+          recovery_transaction_hash?: string | null
+          released_wallet_claim_token?: string | null
           replaces_operation_id?: string | null
           requested_amount_base_units?: number | null
           retryable?: boolean
@@ -808,24 +942,35 @@ export type Database = {
           transaction_hash?: string | null
           transfer_id?: string | null
           transfer_log_index?: number | null
+          unbound_transaction_hashes?: Json
           updated_at?: string
+          wallet_claim_token?: string | null
         }
         Update: {
           attempt_no?: number
           block_hash?: string | null
           block_number?: number | null
           created_at?: string
+          delivery_retry_attempt_no?: number
+          delivery_retry_claim_token?: string | null
           event_chain_id?: number | null
           failure_code?: string | null
           funding_intent_id?: string
           gateway_wallet_address?: string | null
           id?: string
+          idempotency_key?: string
           log_index?: number | null
           net_received_base_units?: number | null
           operation_id?: string | null
           operation_type?: string
           pre_gateway_balance_base_units?: number | null
           provider_state?: string | null
+          recovery_block_hash?: string | null
+          recovery_block_number?: number | null
+          recovery_checked_at?: string | null
+          recovery_state?: string | null
+          recovery_transaction_hash?: string | null
+          released_wallet_claim_token?: string | null
           replaces_operation_id?: string | null
           requested_amount_base_units?: number | null
           retryable?: boolean
@@ -839,7 +984,9 @@ export type Database = {
           transaction_hash?: string | null
           transfer_id?: string | null
           transfer_log_index?: number | null
+          unbound_transaction_hashes?: Json
           updated_at?: string
+          wallet_claim_token?: string | null
         }
         Relationships: [
           {
@@ -1738,6 +1885,197 @@ export type Database = {
           },
         ]
       }
+      reward_settlement_intents: {
+        Row: {
+          actor_id: string
+          amount: number
+          amount_base_units: number
+          approved_content_hash: string
+          calculation_basis_amount: number | null
+          calculation_basis_base_units: number | null
+          calculation_type: string
+          created_at: string
+          escrow_contract_id: string
+          failure_code: string | null
+          id: string
+          idempotency_key: string
+          max_reward_cap: number | null
+          max_reward_cap_base_units: number | null
+          owner_wallet: string
+          percentage_bps: number | null
+          program_id: string
+          recipient_address: string
+          report_id: string
+          report_key: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          actor_id: string
+          amount: number
+          amount_base_units: number
+          approved_content_hash: string
+          calculation_basis_amount?: number | null
+          calculation_basis_base_units?: number | null
+          calculation_type: string
+          created_at?: string
+          escrow_contract_id: string
+          failure_code?: string | null
+          id?: string
+          idempotency_key: string
+          max_reward_cap?: number | null
+          max_reward_cap_base_units?: number | null
+          owner_wallet: string
+          percentage_bps?: number | null
+          program_id: string
+          recipient_address: string
+          report_id: string
+          report_key: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          actor_id?: string
+          amount?: number
+          amount_base_units?: number
+          approved_content_hash?: string
+          calculation_basis_amount?: number | null
+          calculation_basis_base_units?: number | null
+          calculation_type?: string
+          created_at?: string
+          escrow_contract_id?: string
+          failure_code?: string | null
+          id?: string
+          idempotency_key?: string
+          max_reward_cap?: number | null
+          max_reward_cap_base_units?: number | null
+          owner_wallet?: string
+          percentage_bps?: number | null
+          program_id?: string
+          recipient_address?: string
+          report_id?: string
+          report_key?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reward_settlement_intents_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_intents_escrow_contract_id_fkey"
+            columns: ["escrow_contract_id"]
+            isOneToOne: false
+            referencedRelation: "escrow_contracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_intents_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: false
+            referencedRelation: "programs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_intents_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reward_settlement_operations: {
+        Row: {
+          attempt_no: number
+          block_hash: string | null
+          block_number: number | null
+          circle_transaction_id: string | null
+          created_at: string
+          event_log_index: number | null
+          failure_code: string | null
+          id: string
+          intent_id: string
+          operation_type: string
+          post_escrow_balance_base_units: number | null
+          post_total_approved_outstanding_base_units: number | null
+          post_total_funded_base_units: number | null
+          post_total_paid_base_units: number | null
+          post_total_withdrawn_base_units: number | null
+          provider_idempotency_key: string | null
+          replaces_operation_id: string | null
+          status: string
+          transaction_hash: string | null
+          transfer_log_index: number | null
+          updated_at: string
+        }
+        Insert: {
+          attempt_no: number
+          block_hash?: string | null
+          block_number?: number | null
+          circle_transaction_id?: string | null
+          created_at?: string
+          event_log_index?: number | null
+          failure_code?: string | null
+          id?: string
+          intent_id: string
+          operation_type: string
+          post_escrow_balance_base_units?: number | null
+          post_total_approved_outstanding_base_units?: number | null
+          post_total_funded_base_units?: number | null
+          post_total_paid_base_units?: number | null
+          post_total_withdrawn_base_units?: number | null
+          provider_idempotency_key?: string | null
+          replaces_operation_id?: string | null
+          status: string
+          transaction_hash?: string | null
+          transfer_log_index?: number | null
+          updated_at?: string
+        }
+        Update: {
+          attempt_no?: number
+          block_hash?: string | null
+          block_number?: number | null
+          circle_transaction_id?: string | null
+          created_at?: string
+          event_log_index?: number | null
+          failure_code?: string | null
+          id?: string
+          intent_id?: string
+          operation_type?: string
+          post_escrow_balance_base_units?: number | null
+          post_total_approved_outstanding_base_units?: number | null
+          post_total_funded_base_units?: number | null
+          post_total_paid_base_units?: number | null
+          post_total_withdrawn_base_units?: number | null
+          provider_idempotency_key?: string | null
+          replaces_operation_id?: string | null
+          status?: string
+          transaction_hash?: string | null
+          transfer_log_index?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reward_settlement_operations_intent_id_fkey"
+            columns: ["intent_id"]
+            isOneToOne: false
+            referencedRelation: "reward_settlement_intents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_operations_replaces_operation_id_fkey"
+            columns: ["replaces_operation_id"]
+            isOneToOne: false
+            referencedRelation: "reward_settlement_operations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       schema_migrations: {
         Row: {
           applied_at: string
@@ -1771,6 +2109,8 @@ export type Database = {
           pre_total_withdrawn_base_units: number
           program_id: string
           recipient_address: string
+          replaced_by_intent_id: string | null
+          replaces_intent_id: string | null
           status: string
           transfer_log_index: number | null
           updated_at: string
@@ -1797,6 +2137,8 @@ export type Database = {
           pre_total_withdrawn_base_units: number
           program_id: string
           recipient_address: string
+          replaced_by_intent_id?: string | null
+          replaces_intent_id?: string | null
           status: string
           transfer_log_index?: number | null
           updated_at?: string
@@ -1823,6 +2165,8 @@ export type Database = {
           pre_total_withdrawn_base_units?: number
           program_id?: string
           recipient_address?: string
+          replaced_by_intent_id?: string | null
+          replaces_intent_id?: string | null
           status?: string
           transfer_log_index?: number | null
           updated_at?: string
@@ -1854,6 +2198,20 @@ export type Database = {
             referencedRelation: "programs"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "withdrawal_intents_replaced_by_intent_id_fkey"
+            columns: ["replaced_by_intent_id"]
+            isOneToOne: false
+            referencedRelation: "withdrawal_intents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "withdrawal_intents_replaces_intent_id_fkey"
+            columns: ["replaces_intent_id"]
+            isOneToOne: false
+            referencedRelation: "withdrawal_intents"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -1861,6 +2219,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_reward_payout_relay_atomic: {
+        Args: {
+          target_circle_transaction_id: string
+          target_intent_id: string
+          target_provider_idempotency_key: string
+        }
+        Returns: string
+      }
       actor_can_review_program: {
         Args: { actor_id: string; target_program_id: string }
         Returns: boolean
@@ -1881,6 +2247,35 @@ export type Database = {
           target_report_id: string
         }
         Returns: string
+      }
+      arm_bridge_delivery_retry_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      arm_funding_destination_attempt_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      arm_source_deposit_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          target_deposit_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
       }
       assert_program_asset_types_scoped: {
         Args: { target_program_id: string }
@@ -1942,6 +2337,76 @@ export type Database = {
         }
         Returns: string
       }
+      attach_funding_destination_hash_atomic: {
+        Args: {
+          actor_id: string
+          attached_transaction_hash: string
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      attach_funding_recovery_telemetry_atomic: {
+        Args: {
+          actor_id: string
+          observed_provider_state: string
+          observed_retryable: boolean
+          observed_source_hashes: Json
+          observed_steps: Json
+          observed_unbound_hashes: Json
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      attach_funding_recovery_telemetry_atomic_cp14_internal: {
+        Args: {
+          actor_id: string
+          observed_provider_state: string
+          observed_retryable: boolean
+          observed_source_hashes: Json
+          observed_steps: Json
+          observed_unbound_hashes: Json
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      attach_funding_recovery_telemetry_atomic_cp14_mapping_internal: {
+        Args: {
+          actor_id: string
+          observed_provider_state: string
+          observed_retryable: boolean
+          observed_source_hashes: Json
+          observed_steps: Json
+          observed_unbound_hashes: Json
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      attach_reward_payout_hash_atomic: {
+        Args: {
+          submitted_transaction_hash: string
+          target_circle_transaction_id: string
+          target_intent_id: string
+        }
+        Returns: string
+      }
+      attach_source_deposit_hash_atomic: {
+        Args: {
+          actor_id: string
+          attached_transaction_hash: string
+          target_deposit_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
       can_access_report: {
         Args: { target_report_id: string }
         Returns: boolean
@@ -1949,6 +2414,27 @@ export type Database = {
       can_review_report: {
         Args: { target_report_id: string }
         Returns: boolean
+      }
+      cancel_funding_intent_atomic: {
+        Args: {
+          actor_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      cancel_reward_settlement_intent_atomic: {
+        Args: { actor_id: string; target_intent_id: string }
+        Returns: string
+      }
+      claim_funding_destination_attempt_atomic: {
+        Args: {
+          actor_id: string
+          request_idempotency_key: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: string
       }
       claim_funding_reconciliation_atomic: {
         Args: {
@@ -2025,6 +2511,43 @@ export type Database = {
         }
         Returns: string
       }
+      confirm_reward_approval_atomic: {
+        Args: {
+          reward_event_log_index: number
+          settled_block_hash: string
+          settled_block_number: number
+          submitted_transaction_hash: string
+          target_intent_id: string
+        }
+        Returns: string
+      }
+      confirm_reward_payout_atomic: {
+        Args: {
+          reward_event_log_index: number
+          settled_block_hash: string
+          settled_block_number: number
+          submitted_transaction_hash: string
+          target_intent_id: string
+          usdc_transfer_log_index: number
+        }
+        Returns: string
+      }
+      confirm_reward_payout_with_accounting_atomic: {
+        Args: {
+          post_escrow_balance_base_units: number
+          post_total_approved_outstanding_base_units: number
+          post_total_funded_base_units: number
+          post_total_paid_base_units: number
+          post_total_withdrawn_base_units: number
+          reward_event_log_index: number
+          settled_block_hash: string
+          settled_block_number: number
+          submitted_transaction_hash: string
+          target_intent_id: string
+          usdc_transfer_log_index: number
+        }
+        Returns: string
+      }
       confirm_source_deposit_atomic: {
         Args: {
           target_deposit_id: string
@@ -2060,6 +2583,43 @@ export type Database = {
         }
         Returns: string
       }
+      create_escrow_deployment_with_wallet_proof_atomic: {
+        Args: {
+          actor_id: string
+          target_artifact_checksum: string
+          target_idempotency_key: string
+          target_immutable_references: Json
+          target_owner_wallet: string
+          target_program_id: string
+          target_program_key: string
+          target_refund_unlock_at: string
+          target_runtime_checksum: string
+          target_wallet_challenge_id: string
+          target_withdraw_recipient: string
+        }
+        Returns: string
+      }
+      create_escrow_wallet_challenge_atomic: {
+        Args: {
+          actor_id: string
+          target_challenge_id: string
+          target_expires_at: string
+          target_issued_at: string
+          target_nonce: string
+          target_owner_wallet: string
+          target_program_id: string
+          target_withdraw_recipient: string
+        }
+        Returns: string
+      }
+      create_funding_destination_replacement_atomic: {
+        Args: {
+          actor_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: string
+      }
       create_funding_intent_atomic: {
         Args: {
           actor_id: string
@@ -2080,6 +2640,19 @@ export type Database = {
       }
       create_program_atomic: {
         Args: { actor_id: string; input: Json }
+        Returns: string
+      }
+      create_reward_settlement_intent_atomic: {
+        Args: {
+          actor_id: string
+          calculation_basis_amount: number
+          request_idempotency_key: string
+          reward_amount: number
+          target_content_hash: string
+          target_owner_wallet: string
+          target_report_id: string
+          target_report_key: string
+        }
         Returns: string
       }
       create_source_deposit_atomic: {
@@ -2105,6 +2678,19 @@ export type Database = {
           expected_amount_base_units: number
           request_idempotency_key: string
           source_wallet: string
+          target_program_id: string
+        }
+        Returns: string
+      }
+      create_withdrawal_replacement_intent_atomic: {
+        Args: {
+          actor_id: string
+          escrow_already_closed: boolean
+          escrow_pre_total_withdrawn_base_units: number
+          expected_amount_base_units: number
+          request_idempotency_key: string
+          source_wallet: string
+          target_failed_intent_id: string
           target_program_id: string
         }
         Returns: string
@@ -2143,6 +2729,14 @@ export type Database = {
         }
         Returns: boolean
       }
+      fail_reward_settlement_operation_atomic: {
+        Args: {
+          target_failure_code: string
+          target_intent_id: string
+          target_operation_type: string
+        }
+        Returns: string
+      }
       fail_source_deposit_reverted_atomic: {
         Args: { target_deposit_id: string; verified_transaction_hash: string }
         Returns: boolean
@@ -2153,6 +2747,26 @@ export type Database = {
           target_intent_id: string
           terminal_failure_code: string
         }
+        Returns: boolean
+      }
+      funding_operation_recovery_buckets_are_valid: {
+        Args: {
+          candidate_steps: Json
+          destination_hash: string
+          unbound_hashes: Json
+        }
+        Returns: boolean
+      }
+      funding_operation_recovery_identity_count: {
+        Args: {
+          candidate_steps: Json
+          destination_hash: string
+          unbound_hashes: Json
+        }
+        Returns: number
+      }
+      funding_operation_steps_have_unique_identities: {
+        Args: { candidate: Json }
         Returns: boolean
       }
       gateway_subscription_intent_ready: {
@@ -2216,6 +2830,41 @@ export type Database = {
         }
         Returns: string
       }
+      observe_claimed_funding_destination_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          observed_destination_hash: string
+          observed_outcome: string
+          observed_provider_operation_id: string
+          observed_provider_state: string
+          observed_retryable: boolean
+          observed_source_hashes: Json
+          observed_steps: Json
+          observed_transfer_id: string
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      observe_claimed_source_deposit_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          observed_failure_code: string
+          observed_outcome: string
+          observed_transaction_hash: string
+          target_deposit_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      observe_external_reward_payout_atomic: {
+        Args: { submitted_transaction_hash: string; target_intent_id: string }
+        Returns: string
+      }
       observe_funding_operation_atomic: {
         Args: {
           observed_destination_hash: string
@@ -2229,6 +2878,29 @@ export type Database = {
           target_intent_id: string
         }
         Returns: boolean
+      }
+      observe_funding_operation_atomic_cp14_internal: {
+        Args: {
+          observed_destination_hash: string
+          observed_operation_id: string
+          observed_provider_state: string
+          observed_retryable: boolean
+          observed_source_hashes: Json
+          observed_steps: Json
+          observed_submission_uncertain: boolean
+          observed_transfer_id: string
+          target_intent_id: string
+        }
+        Returns: boolean
+      }
+      observe_reward_approval_submission_atomic: {
+        Args: {
+          actor_id: string
+          submission_outcome: string
+          submitted_transaction_hash: string
+          target_intent_id: string
+        }
+        Returns: string
       }
       observe_source_deposit_atomic: {
         Args: {
@@ -2268,6 +2940,24 @@ export type Database = {
           sort_order: number
         }[]
       }
+      prepare_funding_destination_atomic: {
+        Args: {
+          actor_id: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
+      prepare_funding_destination_checked_atomic: {
+        Args: {
+          actor_id: string
+          expected_fee_allocations: Json
+          expected_quote_quoted_at: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
       prepare_gateway_subscription_registration_atomic: {
         Args: {
           requested_lease_expires_at: string
@@ -2286,6 +2976,13 @@ export type Database = {
           filename: string
           media_type: string
           target_report_id: string
+        }
+        Returns: string
+      }
+      prepare_reward_payout_relay_atomic: {
+        Args: {
+          target_intent_id: string
+          target_provider_idempotency_key: string
         }
         Returns: string
       }
@@ -2348,6 +3045,19 @@ export type Database = {
         }
         Returns: boolean
       }
+      record_funding_recovery_poll_atomic: {
+        Args: {
+          actor_id: string
+          checked_block_hash: string
+          checked_block_number: number
+          checked_state: string
+          checked_transaction_hash: string
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
       record_gateway_webhook_test_atomic: {
         Args: {
           notification_id: string
@@ -2394,6 +3104,16 @@ export type Database = {
         }
         Returns: string
       }
+      release_rejected_send_attempt_atomic: {
+        Args: {
+          actor_id: string
+          claim_token: string
+          target_intent_id: string
+          target_operation_id: string
+          target_program_id: string
+        }
+        Returns: boolean
+      }
       remove_program_reviewer_atomic: {
         Args: {
           actor_id: string
@@ -2401,6 +3121,16 @@ export type Database = {
           target_reviewer_id: string
         }
         Returns: string
+      }
+      reopen_funding_source_collection_atomic: {
+        Args: {
+          actor_id: string
+          expected_fee_allocations: Json
+          expected_quote_quoted_at: string
+          target_intent_id: string
+          target_program_id: string
+        }
+        Returns: boolean
       }
       request_report_information_atomic: {
         Args: {

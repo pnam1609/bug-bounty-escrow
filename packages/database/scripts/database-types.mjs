@@ -53,6 +53,26 @@ if (!generated.includes('export type Json') || !generated.includes('export type 
   throw new Error('Supabase CLI returned an invalid or empty database type document');
 }
 
+const emptyPublicSchema =
+  /Tables:\s*\{\s*\[_ in never\]: never\s*\}/u.test(generated) ||
+  /Functions:\s*\{\s*\[_ in never\]: never\s*\}/u.test(generated);
+const requiredSchemaSentinels = [
+  'programs: {',
+  'withdrawal_intents: {',
+  'confirm_reward_payout_with_accounting_atomic: {',
+];
+const missingSchemaSentinels = requiredSchemaSentinels.filter(
+  (sentinel) => !generated.includes(sentinel),
+);
+
+if (emptyPublicSchema || missingSchemaSentinels.length > 0) {
+  throw new Error(
+    `Supabase CLI returned an incomplete public schema; missing sentinels: ${
+      missingSchemaSentinels.join(', ') || 'none'
+    }. Apply all package migrations to the local database before generating types.`,
+  );
+}
+
 if (mode === 'generate') {
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, generated, 'utf8');

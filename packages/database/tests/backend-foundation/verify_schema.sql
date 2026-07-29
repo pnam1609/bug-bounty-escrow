@@ -6,6 +6,26 @@
 
 begin;
 
+create function pg_temp.funding_fee_allocations(allocations jsonb)
+returns jsonb
+language sql
+immutable
+as $$
+  select jsonb_agg(
+    allocation || jsonb_build_object(
+      'components',
+      jsonb_build_array(
+        jsonb_build_object('network', allocation->>'network', 'type', 'provider', 'token', 'USDC', 'amountBaseUnits', allocation->>'amountBaseUnits'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'gas', 'token', 'USDC', 'amountBaseUnits', '0'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'kit', 'token', 'USDC', 'amountBaseUnits', '0'),
+        jsonb_build_object('network', allocation->>'network', 'type', 'forwarder', 'token', 'USDC', 'amountBaseUnits', '0')
+      )
+    )
+    order by ordinal
+  )
+  from jsonb_array_elements(allocations) with ordinality entry(allocation, ordinal)
+$$;
+
 ------------------------------------------------------------------ tables and RLS
 
 do $tables_and_rls$
@@ -156,7 +176,9 @@ begin
     '90000000-0000-4000-8000-000000000110', program_uuid, escrow_uuid,
     owner_uuid, '90000000-0000-4000-8000-000000000111',
     '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'send', 1000000, 0,
-    '[{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb,
+    pg_temp.funding_fee_allocations(
+      '[{"network":"Arc_Testnet","amountBaseUnits":"0"}]'::jsonb
+    ),
     '[{"network":"Arc_Testnet","amountBaseUnits":"1000000"}]'::jsonb,
     '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 0, 0, 'complete',
     '0x2222222222222222222222222222222222222222222222222222222222222222',

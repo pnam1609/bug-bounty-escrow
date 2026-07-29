@@ -20,6 +20,7 @@ import {
   FUNDING_NETWORKS,
   canStartDestinationOperation,
   deriveFundingRoute,
+  fundingEstimatedNetAmount,
   fundingRecoveryAction,
   fundingRouteLabel,
   type FundingDestinationResult,
@@ -27,6 +28,7 @@ import {
   type FundingOperationPhase,
   type FundingSource,
   type ValidatedFundingSelection,
+  type VerifiedFundingIntent,
 } from './program-funding-flow';
 import { fieldId, formatUsdc, shortenAddress } from './program-draft';
 import { AffixedField, FormCard, SummaryRow } from './wizard-parts';
@@ -57,6 +59,9 @@ export interface FundingAllocationsProps {
   readonly pendingUnifiedBalance: string | undefined;
   readonly estimatedFeeReserve: string | undefined;
   readonly transactionsEnabled: boolean;
+  readonly canSubmit: boolean;
+  readonly readinessChecked: boolean;
+  readonly working: boolean;
   readonly onConnectWallet: () => void;
   readonly onGrossAmountChange: (value: string) => void;
   readonly onSourceChange: (rowId: string, patch: Partial<FundingSource>) => void;
@@ -66,11 +71,14 @@ export interface FundingAllocationsProps {
   readonly onDepositRecoveryHashChange: (rowId: string, value: string) => void;
   readonly onRefreshUnifiedBalance: () => void;
   readonly onSubmit: () => void;
+  readonly onCheckReadiness: () => void;
   readonly onLater: () => void;
 }
 
 export function FundingAllocations({
   confirmedUnifiedBalance,
+  canSubmit,
+  readinessChecked,
   depositRequiredAmounts,
   depositRecoveryHashes,
   depositStatuses,
@@ -87,10 +95,12 @@ export function FundingAllocations({
   onRemoveSource,
   onSourceChange,
   onSubmit,
+  onCheckReadiness,
   pendingUnifiedBalance,
   program,
   sources,
   transactionsEnabled,
+  working,
   walletAddress,
   walletError,
   walletName,
@@ -113,7 +123,7 @@ export function FundingAllocations({
             </span>
             <span className="flex min-w-0 flex-col gap-xs">
               <span className="text-label-sm font-semibold uppercase text-text-muted">
-                {walletAddress === undefined ? 'Wallet disconnected' : walletName ?? 'EVM wallet'}
+                {walletAddress === undefined ? 'Wallet disconnected' : (walletName ?? 'EVM wallet')}
               </span>
               <span className="truncate text-body-sm text-text">
                 {walletAddress === undefined
@@ -206,9 +216,7 @@ export function FundingAllocations({
                     >
                       <SelectTrigger
                         aria-invalid={
-                          errors[`sources.${source.rowId}.network`] === undefined
-                            ? undefined
-                            : true
+                          errors[`sources.${source.rowId}.network`] === undefined ? undefined : true
                         }
                         id={fieldId(`fund.source.${source.rowId}.network`)}
                         size="lg"
@@ -261,7 +269,9 @@ export function FundingAllocations({
                         />
                         {depositRequiredAmounts[source.rowId] === undefined ? null : (
                           <span className="text-label-md text-text-muted">
-                            Exact locked deposit:{' '}
+                            {status === 'top_up_required'
+                              ? 'Exact server-required top-up: '
+                              : 'Exact locked deposit: '}
                             {formatUsdc(depositRequiredAmounts[source.rowId]!)}
                           </span>
                         )}
@@ -291,13 +301,13 @@ export function FundingAllocations({
                         ? 'Check deposit'
                         : status === 'failed'
                           ? 'Recover deposit'
-                        : status === 'replaceable'
-                          ? 'Replace reverted deposit'
-                          : status === 'top_up_required'
-                            ? 'Add required deposit'
-                          : status === 'recovery_required'
-                            ? 'Recover deposit'
-                            : 'Add to Unified Balance'}
+                          : status === 'replaceable'
+                            ? 'Replace reverted deposit'
+                            : status === 'top_up_required'
+                              ? 'Add required deposit'
+                              : status === 'recovery_required'
+                                ? 'Recover deposit'
+                                : 'Add to Unified Balance'}
                     </Button>
                   ) : null}
                 </div>
@@ -361,8 +371,8 @@ export function FundingAllocations({
               </Button>
             </div>
             <p className="text-label-md text-text-muted">
-              Existing confirmed Gateway balance can satisfy selected allocations. Pending
-              deposits do not count; add only missing sources, one wallet prompt at a time.
+              Existing confirmed Gateway balance can satisfy selected allocations. Pending deposits
+              do not count; add only missing sources, one wallet prompt at a time.
             </p>
             {transactionsEnabled ? null : (
               <p className="text-label-md text-warning">
@@ -410,7 +420,23 @@ export function FundingAllocations({
           <Button className="w-full sm:w-auto" onClick={onLater} size="lg" variant="ghost">
             Do this later
           </Button>
-          <Button className="w-full sm:w-auto" onClick={onSubmit} size="lg">
+          <Button
+            className="w-full sm:w-auto"
+            disabled={working}
+            loading={working}
+            onClick={onCheckReadiness}
+            size="lg"
+            variant="secondary"
+          >
+            {readinessChecked ? 'Check readiness again' : 'Check readiness'}
+          </Button>
+          <Button
+            className="w-full sm:w-auto"
+            disabled={!canSubmit}
+            loading={working}
+            onClick={onSubmit}
+            size="lg"
+          >
             Submit funding plan
           </Button>
         </div>
@@ -420,7 +446,9 @@ export function FundingAllocations({
 }
 
 export interface FundingPendingProps {
-  readonly walletAddress: string;
+  readonly walletAddress: string | undefined;
+  readonly walletMatchesIntent: boolean;
+  readonly intent: VerifiedFundingIntent;
   readonly selection: ValidatedFundingSelection;
   readonly phase: FundingOperationPhase;
   readonly working: boolean;
@@ -429,26 +457,37 @@ export interface FundingPendingProps {
   readonly executionAvailable: boolean;
   readonly verifiedRecipient: string | undefined;
   readonly estimatedFeeReserve: string;
+  readonly recoveryHash: string;
   readonly onBack: () => void;
+  readonly onConnectWallet: () => void;
   readonly onContinue: () => void;
+  readonly onRecoveryHashChange: (value: string) => void;
 }
 
 export function FundingPending({
   error,
   estimatedFeeReserve,
   executionAvailable,
+  intent,
   onBack,
+  onConnectWallet,
   onContinue,
+  onRecoveryHashChange,
   phase,
   result,
+  recoveryHash,
   selection,
   verifiedRecipient,
   walletAddress,
+  walletMatchesIntent,
   working,
 }: FundingPendingProps) {
   const operationSubmitted = !canStartDestinationOperation(phase);
   const recoveryAction = fundingRecoveryAction(phase);
-  const progress = routeProgress(selection.routeMode, phase);
+  const progress = routeProgress(selection.routeMode, phase, intent.recovery?.steps ?? []);
+  const destinationTransactionHash =
+    intent.destinationTransactionHash ?? result?.destinationTransactionHash;
+  const transferId = intent.transferId ?? intent.recovery?.transferId ?? result?.transferId;
 
   return (
     <div className="flex min-w-0 flex-col gap-xl">
@@ -465,16 +504,49 @@ export function FundingPending({
           still required.
         </Callout>
       )}
+      {walletAddress !== undefined && walletMatchesIntent ? null : (
+        <Callout title="Reconnect the locked funding wallet" variant="warning">
+          This operation is locked to {shortenAddress(intent.walletAddress)}. Reconnecting is an
+          explicit action; this screen never opens a wallet prompt during hydration.
+        </Callout>
+      )}
 
       <FormCard
         description="Route and recipient are locked while this funding operation is active."
         title="Funding operation"
       >
         <div className="flex flex-col">
-          <SummaryRow label="Connected wallet" value={shortenAddress(walletAddress)} />
+          <SummaryRow
+            label="Locked wallet"
+            value={
+              walletAddress === undefined
+                ? `${shortenAddress(intent.walletAddress)} · disconnected`
+                : walletMatchesIntent
+                  ? shortenAddress(walletAddress)
+                  : `${shortenAddress(walletAddress)} · wrong account`
+            }
+          />
           <SummaryRow label="Route" value={fundingRouteLabel(selection.routeMode)} />
           <SummaryRow label="Gross amount" value={formatUsdc(selection.grossAmount)} />
           <SummaryRow label="Estimated fee reserve" value={formatUsdc(estimatedFeeReserve)} />
+          <SummaryRow
+            label="Estimated net received"
+            value={formatUsdc(
+              fundingEstimatedNetAmount(selection.grossAmount, estimatedFeeReserve),
+            )}
+          />
+          {selection.sources.map((source) => (
+            <SummaryRow
+              key={source.rowId}
+              label={
+                <span className="inline-flex items-center gap-sm">
+                  <NetworkIdentity network={source.network} />
+                  <span className="sr-only">source</span>
+                </span>
+              }
+              value={`${formatUsdc(source.amount)} allocation`}
+            />
+          ))}
           <SummaryRow label="Destination" value="Arc Testnet" />
           <SummaryRow
             label="Verified escrow"
@@ -484,12 +556,28 @@ export function FundingPending({
                 : shortenAddress(verifiedRecipient)
             }
           />
-          {result === undefined ? null : (
+          {destinationTransactionHash === undefined ? null : (
             <SummaryRow
               label="Destination transaction"
-              value={shortenAddress(result.destinationTransactionHash)}
+              value={shortenAddress(destinationTransactionHash)}
             />
           )}
+          {transferId === undefined ? null : (
+            <SummaryRow label="Circle transfer" value={truncateEvidence(transferId)} />
+          )}
+          {intent.recovery?.operationId === undefined ? null : (
+            <SummaryRow
+              label="Circle operation"
+              value={truncateEvidence(intent.recovery.operationId)}
+            />
+          )}
+          {(intent.recovery?.sourceTransactionHashes ?? []).map((hash, index) => (
+            <SummaryRow
+              key={hash}
+              label={`Source transaction ${index + 1}`}
+              value={shortenAddress(hash)}
+            />
+          ))}
         </div>
 
         <Separator />
@@ -529,6 +617,20 @@ export function FundingPending({
             address.
           </Callout>
         )}
+        {phase !== 'source_submitted' || destinationTransactionHash !== undefined ? null : (
+          <Field
+            helperText="Paste only the original destination transaction returned by the wallet. The server binds it to this claimed attempt and independently verifies Arc before crediting funds."
+            htmlFor="funding-destination-recovery-hash"
+            label="Original destination transaction hash"
+          >
+            <Input
+              id="funding-destination-recovery-hash"
+              onChange={(event) => onRecoveryHashChange(event.currentTarget.value)}
+              placeholder="0x…"
+              value={recoveryHash}
+            />
+          </Field>
+        )}
 
         <div className="mt-2xl grid grid-cols-1 gap-md pt-md sm:flex sm:flex-wrap sm:items-center sm:justify-end">
           <Button
@@ -540,15 +642,28 @@ export function FundingPending({
           >
             Back
           </Button>
-          <Button
-            className="w-full sm:w-auto"
-            disabled={!executionAvailable || phase === 'complete'}
-            loading={working}
-            onClick={onContinue}
-            size="lg"
-          >
-            {executionAvailable ? recoveryAction ?? 'Continue and sign' : 'Funding API required'}
-          </Button>
+          {walletAddress === undefined || !walletMatchesIntent ? (
+            <Button
+              className="w-full sm:w-auto"
+              loading={working}
+              onClick={onConnectWallet}
+              size="lg"
+            >
+              {walletAddress === undefined ? 'Connect locked wallet' : 'Change wallet'}
+            </Button>
+          ) : (
+            <Button
+              className="w-full sm:w-auto"
+              disabled={!executionAvailable || phase === 'complete'}
+              loading={working}
+              onClick={onContinue}
+              size="lg"
+            >
+              {executionAvailable
+                ? (recoveryAction ?? 'Continue and sign')
+                : 'Funding API required'}
+            </Button>
+          )}
         </div>
       </FormCard>
     </div>
@@ -561,7 +676,10 @@ export function FundingConfirmationEvidence({
   readonly artifact: FundingConfirmationArtifact;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-xl" data-funding-confirmation={artifact.fundingIntentId}>
+    <div
+      className="flex min-w-0 flex-col gap-xl"
+      data-funding-confirmation={artifact.fundingIntentId}
+    >
       <FormCard
         description="Immutable deployment and Arc destination evidence for the latest completed funding intent."
         title="Canonical funding confirmation"
@@ -570,10 +688,7 @@ export function FundingConfirmationEvidence({
           <SummaryRow label="Route" value={fundingRouteLabel(artifact.routeMode)} />
           <SummaryRow label="Escrow" value={shortenAddress(artifact.escrowAddress)} />
           <SummaryRow label="Artifact version" value={artifact.artifactVersion} />
-          <SummaryRow
-            label="Artifact checksum"
-            value={shortenAddress(artifact.artifactChecksum)}
-          />
+          <SummaryRow label="Artifact checksum" value={shortenAddress(artifact.artifactChecksum)} />
           <SummaryRow
             label="Canonical Arc USDC"
             value={`${shortenAddress(artifact.tokenAddress)} · ${artifact.tokenDecimals} decimals`}
@@ -673,12 +788,7 @@ function NetworkLogo({ network }: { readonly network: FundingNetworkId }) {
   const common = 'size-5 shrink-0';
   if (network === 'Ethereum_Sepolia') {
     return (
-      <svg
-        aria-hidden="true"
-        className={common}
-        fill="none"
-        viewBox="0 0 24 24"
-      >
+      <svg aria-hidden="true" className={common} fill="none" viewBox="0 0 24 24">
         <path d="M12 2 6.5 12 12 15.2 17.5 12 12 2Z" fill="#627EEA" />
         <path d="m6.5 13.1 5.5 8.2 5.5-8.2-5.5 3.2-5.5-3.2Z" fill="#627EEA" />
       </svg>
@@ -686,12 +796,7 @@ function NetworkLogo({ network }: { readonly network: FundingNetworkId }) {
   }
   if (network === 'Arbitrum_Sepolia') {
     return (
-      <svg
-        aria-hidden="true"
-        className={`${common} text-usdc`}
-        fill="none"
-        viewBox="0 0 24 24"
-      >
+      <svg aria-hidden="true" className={`${common} text-usdc`} fill="none" viewBox="0 0 24 24">
         <path d="m12 2 8.5 5v10L12 22l-8.5-5V7L12 2Z" stroke="currentColor" strokeWidth="1.5" />
         <path d="m8 17 4-10h2l-4 10H8Zm4 0 4-10h1.5l-4 10H12Z" fill="currentColor" />
       </svg>
@@ -699,24 +804,14 @@ function NetworkLogo({ network }: { readonly network: FundingNetworkId }) {
   }
   if (network === 'Base_Sepolia') {
     return (
-      <svg
-        aria-hidden="true"
-        className={`${common} text-usdc`}
-        fill="none"
-        viewBox="0 0 24 24"
-      >
+      <svg aria-hidden="true" className={`${common} text-usdc`} fill="none" viewBox="0 0 24 24">
         <circle cx="12" cy="12" fill="currentColor" r="10" />
         <path d="M6 12h12" stroke="var(--color-primary-contrast)" strokeWidth="3" />
       </svg>
     );
   }
   return (
-    <svg
-      aria-hidden="true"
-      className={`${common} text-escrow`}
-      fill="none"
-      viewBox="0 0 24 24"
-    >
+    <svg aria-hidden="true" className={`${common} text-escrow`} fill="none" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
       <path d="M7 14.5c1.8-5 7-7.3 10-3.2" stroke="currentColor" strokeWidth="2" />
     </svg>
@@ -747,29 +842,100 @@ function depositStatusVariant(
 }
 
 type ProgressItemState = 'pending' | 'active' | 'complete';
+type RecoveryStep = NonNullable<VerifiedFundingIntent['recovery']>['steps'][number];
 
 function routeProgress(
   routeMode: ValidatedFundingSelection['routeMode'],
   phase: FundingOperationPhase,
-): readonly { readonly label: string; readonly detail: string; readonly state: ProgressItemState }[] {
-  const submitted =
-    phase === 'source_submitted' ||
-    phase === 'destination_submitted' ||
-    phase === 'delivery_pending' ||
+  recoverySteps: readonly RecoveryStep[],
+): readonly {
+  readonly label: string;
+  readonly detail: string;
+  readonly state: ProgressItemState;
+}[] {
+  const routeDelivered =
     phase === 'verifying_destination' ||
     phase === 'syncing_pool' ||
     phase === 'sync_failed' ||
     phase === 'complete';
-  const destinationLabel =
+  const destinationPending = phase === 'destination_submitted' || phase === 'delivery_pending';
+  const sourceSubmitted = phase === 'source_submitted';
+  const routeSteps =
     routeMode === 'send'
-      ? 'Sending USDC to the Arc escrow'
+      ? [
+          fundingRouteStep(
+            'Sending USDC to the Arc escrow',
+            ['send'],
+            recoverySteps,
+            routeDelivered ? 'complete' : destinationPending ? 'active' : 'pending',
+          ),
+        ]
       : routeMode === 'bridge'
-        ? 'Bridge approve, burn, attestation and mint'
-        : 'Build, sign, attest and mint Unified Balance spend';
+        ? [
+            fundingRouteStep(
+              'Approve USDC (if required)',
+              ['approve', 'approval'],
+              recoverySteps,
+              sourceSubmitted || destinationPending || routeDelivered ? 'complete' : 'pending',
+            ),
+            fundingRouteStep(
+              'Burn source USDC',
+              ['burn'],
+              recoverySteps,
+              sourceSubmitted || destinationPending || routeDelivered ? 'complete' : 'pending',
+            ),
+            fundingRouteStep(
+              'Fetch CCTP attestation',
+              ['attestation', 'fetchattestation'],
+              recoverySteps,
+              routeDelivered
+                ? 'complete'
+                : sourceSubmitted || destinationPending
+                  ? 'active'
+                  : 'pending',
+            ),
+            fundingRouteStep(
+              'Mint USDC on Arc',
+              ['mint'],
+              recoverySteps,
+              routeDelivered ? 'complete' : destinationPending ? 'active' : 'pending',
+            ),
+          ]
+        : [
+            fundingRouteStep(
+              'Build Unified Balance burn intents',
+              ['buildburnintents', 'build_burn_intents'],
+              recoverySteps,
+              sourceSubmitted || destinationPending || routeDelivered ? 'complete' : 'pending',
+            ),
+            fundingRouteStep(
+              'Sign burn intents sequentially',
+              ['signburnintents', 'sign_burn_intents', 'sign'],
+              recoverySteps,
+              sourceSubmitted || destinationPending || routeDelivered ? 'complete' : 'pending',
+            ),
+            fundingRouteStep(
+              'Fetch Gateway attestation',
+              ['attestation', 'fetchattestation'],
+              recoverySteps,
+              routeDelivered
+                ? 'complete'
+                : sourceSubmitted || destinationPending
+                  ? 'active'
+                  : 'pending',
+            ),
+            fundingRouteStep(
+              'Mint USDC on Arc',
+              ['mint'],
+              recoverySteps,
+              routeDelivered ? 'complete' : destinationPending ? 'active' : 'pending',
+            ),
+          ];
 
   return [
     {
-      label: routeMode === 'send' ? 'Waiting for Arc signature' : 'Waiting for sequential signatures',
+      label:
+        routeMode === 'send' ? 'Waiting for Arc signature' : 'Waiting for sequential signatures',
       detail: 'Wallet prompts only open after Continue and sign.',
       state:
         phase === 'ready_to_sign'
@@ -778,17 +944,7 @@ function routeProgress(
             ? 'active'
             : 'complete',
     },
-    {
-      label: destinationLabel,
-      detail: 'The returned operation IDs and hashes must be persisted before recovery.',
-      state: submitted
-        ? phase === 'source_submitted' || phase === 'delivery_pending'
-          ? 'active'
-          : 'complete'
-        : phase === 'awaiting_signature'
-          ? 'pending'
-          : 'pending',
-    },
+    ...routeSteps,
     {
       label: 'Verifying escrow balance received',
       detail:
@@ -811,4 +967,40 @@ function routeProgress(
             : 'pending',
     },
   ];
+}
+
+function fundingRouteStep(
+  label: string,
+  names: readonly string[],
+  recoverySteps: readonly RecoveryStep[],
+  fallback: ProgressItemState,
+): { readonly label: string; readonly detail: string; readonly state: ProgressItemState } {
+  const observed = [...recoverySteps].reverse().find((step) => {
+    const normalized = step.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return names.some((name) => normalized.includes(name.replace(/[^a-z0-9]/g, '')));
+  });
+  if (observed === undefined) {
+    return {
+      label,
+      detail: 'The server persists accepted operation IDs and transaction hashes for recovery.',
+      state: fallback,
+    };
+  }
+  return {
+    label,
+    detail:
+      observed.transactionHash === undefined
+        ? `Server state: ${observed.state}.`
+        : `Server state: ${observed.state} · ${shortenAddress(observed.transactionHash)}.`,
+    state:
+      observed.state === 'success'
+        ? 'complete'
+        : observed.state === 'pending'
+          ? 'active'
+          : 'active',
+  };
+}
+
+function truncateEvidence(value: string): string {
+  return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-8)}`;
 }

@@ -125,7 +125,7 @@ describe('off-chain application services', () => {
     expect(repository.submit.mock.calls[1]?.[3]).toBe(firstHash);
   });
 
-  it('dispatches each review through its dedicated atomic repository method', async () => {
+  it('dispatches safe reviews and retires the legacy reward mutation path', async () => {
     const detail = { id: '10000000-0000-4000-8000-000000000300' };
     const repository = {
       requestInformation: vi.fn(),
@@ -142,12 +142,14 @@ describe('off-chain application services', () => {
     await service.review('duplicate', owner, detail.id, {
       originalReportId: '10000000-0000-4000-8000-000000000301',
     });
-    await service.review('approve', owner, detail.id, { amount: '1000.000000' });
+    await expect(
+      service.review('approve', owner, detail.id, { amount: '1000.000000' }),
+    ).rejects.toMatchObject({ status: 410 });
 
     expect(repository.requestInformation).toHaveBeenCalledOnce();
     expect(repository.validate).toHaveBeenCalledOnce();
     expect(repository.reject).toHaveBeenCalledOnce();
     expect(repository.markDuplicate).toHaveBeenCalledOnce();
-    expect(repository.approveReward).toHaveBeenCalledOnce();
+    expect(repository.approveReward).not.toHaveBeenCalled();
   });
 });

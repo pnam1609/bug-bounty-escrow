@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CircleAppKitFundingExecutor } from '@/components/owner/circle-funding-executor';
 import {
   clearPendingWithdrawalHash,
+  persistAndObserveReturnedWithdrawalHash,
   persistPendingWithdrawalHash,
   readPendingWithdrawalHash,
   withdrawalContinuationAction,
@@ -108,11 +109,7 @@ describe('CP-13 withdrawal recovery', () => {
     const pending = readPendingWithdrawalHash(storage, 'program', 'intent', 'close');
 
     expect(
-      withdrawalContinuationAction(
-        { status: 'ready_to_close' } as never,
-        pending,
-        undefined,
-      ),
+      withdrawalContinuationAction({ status: 'ready_to_close' } as never, pending, undefined),
     ).toBe('observe_close');
     clearPendingWithdrawalHash(storage, 'program', 'intent', 'close');
     expect(readPendingWithdrawalHash(storage, 'program', 'intent', 'close')).toBeUndefined();
@@ -124,22 +121,45 @@ describe('CP-13 withdrawal recovery', () => {
     const pending = readPendingWithdrawalHash(storage, 'program', 'intent', 'withdraw');
 
     expect(
-      withdrawalContinuationAction(
-        { status: 'ready_to_withdraw' } as never,
-        undefined,
-        pending,
-      ),
+      withdrawalContinuationAction({ status: 'ready_to_withdraw' } as never, undefined, pending),
     ).toBe('observe_withdraw');
   });
 
-  it('starts a new server intent after a complete or failed withdrawal round', () => {
+  it('uses a linked replacement instead of an unrelated round after failure', () => {
     expect(
       withdrawalContinuationAction({ status: 'complete' } as never, undefined, undefined),
     ).toBe('new_round');
-    expect(
-      withdrawalContinuationAction({ status: 'failed' } as never, undefined, undefined),
-    ).toBe('new_round');
+    expect(withdrawalContinuationAction({ status: 'failed' } as never, undefined, undefined)).toBe(
+      'replace',
+    );
   });
+
+  for (const operation of ['close', 'withdraw'] as const) {
+    it(`still observes the provider-returned ${operation} hash when localStorage throws`, async () => {
+      const storage = storageFixture();
+      storage.setItem = vi.fn(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      });
+      const observe = vi.fn(async (transactionHash: string) => ({ transactionHash }));
+      const volatile: Array<string | undefined> = [];
+
+      await expect(
+        persistAndObserveReturnedWithdrawalHash({
+          storage,
+          programId: 'program',
+          intentId: 'intent',
+          operation,
+          transactionHash: hash,
+          observe,
+          setVolatileHash: (value) => volatile.push(value),
+        }),
+      ).resolves.toEqual({ transactionHash: hash });
+
+      expect(observe).toHaveBeenCalledOnce();
+      expect(observe).toHaveBeenCalledWith(hash);
+      expect(volatile).toEqual([hash, undefined]);
+    });
+  }
 
   it('never re-signs after the durable close or withdrawal wallet boundary', () => {
     expect(

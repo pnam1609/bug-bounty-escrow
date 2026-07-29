@@ -5,16 +5,20 @@ import {
   formatUsdcBaseUnits,
   fundingIntentSchema,
   withdrawalIntentSchema,
+  rewardSettlementIntentSchema,
   type FundingIntent,
   type FundingConfirmationArtifact,
   type FundingSource,
   type FundingNetworkId,
+  type FundingFeeComponentType,
   type ObserveSourceDepositRequest,
   type SourceDeposit,
   type ObserveFundingOperationRequest,
   type ObserveWithdrawalRequest,
+  type AttachFundingRecoveryTelemetryRequest,
   type EscrowDeployment,
   type WithdrawalIntent,
+  type RewardSettlementIntent,
 } from '@bug-bounty-escrow/shared';
 
 import { RepositoryBase, type DatabaseResult } from '../database/repository.base.js';
@@ -41,6 +45,32 @@ export interface ConfirmedEscrowRow {
   runtime_bytecode_checksum: `0x${string}` | null;
 }
 
+export interface EscrowWalletChallengeRow {
+  id: string;
+  program_id: string;
+  actor_id: string;
+  owner_wallet: `0x${string}`;
+  withdraw_recipient: `0x${string}`;
+  chain_id: 5_042_002;
+  nonce: `0x${string}`;
+  issued_at: string;
+  expires_at: string;
+  invalidated_at: string | null;
+  consumed_at: string | null;
+  deployment_id: string | null;
+}
+
+export interface FundingFeeAllocationRow {
+  network: FundingSource['network'];
+  amountBaseUnits: string;
+  components: {
+    network: FundingSource['network'];
+    type: FundingFeeComponentType;
+    token: 'USDC';
+    amountBaseUnits: string;
+  }[];
+}
+
 export interface FundingIntentRow {
   id: string;
   program_id: string;
@@ -49,13 +79,14 @@ export interface FundingIntentRow {
   route_mode: 'send' | 'bridge' | 'unified_balance';
   gross_amount_base_units: string;
   estimated_fee_reserve_base_units: string;
-  fee_allocations: { network: FundingSource['network']; amountBaseUnits: string }[];
+  fee_allocations: FundingFeeAllocationRow[];
   quote_quoted_at?: string | null;
   quote_expires_at?: string | null;
   sources: { network: FundingSource['network']; amountBaseUnits: string }[];
   destination_address: `0x${string}`;
   pre_balance_base_units: string;
   pre_total_funded_base_units: string;
+  funding_phase: FundingIntent['fundingPhase'];
   status: FundingIntent['status'];
   destination_transaction_hash: `0x${string}` | null;
   transfer_id: string | null;
@@ -68,6 +99,8 @@ export interface FundingIntentRow {
   updated_at: string;
   funding_operations?: SourceDepositOperationRow[];
   funding_confirmation_artifacts?: FundingConfirmationArtifactRow | null;
+  recovery_attempts_total?: number;
+  source_deposits_total?: number;
 }
 
 export interface FundingConfirmationArtifactRow {
@@ -107,6 +140,7 @@ export interface SourceDepositOperationRow {
   funding_intent_id?: string;
   attempt_no?: number;
   replaces_operation_id?: string | null;
+  idempotency_key?: string;
   operation_type?: 'deposit' | 'send' | 'bridge' | 'spend' | 'funding_sync';
   operation_id?: string | null;
   source_chain?: FundingNetworkId | null;
@@ -132,17 +166,36 @@ export interface SourceDepositOperationRow {
     | 'confirmed'
     | 'failed';
   failure_code?: string | null;
+  recovery_checked_at?: string | null;
+  recovery_transaction_hash?: `0x${string}` | null;
+  recovery_state?: 'pending' | 'success' | 'reverted' | null;
+  recovery_block_number?: string | null;
+  recovery_block_hash?: `0x${string}` | null;
+  unbound_transaction_hashes?: `0x${string}`[];
+  funding_operation_recovery_checks?: FundingOperationRecoveryCheckRow[];
   provider_state: 'pending' | 'success' | 'error' | null;
   retryable: boolean;
   submission_uncertain: boolean;
   steps: {
     name: string;
     state: 'pending' | 'success' | 'error';
+    network?: FundingNetworkId;
     transactionHash?: string;
     errorCode?: string;
   }[];
   created_at?: string;
   updated_at: string;
+}
+
+export interface FundingOperationRecoveryCheckRow {
+  funding_operation_id: string;
+  transaction_hash: `0x${string}`;
+  evidence_role: 'source' | 'destination';
+  network: FundingNetworkId;
+  state: 'pending' | 'success' | 'reverted';
+  block_number: string | null;
+  block_hash: `0x${string}` | null;
+  checked_at: string;
 }
 
 export interface EscrowDeploymentRow {
@@ -170,6 +223,8 @@ export interface WithdrawalIntentRow {
   id: string;
   program_id: string;
   escrow_contract_id: string;
+  replaces_intent_id: string | null;
+  replaced_by_intent_id: string | null;
   wallet_address: `0x${string}`;
   recipient_address: `0x${string}`;
   amount_base_units: string;
@@ -184,20 +239,168 @@ export interface WithdrawalIntentRow {
   escrow_contracts?: { contract_address: `0x${string}` | null } | null;
 }
 
+export interface RewardSettlementOperationRow {
+  id: string;
+  operation_type: 'approval' | 'payout';
+  attempt_no: number;
+  status: 'submission_uncertain' | 'provider_accepted' | 'submitted' | 'confirmed' | 'failed';
+  provider_idempotency_key: string | null;
+  circle_transaction_id: string | null;
+  transaction_hash: `0x${string}` | null;
+  event_log_index: number | null;
+  transfer_log_index: number | null;
+  block_number: string | null;
+  block_hash: `0x${string}` | null;
+  failure_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RewardSettlementIntentRow {
+  id: string;
+  report_id: string;
+  program_id: string;
+  escrow_contract_id: string;
+  owner_wallet: `0x${string}`;
+  report_key: `0x${string}`;
+  approved_content_hash: `0x${string}`;
+  recipient_address: `0x${string}`;
+  calculation_type: 'range' | 'flat' | 'percentage';
+  calculation_basis_base_units: string | null;
+  percentage_bps: number | null;
+  max_reward_cap_base_units: string | null;
+  amount_base_units: string;
+  amount: string | number;
+  status: RewardSettlementIntent['status'];
+  failure_code: string | null;
+  created_at: string;
+  updated_at: string;
+  escrow_contracts: {
+    contract_address: `0x${string}` | null;
+    deployment_block_number: string | null;
+  } | null;
+  reward_settlement_operations?: RewardSettlementOperationRow[];
+}
+
+export interface RewardSettlementContextRow {
+  id: string;
+  program_id: string;
+  content_hash: `0x${string}`;
+}
+
 function mapFundingIntent(row: FundingIntentRow): FundingIntent {
-  const recoveryOperation = [...(row.funding_operations ?? [])]
+  const mapRecoveryChecks = (operation: SourceDepositOperationRow) =>
+    [...(operation.funding_operation_recovery_checks ?? [])]
+      .sort(
+        (left, right) =>
+          left.checked_at.localeCompare(right.checked_at) ||
+          left.transaction_hash.localeCompare(right.transaction_hash) ||
+          left.evidence_role.localeCompare(right.evidence_role) ||
+          left.network.localeCompare(right.network),
+      )
+      .map((check) => ({
+        transactionHash: check.transaction_hash,
+        evidenceRole: check.evidence_role,
+        network: check.network,
+        state: check.state,
+        ...(check.block_number === null ? {} : { blockNumber: check.block_number }),
+        ...(check.block_hash === null ? {} : { blockHash: check.block_hash }),
+        checkedAt: check.checked_at,
+      }));
+  const recoveryOperations = [...(row.funding_operations ?? [])]
     .filter((operation) => operation.operation_type !== 'deposit')
-    .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0];
-  const recoverySteps = recoveryOperation?.steps.slice(0, 32) ?? [];
-  const sourceTransactionHashes = [
-    ...new Set(
-      recoverySteps.flatMap((step) =>
-        step.transactionHash !== undefined && /^0x[0-9a-fA-F]{64}$/.test(step.transactionHash)
-          ? [step.transactionHash]
-          : [],
-      ),
-    ),
-  ];
+    .sort((left, right) => {
+      const createdOrder = (left.created_at ?? left.updated_at).localeCompare(
+        right.created_at ?? right.updated_at,
+      );
+      if (createdOrder !== 0) return createdOrder;
+      const attemptOrder = (left.attempt_no ?? 1) - (right.attempt_no ?? 1);
+      return attemptOrder !== 0
+        ? attemptOrder
+        : (left.operation_type ?? '').localeCompare(right.operation_type ?? '') ||
+            (left.id ?? '').localeCompare(right.id ?? '');
+    });
+  // Recovery always follows the newest non-terminal linked attempt. Polling an older failed
+  // attempt updates its timestamp, but must never make it shadow a newer replacement.
+  const recoveryOperation =
+    [...recoveryOperations]
+      .filter((operation) => operation.status !== 'failed' && operation.status !== 'confirmed')
+      .sort((left, right) => {
+        const attemptOrder = (right.attempt_no ?? 1) - (left.attempt_no ?? 1);
+        return attemptOrder !== 0
+          ? attemptOrder
+          : (right.created_at ?? right.updated_at).localeCompare(
+              left.created_at ?? left.updated_at,
+            ) ||
+              (right.operation_type ?? '').localeCompare(left.operation_type ?? '') ||
+              (right.id ?? '').localeCompare(left.id ?? '');
+      })[0] ??
+    [...recoveryOperations].sort((left, right) => {
+      const attemptOrder = (right.attempt_no ?? 1) - (left.attempt_no ?? 1);
+      return attemptOrder !== 0
+        ? attemptOrder
+        : right.updated_at.localeCompare(left.updated_at) ||
+            (right.operation_type ?? '').localeCompare(left.operation_type ?? '') ||
+            (right.id ?? '').localeCompare(left.id ?? '');
+    })[0];
+  const mapRecoveryOperation = (operation: SourceDepositOperationRow) => {
+    const recoverySteps = operation.steps.slice(0, 32);
+    const destinationHash = operation.transaction_hash?.toLowerCase();
+    const sourceTransactionHashes = [
+      ...new Map(
+        recoverySteps.flatMap((step) =>
+          step.transactionHash !== undefined &&
+          /^0x[0-9a-fA-F]{64}$/.test(step.transactionHash) &&
+          step.transactionHash.toLowerCase() !== destinationHash
+            ? [[step.transactionHash.toLowerCase(), step.transactionHash] as const]
+            : [],
+        ),
+      ).values(),
+    ];
+    return {
+      operationRecordId: operation.id!,
+      operationType: operation.operation_type as 'send' | 'bridge' | 'spend' | 'funding_sync',
+      attemptNo: operation.attempt_no ?? 1,
+      status: operation.status!,
+      ...(operation.replaces_operation_id == null
+        ? {}
+        : { replacesOperationId: operation.replaces_operation_id }),
+      ...(operation.operation_id == null
+        ? {}
+        : { operationId: operation.operation_id.replace(/^client:/, '') }),
+      ...(operation.transaction_hash == null
+        ? {}
+        : { transactionHash: operation.transaction_hash }),
+      ...(operation.transfer_id == null ? {} : { transferId: operation.transfer_id }),
+      ...(operation.failure_code == null ? {} : { failureCode: operation.failure_code }),
+      ...(operation.provider_state === null ? {} : { providerState: operation.provider_state }),
+      ...(operation.recovery_checked_at == null
+        ? {}
+        : { recoveryCheckedAt: operation.recovery_checked_at }),
+      ...(operation.recovery_transaction_hash == null
+        ? {}
+        : { recoveryTransactionHash: operation.recovery_transaction_hash }),
+      ...(operation.recovery_state == null ? {} : { recoveryState: operation.recovery_state }),
+      ...(operation.recovery_block_number == null
+        ? {}
+        : { recoveryBlockNumber: operation.recovery_block_number }),
+      ...(operation.recovery_block_hash == null
+        ? {}
+        : { recoveryBlockHash: operation.recovery_block_hash }),
+      ...(mapRecoveryChecks(operation).length === 0
+        ? {}
+        : { recoveryChecks: mapRecoveryChecks(operation) }),
+      ...((operation.unbound_transaction_hashes?.length ?? 0) === 0
+        ? {}
+        : { unboundTransactionHashes: operation.unbound_transaction_hashes }),
+      retryable: operation.retryable,
+      submissionUncertain: operation.submission_uncertain,
+      sourceTransactionHashes,
+      steps: recoverySteps,
+      ...(operation.created_at === undefined ? {} : { createdAt: operation.created_at }),
+      updatedAt: operation.updated_at,
+    };
+  };
   return fundingIntentSchema.parse({
     id: row.id,
     programId: row.program_id,
@@ -208,6 +411,12 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
     feeAllocations: row.fee_allocations.map((allocation) => ({
       network: allocation.network,
       amount: formatUsdcBaseUnits(BigInt(allocation.amountBaseUnits)),
+      components: allocation.components.map((component) => ({
+        network: component.network,
+        type: component.type,
+        token: component.token,
+        amount: formatUsdcBaseUnits(BigInt(component.amountBaseUnits)),
+      })),
     })),
     ...(row.quote_quoted_at == null ? {} : { quoteQuotedAt: row.quote_quoted_at }),
     ...(row.quote_expires_at == null ? {} : { quoteExpiresAt: row.quote_expires_at }),
@@ -241,6 +450,22 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
         ...(operation.block_number === null ? {} : { blockNumber: operation.block_number }),
         ...(operation.block_hash === null ? {} : { blockHash: operation.block_hash }),
         ...(operation.failure_code === null ? {} : { failureCode: operation.failure_code }),
+        ...(operation.recovery_checked_at == null
+          ? {}
+          : { recoveryCheckedAt: operation.recovery_checked_at }),
+        ...(operation.recovery_transaction_hash == null
+          ? {}
+          : { recoveryTransactionHash: operation.recovery_transaction_hash }),
+        ...(operation.recovery_state == null ? {} : { recoveryState: operation.recovery_state }),
+        ...(operation.recovery_block_number == null
+          ? {}
+          : { recoveryBlockNumber: operation.recovery_block_number }),
+        ...(operation.recovery_block_hash == null
+          ? {}
+          : { recoveryBlockHash: operation.recovery_block_hash }),
+        ...(mapRecoveryChecks(operation).length === 0
+          ? {}
+          : { recoveryChecks: mapRecoveryChecks(operation) }),
         canAttach: true,
         canRetry:
           operation.status === 'failed' &&
@@ -248,6 +473,17 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
         createdAt: operation.created_at!,
         updatedAt: operation.updated_at,
       })),
+    ...(row.source_deposits_total === undefined
+      ? {}
+      : {
+          sourceDepositsTotal: row.source_deposits_total,
+          sourceDepositsTruncated:
+            row.source_deposits_total >
+            (row.funding_operations ?? []).filter(
+              (operation) => operation.operation_type === 'deposit',
+            ).length,
+        }),
+    fundingPhase: row.funding_phase,
     destinationChain: 'Arc_Testnet',
     recipientAddress: row.destination_address,
     recipientVerified: true,
@@ -268,29 +504,18 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
     ...(recoveryOperation === undefined
       ? {}
       : {
-          recovery: {
-            attemptNo: recoveryOperation.attempt_no ?? 1,
-            ...(recoveryOperation.replaces_operation_id == null
-              ? {}
-              : { replacesOperationId: recoveryOperation.replaces_operation_id }),
-            ...(recoveryOperation.operation_id == null
-              ? {}
-              : { operationId: recoveryOperation.operation_id.replace(/^client:/, '') }),
-            ...(recoveryOperation.transfer_id == null
-              ? {}
-              : { transferId: recoveryOperation.transfer_id }),
-            ...(recoveryOperation.failure_code == null
-              ? {}
-              : { failureCode: recoveryOperation.failure_code }),
-            ...(recoveryOperation.provider_state === null
-              ? {}
-              : { providerState: recoveryOperation.provider_state }),
-            retryable: recoveryOperation.retryable,
-            submissionUncertain: recoveryOperation.submission_uncertain,
-            sourceTransactionHashes,
-            steps: recoverySteps,
-          },
+          recovery: mapRecoveryOperation(recoveryOperation),
         }),
+    ...(recoveryOperations.length === 0
+      ? {}
+      : { recoveryAttempts: recoveryOperations.map(mapRecoveryOperation) }),
+    ...(row.recovery_attempts_total === undefined
+      ? {}
+      : {
+          recoveryAttemptsTotal: row.recovery_attempts_total,
+          recoveryAttemptsTruncated: row.recovery_attempts_total > recoveryOperations.length,
+        }),
+    expiresAt: row.expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -368,6 +593,10 @@ function mapWithdrawalIntent(row: WithdrawalIntentRow): WithdrawalIntent {
     walletAddress: row.wallet_address,
     amount: formatUsdcBaseUnits(BigInt(row.amount_base_units)),
     closeRequired: row.close_required,
+    ...(row.replaces_intent_id === null ? {} : { replacesIntentId: row.replaces_intent_id }),
+    ...(row.replaced_by_intent_id === null
+      ? {}
+      : { replacedByIntentId: row.replaced_by_intent_id }),
     status: row.status,
     ...(row.close_transaction_hash === null
       ? {}
@@ -376,6 +605,59 @@ function mapWithdrawalIntent(row: WithdrawalIntentRow): WithdrawalIntent {
       ? {}
       : { withdrawTransactionHash: row.withdraw_transaction_hash }),
     ...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function mapRewardSettlementIntent(row: RewardSettlementIntentRow): RewardSettlementIntent {
+  return rewardSettlementIntentSchema.parse({
+    id: row.id,
+    reportId: row.report_id,
+    programId: row.program_id,
+    escrowAddress: row.escrow_contracts?.contract_address,
+    ownerWallet: row.owner_wallet,
+    reportKey: row.report_key,
+    approvedContentHash: row.approved_content_hash,
+    recipientAddress: row.recipient_address,
+    calculationType: row.calculation_type,
+    ...(row.calculation_basis_base_units === null
+      ? {}
+      : {
+          calculationBasisAmount: formatUsdcBaseUnits(BigInt(row.calculation_basis_base_units)),
+        }),
+    ...(row.percentage_bps === null ? {} : { percentageBps: row.percentage_bps }),
+    ...(row.max_reward_cap_base_units === null
+      ? {}
+      : {
+          maxRewardCap: formatUsdcBaseUnits(BigInt(row.max_reward_cap_base_units)),
+        }),
+    amount: formatUsdcBaseUnits(BigInt(row.amount_base_units)),
+    status: row.status,
+    ...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
+    operations: [...(row.reward_settlement_operations ?? [])]
+      .sort((left, right) => left.attempt_no - right.attempt_no)
+      .map((operation) => ({
+        id: operation.id,
+        operationType: operation.operation_type,
+        attemptNo: operation.attempt_no,
+        status: operation.status,
+        ...(operation.circle_transaction_id === null
+          ? {}
+          : { circleTransactionId: operation.circle_transaction_id }),
+        ...(operation.transaction_hash === null
+          ? {}
+          : { transactionHash: operation.transaction_hash }),
+        ...(operation.event_log_index === null ? {} : { eventLogIndex: operation.event_log_index }),
+        ...(operation.transfer_log_index === null
+          ? {}
+          : { transferLogIndex: operation.transfer_log_index }),
+        ...(operation.block_number === null ? {} : { blockNumber: operation.block_number }),
+        ...(operation.block_hash === null ? {} : { blockHash: operation.block_hash }),
+        ...(operation.failure_code === null ? {} : { failureCode: operation.failure_code }),
+        createdAt: operation.created_at,
+        updatedAt: operation.updated_at,
+      })),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -409,6 +691,61 @@ export class EscrowRepository
       .maybeSingle();
     if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
     return (result.data as { deadline: string | null } | null)?.deadline ?? null;
+  }
+
+  public async getProgramStatus(
+    programId: string,
+  ): Promise<'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed' | null> {
+    const result = await this.client
+      .from('programs')
+      .select('status')
+      .eq('id', programId)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return (
+      (
+        result.data as {
+          status: 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed';
+        } | null
+      )?.status ?? null
+    );
+  }
+
+  public async createWalletChallenge(input: {
+    id: string;
+    actorId: string;
+    programId: string;
+    ownerWallet: string;
+    withdrawRecipient: string;
+    nonce: string;
+    issuedAt: string;
+    expiresAt: string;
+  }): Promise<EscrowWalletChallengeRow> {
+    const id = await this.executeAtomicRpc<string>('create_escrow_wallet_challenge_atomic', {
+      target_challenge_id: input.id,
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_owner_wallet: input.ownerWallet.toLowerCase(),
+      target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
+      target_nonce: input.nonce.toLowerCase(),
+      target_issued_at: input.issuedAt,
+      target_expires_at: input.expiresAt,
+    });
+    const row = await this.findWalletChallenge(id);
+    if (row === null) throw new Error('wallet_control_challenge_not_found_after_create');
+    return row;
+  }
+
+  public async findWalletChallenge(challengeId: string): Promise<EscrowWalletChallengeRow | null> {
+    const result = await this.client
+      .from('escrow_wallet_control_challenges')
+      .select(
+        'id,program_id,actor_id,owner_wallet,withdraw_recipient,chain_id,nonce,issued_at,expires_at,invalidated_at,consumed_at,deployment_id',
+      )
+      .eq('id', challengeId)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as EscrowWalletChallengeRow | null;
   }
 
   public async findConfirmedEscrow(programId: string): Promise<ConfirmedEscrowRow | null> {
@@ -448,6 +785,7 @@ export class EscrowRepository
   public async createDeploymentRecord(input: {
     actorId: string;
     programId: string;
+    walletChallengeId: string;
     programKey: string;
     ownerWallet: string;
     withdrawRecipient: string;
@@ -457,18 +795,22 @@ export class EscrowRepository
     immutableReferences: unknown;
     idempotencyKey: string;
   }): Promise<EscrowDeploymentRow> {
-    const id = await this.executeAtomicRpc<string>('create_escrow_deployment_atomic', {
-      actor_id: input.actorId,
-      target_program_id: input.programId,
-      target_program_key: input.programKey.toLowerCase(),
-      target_owner_wallet: input.ownerWallet.toLowerCase(),
-      target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
-      target_refund_unlock_at: input.refundUnlockAt,
-      target_artifact_checksum: input.artifactChecksum.toLowerCase(),
-      target_runtime_checksum: input.runtimeChecksum.toLowerCase(),
-      target_immutable_references: input.immutableReferences,
-      target_idempotency_key: input.idempotencyKey,
-    });
+    const id = await this.executeAtomicRpc<string>(
+      'create_escrow_deployment_with_wallet_proof_atomic',
+      {
+        actor_id: input.actorId,
+        target_program_id: input.programId,
+        target_wallet_challenge_id: input.walletChallengeId,
+        target_program_key: input.programKey.toLowerCase(),
+        target_owner_wallet: input.ownerWallet.toLowerCase(),
+        target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
+        target_refund_unlock_at: input.refundUnlockAt,
+        target_artifact_checksum: input.artifactChecksum.toLowerCase(),
+        target_runtime_checksum: input.runtimeChecksum.toLowerCase(),
+        target_immutable_references: input.immutableReferences,
+        target_idempotency_key: input.idempotencyKey,
+      },
+    );
     const row = await this.findDeploymentById(id);
     if (row === null) throw new Error('escrow_deployment_not_found_after_create');
     return row;
@@ -565,7 +907,7 @@ export class EscrowRepository
     walletAddress: string;
     grossBaseUnits: bigint;
     feeReserveBaseUnits: bigint;
-    feeAllocations: { network: FundingSource['network']; amountBaseUnits: string }[];
+    feeAllocations: FundingFeeAllocationRow[];
     sources: { network: FundingSource['network']; amountBaseUnits: string }[];
     preBalanceBaseUnits: bigint;
     preTotalFundedBaseUnits: bigint;
@@ -596,7 +938,7 @@ export class EscrowRepository
   public async findActiveFundingIntent(programId: string): Promise<FundingIntentRow | null> {
     const result = await this.client
       .from('funding_intents')
-      .select('*,funding_operations(*),funding_confirmation_artifacts(*)')
+      .select('*,funding_confirmation_artifacts(*)')
       .eq('program_id', programId)
       .in('status', [
         'ready_to_sign',
@@ -610,7 +952,8 @@ export class EscrowRepository
       ])
       .maybeSingle();
     if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
-    return result.data as FundingIntentRow | null;
+    const row = result.data as FundingIntentRow | null;
+    return row === null ? null : this.attachBoundedFundingOperations(row);
   }
 
   public async findFundingIntentRow(
@@ -619,12 +962,157 @@ export class EscrowRepository
   ): Promise<FundingIntentRow | null> {
     const result = await this.client
       .from('funding_intents')
-      .select('*,funding_operations(*),funding_confirmation_artifacts(*)')
+      .select('*,funding_confirmation_artifacts(*)')
       .eq('program_id', programId)
       .eq('id', intentId)
       .maybeSingle();
     if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
-    return result.data as FundingIntentRow | null;
+    const row = result.data as FundingIntentRow | null;
+    return row === null ? null : this.attachBoundedFundingOperations(row);
+  }
+
+  public async listFundingOperationHistory(input: {
+    intentId: string;
+    page: number;
+    limit: number;
+    kind: 'all' | 'source_deposit' | 'recovery';
+  }): Promise<{ rows: SourceDepositOperationRow[]; total: number }> {
+    let query = this.client
+      .from('funding_operations')
+      .select('*,funding_operation_recovery_checks(*)', { count: 'exact' })
+      .eq('funding_intent_id', input.intentId);
+    if (input.kind === 'source_deposit') query = query.eq('operation_type', 'deposit');
+    if (input.kind === 'recovery') query = query.neq('operation_type', 'deposit');
+    const offset = (input.page - 1) * input.limit;
+    const result = await query
+      .order('created_at', { ascending: false })
+      .order('attempt_no', { ascending: false })
+      .order('operation_type', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + input.limit - 1);
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return {
+      rows: (result.data ?? []) as SourceDepositOperationRow[],
+      total: result.count ?? result.data?.length ?? 0,
+    };
+  }
+
+  public toFundingHistoryItem(
+    intent: FundingIntentRow,
+    operation: SourceDepositOperationRow,
+  ):
+    | { kind: 'source_deposit'; data: FundingIntent['sourceDeposits'][number] }
+    | { kind: 'recovery'; data: NonNullable<FundingIntent['recovery']> } {
+    const historyIntent = { ...intent };
+    delete historyIntent.recovery_attempts_total;
+    delete historyIntent.source_deposits_total;
+    const mapped = mapFundingIntent({
+      ...historyIntent,
+      funding_operations: [operation],
+    });
+    if (operation.operation_type === 'deposit') {
+      const deposit = mapped.sourceDeposits[0];
+      if (deposit === undefined) throw new Error('funding_history_source_projection_failed');
+      return { kind: 'source_deposit', data: deposit };
+    }
+    const recovery = mapped.recoveryAttempts?.[0];
+    if (recovery === undefined) throw new Error('funding_history_recovery_projection_failed');
+    return { kind: 'recovery', data: recovery };
+  }
+
+  private async attachBoundedFundingOperations(row: FundingIntentRow): Promise<FundingIntentRow> {
+    const [deposits, activeDeposits, recovery, activeRecovery] = await Promise.all([
+      this.client
+        .from('funding_operations')
+        .select('*', { count: 'exact' })
+        .eq('funding_intent_id', row.id)
+        .eq('operation_type', 'deposit')
+        .order('created_at', { ascending: false })
+        .order('attempt_no', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(64),
+      this.client
+        .from('funding_operations')
+        .select('*')
+        .eq('funding_intent_id', row.id)
+        .eq('operation_type', 'deposit')
+        .not('status', 'in', '(failed,confirmed)')
+        .order('created_at', { ascending: false })
+        .order('attempt_no', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(8),
+      this.client
+        .from('funding_operations')
+        .select('*', { count: 'exact' })
+        .eq('funding_intent_id', row.id)
+        .neq('operation_type', 'deposit')
+        .order('created_at', { ascending: false })
+        .order('attempt_no', { ascending: false })
+        .order('operation_type', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(64),
+      this.client
+        .from('funding_operations')
+        .select('*')
+        .eq('funding_intent_id', row.id)
+        .neq('operation_type', 'deposit')
+        .not('status', 'in', '(failed,confirmed)')
+        .order('created_at', { ascending: false })
+        .order('attempt_no', { ascending: false })
+        .order('operation_type', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(8),
+    ]);
+    if (deposits.error !== null) this.unwrapResult(deposits as DatabaseResult<unknown>);
+    if (activeDeposits.error !== null) this.unwrapResult(activeDeposits as DatabaseResult<unknown>);
+    if (recovery.error !== null) this.unwrapResult(recovery as DatabaseResult<unknown>);
+    if (activeRecovery.error !== null) this.unwrapResult(activeRecovery as DatabaseResult<unknown>);
+    const depositMap = new Map<string, SourceDepositOperationRow>();
+    for (const operation of [
+      ...((activeDeposits.data ?? []) as SourceDepositOperationRow[]),
+      ...((deposits.data ?? []) as SourceDepositOperationRow[]),
+    ]) {
+      if (operation.id !== undefined) depositMap.set(operation.id, operation);
+    }
+    const recoveryMap = new Map<string, SourceDepositOperationRow>();
+    for (const operation of [
+      ...((activeRecovery.data ?? []) as SourceDepositOperationRow[]),
+      ...((recovery.data ?? []) as SourceDepositOperationRow[]),
+    ]) {
+      if (operation.id !== undefined && (recoveryMap.has(operation.id) || recoveryMap.size < 64)) {
+        recoveryMap.set(operation.id, operation);
+      }
+    }
+    const visibleOperations = [...depositMap.values(), ...recoveryMap.values()];
+    const visibleOperationIds = visibleOperations.flatMap((operation) =>
+      operation.id === undefined ? [] : [operation.id],
+    );
+    if (visibleOperationIds.length > 0) {
+      const checks = await this.client
+        .from('funding_operation_recovery_checks')
+        .select('*')
+        .in('funding_operation_id', visibleOperationIds)
+        .order('checked_at', { ascending: true })
+        .order('transaction_hash', { ascending: true })
+        .limit(4_356);
+      if (checks.error !== null) this.unwrapResult(checks as DatabaseResult<unknown>);
+      const byOperation = new Map<string, FundingOperationRecoveryCheckRow[]>();
+      for (const check of (checks.data ?? []) as FundingOperationRecoveryCheckRow[]) {
+        const values = byOperation.get(check.funding_operation_id) ?? [];
+        values.push(check);
+        byOperation.set(check.funding_operation_id, values);
+      }
+      for (const operation of visibleOperations) {
+        operation.funding_operation_recovery_checks =
+          operation.id === undefined ? [] : (byOperation.get(operation.id) ?? []);
+      }
+    }
+    return {
+      ...row,
+      funding_operations: visibleOperations,
+      source_deposits_total: deposits.count ?? deposits.data?.length ?? 0,
+      recovery_attempts_total: recovery.count ?? recovery.data?.length ?? 0,
+    };
   }
 
   public toFundingIntent(row: FundingIntentRow): FundingIntent {
@@ -780,7 +1268,7 @@ export class EscrowRepository
     programId: string;
     intentId: string;
     feeReserveBaseUnits: bigint;
-    feeAllocations: { network: FundingSource['network']; amountBaseUnits: string }[];
+    feeAllocations: FundingFeeAllocationRow[];
     quotedAt: string;
     expiresAt: string;
   }): Promise<void> {
@@ -792,6 +1280,157 @@ export class EscrowRepository
       refreshed_fee_allocations: input.feeAllocations,
       refreshed_quoted_at: input.quotedAt,
       refreshed_expires_at: input.expiresAt,
+    });
+  }
+
+  public async prepareFundingDestination(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    quoteQuotedAt: string;
+    feeAllocations: FundingFeeAllocationRow[];
+  }): Promise<void> {
+    await this.executeAtomicRpc('prepare_funding_destination_checked_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      expected_quote_quoted_at: input.quoteQuotedAt,
+      expected_fee_allocations: input.feeAllocations,
+    });
+  }
+
+  public reopenFundingSourceCollection(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    quoteQuotedAt: string;
+    feeAllocations: FundingFeeAllocationRow[];
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('reopen_funding_source_collection_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      expected_quote_quoted_at: input.quoteQuotedAt,
+      expected_fee_allocations: input.feeAllocations,
+    });
+  }
+
+  public claimFundingDestinationAttempt(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    idempotencyKey: string;
+  }): Promise<string> {
+    return this.executeAtomicRpc<string>('claim_funding_destination_attempt_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      request_idempotency_key: input.idempotencyKey,
+    });
+  }
+
+  public armFundingDestinationAttempt(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    claimToken: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('arm_funding_destination_attempt_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      claim_token: input.claimToken,
+    });
+  }
+
+  public armBridgeDeliveryRetry(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    operationId: string;
+    claimToken: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('arm_bridge_delivery_retry_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_operation_id: input.operationId,
+      claim_token: input.claimToken,
+    });
+  }
+
+  public cancelFundingIntent(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('cancel_funding_intent_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+    });
+  }
+
+  public releaseRejectedSendAttempt(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    operationId: string;
+    claimToken: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('release_rejected_send_attempt_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_operation_id: input.operationId,
+      claim_token: input.claimToken,
+    });
+  }
+
+  public attachFundingDestination(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    operationId: string;
+    transactionHash: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('attach_funding_destination_hash_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_operation_id: input.operationId,
+      attached_transaction_hash: input.transactionHash.toLowerCase(),
+    });
+  }
+
+  public attachFundingRecoveryTelemetry(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    telemetry: AttachFundingRecoveryTelemetryRequest;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('attach_funding_recovery_telemetry_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_operation_id: input.telemetry.operationRecordId,
+      observed_provider_state: input.telemetry.providerState,
+      observed_retryable: input.telemetry.retryable,
+      observed_source_hashes: input.telemetry.sourceTransactionHashes,
+      observed_unbound_hashes: input.telemetry.unboundTransactionHashes,
+      observed_steps: input.telemetry.steps,
+    });
+  }
+
+  public createFundingDestinationReplacement(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+  }): Promise<string> {
+    return this.executeAtomicRpc<string>('create_funding_destination_replacement_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
     });
   }
 
@@ -832,6 +1471,20 @@ export class EscrowRepository
     return result.data as SourceDepositOperationRow | null;
   }
 
+  public async findFundingOperation(
+    intentId: string,
+    operationId: string,
+  ): Promise<SourceDepositOperationRow | null> {
+    const result = await this.client
+      .from('funding_operations')
+      .select('*')
+      .eq('id', operationId)
+      .eq('funding_intent_id', intentId)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as SourceDepositOperationRow | null;
+  }
+
   public async observeSourceDeposit(input: {
     actorId: string;
     programId: string;
@@ -839,14 +1492,47 @@ export class EscrowRepository
     depositId: string;
     observation: ObserveSourceDepositRequest;
   }): Promise<void> {
-    await this.executeAtomicRpc('observe_source_deposit_atomic', {
+    await this.executeAtomicRpc('observe_claimed_source_deposit_atomic', {
       actor_id: input.actorId,
       target_program_id: input.programId,
       target_intent_id: input.intentId,
       target_deposit_id: input.depositId,
+      claim_token: input.observation.claimToken,
       observed_outcome: input.observation.outcome,
       observed_transaction_hash: input.observation.transactionHash?.toLowerCase() ?? null,
       observed_failure_code: null,
+    });
+  }
+
+  public async attachSourceDeposit(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    depositId: string;
+    transactionHash: string;
+  }): Promise<void> {
+    await this.executeAtomicRpc('attach_source_deposit_hash_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_deposit_id: input.depositId,
+      attached_transaction_hash: input.transactionHash.toLowerCase(),
+    });
+  }
+
+  public armSourceDeposit(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    depositId: string;
+    claimToken: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('arm_source_deposit_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_deposit_id: input.depositId,
+      claim_token: input.claimToken,
     });
   }
 
@@ -922,19 +1608,47 @@ export class EscrowRepository
   }
 
   public async observeFundingOperation(
+    actorId: string,
+    programId: string,
     intentId: string,
     input: ObserveFundingOperationRequest,
   ): Promise<void> {
-    await this.executeAtomicRpc('observe_funding_operation_atomic', {
+    await this.executeAtomicRpc('observe_claimed_funding_destination_atomic', {
+      actor_id: actorId,
+      target_program_id: programId,
       target_intent_id: intentId,
-      observed_operation_id: input.operationId ?? null,
+      target_operation_id: input.operationRecordId,
+      claim_token: input.claimToken,
+      observed_outcome: input.outcome,
+      observed_provider_operation_id: input.operationId ?? null,
       observed_destination_hash: input.destinationTransactionHash?.toLowerCase() ?? null,
       observed_transfer_id: input.transferId ?? null,
       observed_source_hashes: input.sourceTransactionHashes ?? [],
-      observed_provider_state: input.providerState ?? null,
+      observed_provider_state: input.providerState ?? 'pending',
       observed_retryable: input.retryable ?? false,
-      observed_submission_uncertain: input.submissionUncertain ?? false,
       observed_steps: input.steps ?? [],
+    });
+  }
+
+  public recordFundingRecoveryPoll(input: {
+    actorId: string;
+    programId: string;
+    intentId: string;
+    operationId: string;
+    transactionHash: string;
+    state: 'pending' | 'success' | 'reverted';
+    blockNumber?: bigint;
+    blockHash?: string;
+  }): Promise<boolean> {
+    return this.executeAtomicRpc<boolean>('record_funding_recovery_poll_atomic', {
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_intent_id: input.intentId,
+      target_operation_id: input.operationId,
+      checked_transaction_hash: input.transactionHash.toLowerCase(),
+      checked_state: input.state,
+      checked_block_number: input.blockNumber?.toString() ?? null,
+      checked_block_hash: input.blockHash?.toLowerCase() ?? null,
     });
   }
 
@@ -1049,6 +1763,34 @@ export class EscrowRepository
     });
     const row = await this.findWithdrawalIntentRow(input.programId, intentId);
     if (row === null) throw new Error('withdrawal_intent_not_found_after_create');
+    return row;
+  }
+
+  public async createWithdrawalReplacement(input: {
+    actorId: string;
+    programId: string;
+    failedIntentId: string;
+    idempotencyKey: string;
+    walletAddress: string;
+    amountBaseUnits: bigint;
+    preTotalWithdrawnBaseUnits: bigint;
+    escrowAlreadyClosed: boolean;
+  }): Promise<WithdrawalIntentRow> {
+    const intentId = await this.executeAtomicRpc<string>(
+      'create_withdrawal_replacement_intent_atomic',
+      {
+        actor_id: input.actorId,
+        target_program_id: input.programId,
+        target_failed_intent_id: input.failedIntentId,
+        request_idempotency_key: input.idempotencyKey,
+        source_wallet: input.walletAddress.toLowerCase(),
+        expected_amount_base_units: input.amountBaseUnits.toString(),
+        escrow_pre_total_withdrawn_base_units: input.preTotalWithdrawnBaseUnits.toString(),
+        escrow_already_closed: input.escrowAlreadyClosed,
+      },
+    );
+    const row = await this.findWithdrawalIntentRow(input.programId, intentId);
+    if (row === null) throw new Error('withdrawal_replacement_not_found_after_create');
     return row;
   }
 
@@ -1175,6 +1917,199 @@ export class EscrowRepository
       verified_amount_base_units: input.amountBaseUnits.toString(),
       verified_block_number: input.blockNumber.toString(),
       verified_block_hash: input.blockHash.toLowerCase(),
+    });
+  }
+
+  public async findRewardSettlementContext(
+    reportId: string,
+  ): Promise<RewardSettlementContextRow | null> {
+    const result = await this.client
+      .from('reports')
+      .select('id,program_id,content_hash')
+      .eq('id', reportId)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as RewardSettlementContextRow | null;
+  }
+
+  public async createRewardSettlementIntent(input: {
+    actorId: string;
+    reportId: string;
+    amount?: string;
+    calculationBasisAmount?: string;
+    reportKey: string;
+    contentHash: string;
+    ownerWallet: string;
+    idempotencyKey: string;
+  }): Promise<RewardSettlementIntentRow> {
+    const id = await this.executeAtomicRpc<string>('create_reward_settlement_intent_atomic', {
+      actor_id: input.actorId,
+      target_report_id: input.reportId,
+      reward_amount: input.amount ?? null,
+      calculation_basis_amount: input.calculationBasisAmount ?? null,
+      target_report_key: input.reportKey.toLowerCase(),
+      target_content_hash: input.contentHash.toLowerCase(),
+      target_owner_wallet: input.ownerWallet.toLowerCase(),
+      request_idempotency_key: input.idempotencyKey,
+    });
+    const row = await this.findRewardSettlementIntentById(id);
+    if (row === null) throw new Error('reward_settlement_not_found_after_create');
+    return row;
+  }
+
+  public async findRewardSettlementIntentByReport(
+    reportId: string,
+  ): Promise<RewardSettlementIntentRow | null> {
+    const result = await this.client
+      .from('reward_settlement_intents')
+      .select(
+        '*,escrow_contracts(contract_address,deployment_block_number),reward_settlement_operations(*)',
+      )
+      .eq('report_id', reportId)
+      .neq('status', 'failed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as RewardSettlementIntentRow | null;
+  }
+
+  public async findRewardSettlementIntentById(
+    intentId: string,
+  ): Promise<RewardSettlementIntentRow | null> {
+    const result = await this.client
+      .from('reward_settlement_intents')
+      .select(
+        '*,escrow_contracts(contract_address,deployment_block_number),reward_settlement_operations(*)',
+      )
+      .eq('id', intentId)
+      .maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as RewardSettlementIntentRow | null;
+  }
+
+  public toRewardSettlementIntent(row: RewardSettlementIntentRow): RewardSettlementIntent {
+    return mapRewardSettlementIntent(row);
+  }
+
+  public async observeRewardApproval(input: {
+    actorId: string;
+    intentId: string;
+    outcome: 'submitted' | 'submission_uncertain';
+    transactionHash?: string;
+  }): Promise<void> {
+    await this.executeAtomicRpc('observe_reward_approval_submission_atomic', {
+      actor_id: input.actorId,
+      target_intent_id: input.intentId,
+      submission_outcome: input.outcome,
+      submitted_transaction_hash: input.transactionHash?.toLowerCase() ?? null,
+    });
+  }
+
+  public async confirmRewardApproval(input: {
+    intentId: string;
+    transactionHash: string;
+    eventLogIndex: number;
+    blockNumber: bigint;
+    blockHash: string;
+  }): Promise<void> {
+    await this.executeAtomicRpc('confirm_reward_approval_atomic', {
+      target_intent_id: input.intentId,
+      submitted_transaction_hash: input.transactionHash.toLowerCase(),
+      reward_event_log_index: input.eventLogIndex,
+      settled_block_number: input.blockNumber.toString(),
+      settled_block_hash: input.blockHash.toLowerCase(),
+    });
+  }
+
+  public async prepareRewardPayoutRelay(intentId: string, idempotencyKey: string): Promise<void> {
+    await this.executeAtomicRpc('prepare_reward_payout_relay_atomic', {
+      target_intent_id: intentId,
+      target_provider_idempotency_key: idempotencyKey,
+    });
+  }
+
+  public async acceptRewardPayoutRelay(
+    intentId: string,
+    idempotencyKey: string,
+    circleTransactionId: string,
+  ): Promise<void> {
+    await this.executeAtomicRpc('accept_reward_payout_relay_atomic', {
+      target_intent_id: intentId,
+      target_provider_idempotency_key: idempotencyKey,
+      target_circle_transaction_id: circleTransactionId,
+    });
+  }
+
+  public async attachRewardPayoutHash(
+    intentId: string,
+    circleTransactionId: string,
+    transactionHash: string,
+  ): Promise<void> {
+    await this.executeAtomicRpc('attach_reward_payout_hash_atomic', {
+      target_intent_id: intentId,
+      target_circle_transaction_id: circleTransactionId,
+      submitted_transaction_hash: transactionHash.toLowerCase(),
+    });
+  }
+
+  public async observeExternalRewardPayout(
+    intentId: string,
+    transactionHash: string,
+  ): Promise<void> {
+    await this.executeAtomicRpc('observe_external_reward_payout_atomic', {
+      target_intent_id: intentId,
+      submitted_transaction_hash: transactionHash.toLowerCase(),
+    });
+  }
+
+  public async confirmRewardPayout(input: {
+    intentId: string;
+    transactionHash: string;
+    eventLogIndex: number;
+    transferLogIndex: number;
+    blockNumber: bigint;
+    blockHash: string;
+    accounting: {
+      totalPaidBaseUnits: bigint;
+      totalApprovedOutstandingBaseUnits: bigint;
+      totalFundedBaseUnits: bigint;
+      totalWithdrawnBaseUnits: bigint;
+      escrowBalanceBaseUnits: bigint;
+    };
+  }): Promise<void> {
+    await this.executeAtomicRpc('confirm_reward_payout_with_accounting_atomic', {
+      target_intent_id: input.intentId,
+      submitted_transaction_hash: input.transactionHash.toLowerCase(),
+      reward_event_log_index: input.eventLogIndex,
+      usdc_transfer_log_index: input.transferLogIndex,
+      settled_block_number: input.blockNumber.toString(),
+      settled_block_hash: input.blockHash.toLowerCase(),
+      post_total_paid_base_units: input.accounting.totalPaidBaseUnits.toString(),
+      post_total_approved_outstanding_base_units:
+        input.accounting.totalApprovedOutstandingBaseUnits.toString(),
+      post_total_funded_base_units: input.accounting.totalFundedBaseUnits.toString(),
+      post_total_withdrawn_base_units: input.accounting.totalWithdrawnBaseUnits.toString(),
+      post_escrow_balance_base_units: input.accounting.escrowBalanceBaseUnits.toString(),
+    });
+  }
+
+  public async failRewardSettlementOperation(
+    intentId: string,
+    operationType: 'approval' | 'payout',
+    failureCode: string,
+  ): Promise<void> {
+    await this.executeAtomicRpc('fail_reward_settlement_operation_atomic', {
+      target_intent_id: intentId,
+      target_operation_type: operationType,
+      target_failure_code: failureCode,
+    });
+  }
+
+  public async cancelRewardSettlementIntent(actorId: string, intentId: string): Promise<void> {
+    await this.executeAtomicRpc('cancel_reward_settlement_intent_atomic', {
+      actor_id: actorId,
+      target_intent_id: intentId,
     });
   }
 }

@@ -8,13 +8,7 @@ import {
   type FundingNetworkId,
   type FundingRouteMode,
 } from '@bug-bounty-escrow/shared';
-import {
-  createPublicClient,
-  decodeEventLog,
-  defineChain,
-  http,
-  type Hex,
-} from 'viem';
+import { createPublicClient, decodeEventLog, defineChain, http, type Hex } from 'viem';
 
 import {
   EscrowProviderError,
@@ -26,6 +20,8 @@ import {
   type VerifiedSync,
   type VerifiedWithdrawal,
   type VerifiedLateFundingEvent,
+  type VerifiedRewardApproval,
+  type VerifiedRewardPayout,
   type VerifiedSourceDeposit,
 } from './escrow-gateways.js';
 
@@ -117,6 +113,25 @@ const ESCROW_ABI = [
   },
   {
     type: 'function',
+    name: 'totalPaid',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'rewards',
+    stateMutability: 'view',
+    inputs: [{ name: 'reportKey', type: 'bytes32' }],
+    outputs: [
+      { name: 'approvedContentHash', type: 'bytes32' },
+      { name: 'researcher', type: 'address' },
+      { name: 'amount', type: 'uint128' },
+      { name: 'status', type: 'uint8' },
+    ],
+  },
+  {
+    type: 'function',
     name: 'totalApprovedOutstanding',
     stateMutability: 'view',
     inputs: [],
@@ -149,6 +164,27 @@ const ESCROW_ABI = [
       { name: 'actor', type: 'address', indexed: true },
       { name: 'newlyObserved', type: 'uint256', indexed: false },
       { name: 'totalFunded', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'RewardApproved',
+    anonymous: false,
+    inputs: [
+      { name: 'reportKey', type: 'bytes32', indexed: true },
+      { name: 'approvedContentHash', type: 'bytes32', indexed: true },
+      { name: 'researcher', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'RewardPaid',
+    anonymous: false,
+    inputs: [
+      { name: 'reportKey', type: 'bytes32', indexed: true },
+      { name: 'researcher', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
     ],
   },
   {
@@ -195,6 +231,20 @@ interface ArcRpcClient {
 
 function equalHex(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+function isTransactionReceiptMissing(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 6 && current instanceof Error; depth += 1) {
+    if (
+      current.name === 'TransactionReceiptNotFoundError' ||
+      /transaction receipt.*(?:not found|could not be found)/i.test(current.message)
+    ) {
+      return true;
+    }
+    current = (current as Error & { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function normalizeRuntimeBytecode(artifact: EscrowArtifact, deployedBytecode: Hex): Buffer {
@@ -318,21 +368,61 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
     }
     if (!response.ok) throw new EscrowProviderError('gateway_balance_unavailable', true);
     const body = (await response.json()) as unknown;
-    if (typeof body !== 'object' || body === null || !('balances' in body) || !Array.isArray(body.balances)) {
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      !('balances' in body) ||
+      !Array.isArray(body.balances)
+    ) {
       throw new EscrowProviderError('gateway_balance_response_invalid', true);
     }
-    const matching = body.balances.filter((entry): entry is { domain: number; depositor: string; balance: string } =>
-      typeof entry === 'object' && entry !== null &&
-      (entry as { domain?: unknown }).domain === expected.gatewayDomain &&
-      typeof (entry as { depositor?: unknown }).depositor === 'string' &&
-      equalHex((entry as { depositor: string }).depositor, wallet) &&
-      typeof (entry as { balance?: unknown }).balance === 'string',
+    const matching = body.balances.filter(
+      (entry): entry is { domain: number; depositor: string; balance: string } =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        (entry as { domain?: unknown }).domain === expected.gatewayDomain &&
+        typeof (entry as { depositor?: unknown }).depositor === 'string' &&
+        equalHex((entry as { depositor: string }).depositor, wallet) &&
+        typeof (entry as { balance?: unknown }).balance === 'string',
     );
-    if (matching.length > 1) throw new EscrowProviderError('gateway_balance_response_ambiguous', true);
+    if (matching.length > 1)
+      throw new EscrowProviderError('gateway_balance_response_ambiguous', true);
     if (matching.length === 0) return 0n;
     const balance = parseUsdcBaseUnits(matching[0]!.balance);
-    if (balance === undefined) throw new EscrowProviderError('gateway_balance_response_invalid', true);
+    if (balance === undefined)
+      throw new EscrowProviderError('gateway_balance_response_invalid', true);
     return balance;
+  }
+
+  public async getTransactionRecoveryEvidence(input: {
+    network: FundingNetworkId;
+    transactionHash: `0x${string}`;
+  }): Promise<
+    | { state: 'pending' }
+    | {
+        state: 'success' | 'reverted';
+        blockNumber: bigint;
+        blockHash: `0x${string}`;
+      }
+  > {
+    const expected = FUNDING_NETWORK_CONFIG[input.network];
+    const client = this.sourceClients[input.network];
+    if ((await client.getChainId()) !== expected.chainId) {
+      throw new EscrowProviderError('funding_recovery_chain_mismatch', false);
+    }
+    let receipt: RpcReceipt;
+    try {
+      receipt = await client.getTransactionReceipt({ hash: input.transactionHash });
+    } catch (error) {
+      if (isTransactionReceiptMissing(error)) return { state: 'pending' };
+      throw new EscrowProviderError('funding_recovery_rpc_unavailable', true);
+    }
+    await this.assertCommittedReceipt(receipt, client, 'funding_recovery');
+    return {
+      state: receipt.status,
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+    };
   }
 
   public async verifySourceDeposit(input: {
@@ -357,20 +447,40 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
       if (log.logIndex === null) continue;
       if (equalHex(log.address, GATEWAY_WALLET)) {
         try {
-          const decoded = decodeEventLog({ abi: GATEWAY_ABI, eventName: 'Deposited', data: log.data, topics: [...log.topics] });
-          if (equalHex(decoded.args.token, expected.tokenAddress) &&
-              equalHex(decoded.args.depositor, input.walletAddress) &&
-              equalHex(decoded.args.sender, input.walletAddress) &&
-              decoded.args.value === input.amountBaseUnits) gatewayLogs.push(log.logIndex);
-        } catch { /* Ignore unrelated Gateway logs. */ }
+          const decoded = decodeEventLog({
+            abi: GATEWAY_ABI,
+            eventName: 'Deposited',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          if (
+            equalHex(decoded.args.token, expected.tokenAddress) &&
+            equalHex(decoded.args.depositor, input.walletAddress) &&
+            equalHex(decoded.args.sender, input.walletAddress) &&
+            decoded.args.value === input.amountBaseUnits
+          )
+            gatewayLogs.push(log.logIndex);
+        } catch {
+          /* Ignore unrelated Gateway logs. */
+        }
       }
       if (equalHex(log.address, expected.tokenAddress)) {
         try {
-          const decoded = decodeEventLog({ abi: ERC20_ABI, eventName: 'Transfer', data: log.data, topics: [...log.topics] });
-          if (equalHex(decoded.args.from, input.walletAddress) &&
-              equalHex(decoded.args.to, GATEWAY_WALLET) &&
-              decoded.args.value === input.amountBaseUnits) transferLogs.push(log.logIndex);
-        } catch { /* Ignore unrelated token logs. */ }
+          const decoded = decodeEventLog({
+            abi: ERC20_ABI,
+            eventName: 'Transfer',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          if (
+            equalHex(decoded.args.from, input.walletAddress) &&
+            equalHex(decoded.args.to, GATEWAY_WALLET) &&
+            decoded.args.value === input.amountBaseUnits
+          )
+            transferLogs.push(log.logIndex);
+        } catch {
+          /* Ignore unrelated token logs. */
+        }
       }
     }
     if (gatewayLogs.length !== 1 || transferLogs.length !== 1) {
@@ -497,8 +607,7 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
           data: log.data,
           topics: [...log.topics],
         });
-        const expectedFrom =
-          input.routeMode === 'send' ? input.walletAddress : ZERO_ADDRESS;
+        const expectedFrom = input.routeMode === 'send' ? input.walletAddress : ZERO_ADDRESS;
         if (
           equalHex(decoded.args.from, expectedFrom) &&
           equalHex(decoded.args.to, input.escrowAddress)
@@ -574,9 +683,283 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
     };
   }
 
-  public async getWithdrawalState(
-    address: `0x${string}`,
-  ): Promise<EscrowWithdrawalState> {
+  public async verifyRewardApproval(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    transactionHash: `0x${string}`;
+  }): Promise<VerifiedRewardApproval> {
+    await this.assertArcChain();
+    const receipt = await this.client.getTransactionReceipt({ hash: input.transactionHash });
+    await this.assertCommittedReceipt(receipt);
+    if (receipt.status !== 'success') {
+      throw new EscrowProviderError('reward_approval_reverted', false);
+    }
+    const events: number[] = [];
+    for (const log of receipt.logs) {
+      if (!equalHex(log.address, input.escrowAddress) || log.logIndex === null) continue;
+      try {
+        const decoded = decodeEventLog({
+          abi: ESCROW_ABI,
+          eventName: 'RewardApproved',
+          data: log.data,
+          topics: [...log.topics],
+        });
+        if (
+          equalHex(decoded.args.reportKey, input.reportKey) &&
+          equalHex(decoded.args.approvedContentHash, input.approvedContentHash) &&
+          equalHex(decoded.args.researcher, input.recipientAddress) &&
+          decoded.args.amount === input.amountBaseUnits
+        ) {
+          events.push(log.logIndex);
+        }
+      } catch {
+        // Ignore unrelated escrow logs.
+      }
+    }
+    if (events.length !== 1) {
+      throw new EscrowProviderError('reward_approval_event_mismatch', false);
+    }
+    const reward = await this.client.readContract({
+      address: input.escrowAddress,
+      abi: ESCROW_ABI,
+      functionName: 'rewards',
+      args: [input.reportKey],
+    });
+    if (
+      !Array.isArray(reward) ||
+      reward.length !== 4 ||
+      typeof reward[0] !== 'string' ||
+      typeof reward[1] !== 'string' ||
+      typeof reward[2] !== 'bigint' ||
+      (reward[3] !== 1 && reward[3] !== 2 && reward[3] !== 1n && reward[3] !== 2n) ||
+      !equalHex(reward[0], input.approvedContentHash) ||
+      !equalHex(reward[1], input.recipientAddress) ||
+      reward[2] !== input.amountBaseUnits
+    ) {
+      throw new EscrowProviderError('reward_approval_state_mismatch', false);
+    }
+    return {
+      transactionHash: input.transactionHash,
+      eventLogIndex: events[0]!,
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+    };
+  }
+
+  public async findRewardApproval(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    fromBlock: bigint;
+  }): Promise<VerifiedRewardApproval | null> {
+    await this.assertArcChain();
+    const latestBlock = await this.client.getBlockNumber();
+    if (input.fromBlock > latestBlock) return null;
+    const logs = await this.client.getLogs({
+      address: input.escrowAddress,
+      event: ESCROW_ABI.find((item) => item.type === 'event' && item.name === 'RewardApproved'),
+      args: { reportKey: input.reportKey },
+      fromBlock: input.fromBlock,
+      toBlock: latestBlock,
+    });
+    const hashes = [
+      ...new Set(
+        logs.flatMap((log) => {
+          const hash = (log as RpcLog & { transactionHash?: Hex }).transactionHash;
+          return hash === undefined ? [] : [hash as `0x${string}`];
+        }),
+      ),
+    ];
+    if (hashes.length > 1) {
+      throw new EscrowProviderError('reward_approval_event_ambiguous', false);
+    }
+    if (hashes.length === 0) return null;
+    return this.verifyRewardApproval({
+      escrowAddress: input.escrowAddress,
+      reportKey: input.reportKey,
+      approvedContentHash: input.approvedContentHash,
+      recipientAddress: input.recipientAddress,
+      amountBaseUnits: input.amountBaseUnits,
+      transactionHash: hashes[0]!,
+    });
+  }
+
+  public async verifyRewardPayout(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    transactionHash: `0x${string}`;
+  }): Promise<VerifiedRewardPayout> {
+    await this.assertArcChain();
+    const receipt = await this.client.getTransactionReceipt({ hash: input.transactionHash });
+    await this.assertCommittedReceipt(receipt);
+    if (receipt.status !== 'success') {
+      throw new EscrowProviderError('reward_payout_reverted', false);
+    }
+    const events: number[] = [];
+    const transfers: number[] = [];
+    for (const log of receipt.logs) {
+      if (log.logIndex === null) continue;
+      if (equalHex(log.address, input.escrowAddress)) {
+        try {
+          const decoded = decodeEventLog({
+            abi: ESCROW_ABI,
+            eventName: 'RewardPaid',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          if (
+            equalHex(decoded.args.reportKey, input.reportKey) &&
+            equalHex(decoded.args.researcher, input.recipientAddress) &&
+            decoded.args.amount === input.amountBaseUnits
+          ) {
+            events.push(log.logIndex);
+          }
+        } catch {
+          // Ignore unrelated escrow logs.
+        }
+      }
+      if (equalHex(log.address, CANONICAL_USDC)) {
+        try {
+          const decoded = decodeEventLog({
+            abi: ERC20_ABI,
+            eventName: 'Transfer',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          if (
+            equalHex(decoded.args.from, input.escrowAddress) &&
+            equalHex(decoded.args.to, input.recipientAddress) &&
+            decoded.args.value === input.amountBaseUnits
+          ) {
+            transfers.push(log.logIndex);
+          }
+        } catch {
+          // Ignore unrelated USDC logs.
+        }
+      }
+    }
+    if (events.length !== 1 || transfers.length !== 1) {
+      throw new EscrowProviderError('reward_payout_evidence_mismatch', false);
+    }
+    const readEscrowAtSettlement = (functionName: string) =>
+      this.client.readContract({
+        address: input.escrowAddress,
+        abi: ESCROW_ABI,
+        functionName,
+        blockNumber: receipt.blockNumber,
+      });
+    const [reward, totalPaid, totalApprovedOutstanding, totalFunded, totalWithdrawn, balance] =
+      await Promise.all([
+        this.client.readContract({
+          address: input.escrowAddress,
+          abi: ESCROW_ABI,
+          functionName: 'rewards',
+          args: [input.reportKey],
+          blockNumber: receipt.blockNumber,
+        }),
+        readEscrowAtSettlement('totalPaid'),
+        readEscrowAtSettlement('totalApprovedOutstanding'),
+        readEscrowAtSettlement('totalFunded'),
+        readEscrowAtSettlement('totalWithdrawn'),
+        this.client.readContract({
+          address: CANONICAL_USDC,
+          abi: ERC20_ABI,
+          functionName: 'balanceOf',
+          args: [input.escrowAddress],
+          blockNumber: receipt.blockNumber,
+        }),
+      ]);
+    if (
+      !Array.isArray(reward) ||
+      reward.length !== 4 ||
+      typeof reward[1] !== 'string' ||
+      typeof reward[2] !== 'bigint' ||
+      (reward[3] !== 2 && reward[3] !== 2n) ||
+      typeof reward[0] !== 'string' ||
+      !equalHex(reward[0], input.approvedContentHash) ||
+      !equalHex(reward[1], input.recipientAddress) ||
+      reward[2] !== input.amountBaseUnits
+    ) {
+      throw new EscrowProviderError('reward_payout_state_mismatch', false);
+    }
+    if (
+      typeof totalPaid !== 'bigint' ||
+      typeof totalApprovedOutstanding !== 'bigint' ||
+      typeof totalFunded !== 'bigint' ||
+      typeof totalWithdrawn !== 'bigint' ||
+      typeof balance !== 'bigint' ||
+      totalPaid < input.amountBaseUnits ||
+      totalApprovedOutstanding > balance ||
+      totalPaid + totalWithdrawn > totalFunded ||
+      totalFunded !== balance + totalPaid + totalWithdrawn
+    ) {
+      throw new EscrowProviderError('reward_payout_accounting_mismatch', false);
+    }
+    return {
+      transactionHash: input.transactionHash,
+      eventLogIndex: events[0]!,
+      transferLogIndex: transfers[0]!,
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+      accounting: {
+        totalPaidBaseUnits: totalPaid,
+        totalApprovedOutstandingBaseUnits: totalApprovedOutstanding,
+        totalFundedBaseUnits: totalFunded,
+        totalWithdrawnBaseUnits: totalWithdrawn,
+        escrowBalanceBaseUnits: balance,
+      },
+    };
+  }
+
+  public async findRewardPayout(input: {
+    escrowAddress: `0x${string}`;
+    reportKey: `0x${string}`;
+    approvedContentHash: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    fromBlock: bigint;
+  }): Promise<VerifiedRewardPayout | null> {
+    await this.assertArcChain();
+    const latestBlock = await this.client.getBlockNumber();
+    if (input.fromBlock > latestBlock) return null;
+    const logs = await this.client.getLogs({
+      address: input.escrowAddress,
+      event: ESCROW_ABI.find((item) => item.type === 'event' && item.name === 'RewardPaid'),
+      args: { reportKey: input.reportKey },
+      fromBlock: input.fromBlock,
+      toBlock: latestBlock,
+    });
+    const hashes = [
+      ...new Set(
+        logs.flatMap((log) => {
+          const hash = (log as RpcLog & { transactionHash?: Hex }).transactionHash;
+          return hash === undefined ? [] : [hash as `0x${string}`];
+        }),
+      ),
+    ];
+    if (hashes.length > 1) {
+      throw new EscrowProviderError('reward_payout_event_ambiguous', false);
+    }
+    if (hashes.length === 0) return null;
+    return this.verifyRewardPayout({
+      escrowAddress: input.escrowAddress,
+      reportKey: input.reportKey,
+      approvedContentHash: input.approvedContentHash,
+      recipientAddress: input.recipientAddress,
+      amountBaseUnits: input.amountBaseUnits,
+      transactionHash: hashes[0]!,
+    });
+  }
+
+  public async getWithdrawalState(address: `0x${string}`): Promise<EscrowWithdrawalState> {
     await this.assertArcChain();
     const read = (functionName: string) =>
       this.client.readContract({ address, abi: ESCROW_ABI, functionName });
@@ -774,10 +1157,7 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
         }
         if (decoded.args.value === 0n) continue;
         const canonicalBlock = await this.client.getBlock({ blockNumber });
-        if (
-          canonicalBlock.hash === null ||
-          !equalHex(canonicalBlock.hash, blockHash)
-        ) {
+        if (canonicalBlock.hash === null || !equalHex(canonicalBlock.hash, blockHash)) {
           throw new EscrowProviderError('late_funding_block_evidence_mismatch', true);
         }
         events.push({
@@ -803,10 +1183,7 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
       throw new EscrowProviderError(`${errorPrefix}_receipt_not_committed`, true);
     }
     const canonicalBlock = await client.getBlock({ blockNumber: receipt.blockNumber });
-    if (
-      canonicalBlock.hash === null ||
-      !equalHex(canonicalBlock.hash, receipt.blockHash)
-    ) {
+    if (canonicalBlock.hash === null || !equalHex(canonicalBlock.hash, receipt.blockHash)) {
       throw new EscrowProviderError(`${errorPrefix}_block_evidence_mismatch`, true);
     }
   }

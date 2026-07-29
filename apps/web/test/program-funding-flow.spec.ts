@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
+import { observeFundingOperationRequestSchema } from '@bug-bounty-escrow/shared';
 
 import {
   assertConnectedWalletAccount,
+  authoritativeUnifiedBalanceSourceTransactions,
   arcCombinedNativeDebitBaseUnits,
+  bridgeDestinationResult,
   bridgeRecoveryTelemetry,
   canRetryBridgeResult,
   CircleAppKitFundingExecutor,
+  encodeRewardApprovalCall,
+  executeWithVerifiedFundingAccount,
   requiresSourceWalletBalanceCheck,
+  sendDestinationResult,
   sumUsdcFees,
   unifiedBalanceFeeReserveByNetwork,
   unifiedBalanceSourceDebitFeeTotal,
@@ -23,9 +29,11 @@ import {
   executePreparedFundingSubmission,
   fundingContinuationAction,
   fundingSubmissionFailurePhase,
+  isExplicitWalletRejection,
   fundingSourceForLockedDeposit,
   fundingSourceSubmittedRecoveryMessage,
   fundingRecoveryAction,
+  fundingEstimatedNetAmount,
   formatUsdcBaseUnits,
   parseUsdcBaseUnits,
   persistPendingFundingResult,
@@ -33,20 +41,29 @@ import {
   readPendingFundingResult,
   readPendingSourceDepositHash,
   sourceDepositContinuationAction,
+  shouldRemainInCp11AfterUnifiedIntentLock,
+  shouldRenderFundingPending,
   validateFundingSelection,
   type FundingSource,
   type FundingExecutionAdapter,
 } from '@/components/owner/program-funding-flow';
 
-function source(
-  rowId: string,
-  network: FundingSource['network'],
-  amount: string,
-): FundingSource {
+function source(rowId: string, network: FundingSource['network'], amount: string): FundingSource {
   return { rowId, network, amount };
 }
 
 describe('CP-11 funding selection', () => {
+  it('encodes the exact server-bound approveReward call without a payout prompt', () => {
+    const data = encodeRewardApprovalCall(
+      `0x${'1'.repeat(64)}`,
+      `0x${'2'.repeat(64)}`,
+      `0x${'3'.repeat(40)}`,
+      10_000_000n,
+    );
+    expect(data).toMatch(/^0x[0-9a-f]+$/);
+    expect(data.length).toBe(2 + 8 + 64 * 4);
+  });
+
   it('derives Send, Bridge and Unified Balance without a manual route selector', () => {
     expect(deriveFundingRoute([source('arc', 'Arc_Testnet', '10')])).toBe('send');
     expect(deriveFundingRoute([source('base', 'Base_Sepolia', '10')])).toBe('bridge');
@@ -60,9 +77,7 @@ describe('CP-11 funding selection', () => {
 
   it('parses USDC exactly at 6 decimals without JavaScript floating point', () => {
     expect(parseUsdcBaseUnits('9007199254740993.123456')).toBe(9_007_199_254_740_993_123_456n);
-    expect(formatUsdcBaseUnits(9_007_199_254_740_993_123_456n)).toBe(
-      '9007199254740993.123456',
-    );
+    expect(formatUsdcBaseUnits(9_007_199_254_740_993_123_456n)).toBe('9007199254740993.123456');
     expect(parseUsdcBaseUnits('1.1234567')).toBeUndefined();
     expect(parseUsdcBaseUnits('-1')).toBeUndefined();
   });
@@ -92,6 +107,49 @@ describe('CP-11 funding selection', () => {
       routeMode: 'unified_balance',
     });
     expect(result.selection?.sources).not.toBe(sources);
+  });
+
+  it('persists a distinct first and second Unified Balance Submit boundary', () => {
+    const selection = validateFundingSelection('10', [
+      source('arc', 'Arc_Testnet', '4'),
+      source('base', 'Base_Sepolia', '6'),
+    ]).selection;
+    expect(selection).toBeDefined();
+    expect(
+      shouldRemainInCp11AfterUnifiedIntentLock('unified_balance', false, 'collecting_deposits'),
+    ).toBe(true);
+    expect(
+      shouldRemainInCp11AfterUnifiedIntentLock('unified_balance', true, 'collecting_deposits'),
+    ).toBe(false);
+    expect(
+      shouldRenderFundingPending(
+        { fundingPhase: 'ready_for_destination' },
+        selection,
+        'ready_to_sign',
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRenderFundingPending(
+        { fundingPhase: 'collecting_deposits' },
+        selection,
+        'ready_to_sign',
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      shouldRenderFundingPending(
+        { fundingPhase: 'ready_for_destination' },
+        selection,
+        'delivery_pending',
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it('computes CP-12 estimated net in exact USDC base units', () => {
+    expect(fundingEstimatedNetAmount('10.000001', '0.000001')).toBe('10');
+    expect(fundingEstimatedNetAmount('1', '2')).toBe('0');
   });
 
   it('keeps spend allocation at gross while signing the exact server-locked fee top-up', () => {
@@ -126,30 +184,52 @@ describe('CP-11 funding selection', () => {
 });
 
 describe('CP-12 wallet and retry safety', () => {
+  it('revalidates the active account immediately before a wallet transaction callback', async () => {
+    const expected = '0x1111111111111111111111111111111111111111';
+    const changed = '0x2222222222222222222222222222222222222222';
+    const provider = { request: vi.fn(async () => [changed]) };
+    const transaction = vi.fn(async () => 'submitted');
+
+    await expect(
+      executeWithVerifiedFundingAccount(provider as never, expected, transaction),
+    ).rejects.toThrow('active wallet account changed');
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('never remaps Unified Balance hashes from reordered allocation arrays', () => {
+    const destinationHash = `0x${'d'.repeat(64)}`;
+    expect(
+      authoritativeUnifiedBalanceSourceTransactions({
+        txHash: destinationHash,
+        steps: [{ txHash: destinationHash }],
+      }),
+    ).toEqual([]);
+
+    expect(() =>
+      authoritativeUnifiedBalanceSourceTransactions({
+        txHash: destinationHash,
+        steps: [{ txHash: `0x${'b'.repeat(64)}` }, { txHash: `0x${'a'.repeat(64)}` }],
+      }),
+    ).toThrow('without an authoritative source-network binding');
+  });
+
   it('keeps a rejected Unified Balance readiness/network switch before the durable boundary', async () => {
     const address = '0x1111111111111111111111111111111111111111';
     const events: string[] = [];
     const provider = { request: vi.fn(async () => [address]) };
     const adapter = {
       getAddress: vi.fn(async () => address),
-      readContract: vi.fn(
-        async ({ functionName }: { readonly functionName: string }) =>
-          functionName === 'decimals' ? 6 : 10_000_000n,
+      readContract: vi.fn(async ({ functionName }: { readonly functionName: string }) =>
+        functionName === 'decimals' ? 6 : 10_000_000n,
       ),
       ensureChain: vi.fn(async () => {
         events.push('switch');
         throw new Error('network switch rejected');
       }),
     };
-    const executor = new CircleAppKitFundingExecutor(
-      adapter as never,
-      provider as never,
-      address,
-    );
+    const executor = new CircleAppKitFundingExecutor(adapter as never, provider as never, address);
     const prepare = vi.fn(() =>
-      executor.prepareUnifiedBalanceDepositSource(
-        source('base', 'Base_Sepolia', '2'),
-      ),
+      executor.prepareUnifiedBalanceDepositSource(source('base', 'Base_Sepolia', '2')),
     );
     const lock = vi.fn(async () => {
       events.push('lock');
@@ -200,26 +280,18 @@ describe('CP-12 wallet and retry safety', () => {
     };
     const adapter = {
       getAddress: vi.fn(async () => address),
-      readContract: vi.fn(
-        async ({ functionName }: { readonly functionName: string }) =>
-          functionName === 'decimals' ? 6 : 10_000_000n,
+      readContract: vi.fn(async ({ functionName }: { readonly functionName: string }) =>
+        functionName === 'decimals' ? 6 : 10_000_000n,
       ),
       ensureChain: vi.fn(async () => undefined),
       readNativeBalance: vi.fn(async () => 1n),
     };
-    const executor = new CircleAppKitFundingExecutor(
-      adapter as never,
-      provider as never,
-      address,
-    );
+    const executor = new CircleAppKitFundingExecutor(adapter as never, provider as never, address);
     const lock = vi.fn(async () => undefined);
 
     await expect(
       executePreparedFundingSubmission(
-        () =>
-          executor.prepareUnifiedBalanceDepositSource(
-            source('base', 'Base_Sepolia', '2'),
-          ),
+        () => executor.prepareUnifiedBalanceDepositSource(source('base', 'Base_Sepolia', '2')),
         lock,
         vi.fn(async () => 'submitted'),
       ),
@@ -269,6 +341,91 @@ describe('CP-12 wallet and retry safety', () => {
     expect(canRetryBridgeResult(result)).toBe(false);
   });
 
+  it('keeps Send destination evidence out of source hashes so observation remains valid', () => {
+    const destinationHash = `0x${'d'.repeat(64)}`;
+    const result = sendDestinationResult(destinationHash);
+
+    expect(result).toEqual({
+      routeMode: 'send',
+      destinationTransactionHash: destinationHash,
+      sourceTransactionHashes: [],
+    });
+    expect(() =>
+      observeFundingOperationRequestSchema.parse({
+        operationRecordId: '31000000-0000-4000-8000-000000000090',
+        claimToken: '31000000-0000-4000-8000-000000000190',
+        outcome: 'submitted',
+        destinationTransactionHash: result.destinationTransactionHash,
+        sourceTransactionHashes: result.sourceTransactionHashes,
+        providerState: 'success',
+      }),
+    ).not.toThrow();
+  });
+
+  it('keeps only unique approve and burn hashes as Bridge source evidence', () => {
+    const approveHash = `0x${'a'.repeat(64)}`;
+    const burnHash = `0x${'b'.repeat(64)}`;
+    const destinationHash = `0x${'c'.repeat(64)}`;
+    const result = bridgeDestinationResult({
+      state: 'success',
+      steps: [
+        { name: 'Approve', state: 'success', txHash: approveHash },
+        { name: 'Approve', state: 'success', txHash: approveHash.toUpperCase() },
+        { name: 'Burn', state: 'success', txHash: burnHash },
+        { name: 'Mint', state: 'success', txHash: destinationHash },
+      ],
+    } as never);
+
+    expect(result).toEqual({
+      routeMode: 'bridge',
+      destinationTransactionHash: destinationHash,
+      sourceTransactionHashes: [approveHash, burnHash],
+    });
+    expect(() =>
+      observeFundingOperationRequestSchema.parse({
+        operationRecordId: '31000000-0000-4000-8000-000000000091',
+        claimToken: '31000000-0000-4000-8000-000000000191',
+        outcome: 'submitted',
+        destinationTransactionHash: result.destinationTransactionHash,
+        sourceTransactionHashes: result.sourceTransactionHashes,
+        providerState: 'success',
+      }),
+    ).not.toThrow();
+  });
+
+  it('preserves a known Mint destination hash even when Circle reports a Bridge error', () => {
+    const burnHash = `0x${'b'.repeat(64)}`;
+    const destinationHash = `0x${'c'.repeat(64)}`;
+    const result = bridgeDestinationResult({
+      state: 'error',
+      steps: [
+        { name: 'Burn', state: 'success', txHash: burnHash },
+        {
+          name: 'Mint',
+          state: 'error',
+          txHash: destinationHash,
+          error: new Error('provider returned an error after broadcast'),
+        },
+      ],
+    } as never);
+
+    expect(result).toEqual({
+      routeMode: 'bridge',
+      destinationTransactionHash: destinationHash,
+      sourceTransactionHashes: [burnHash],
+    });
+    expect(() =>
+      observeFundingOperationRequestSchema.parse({
+        operationRecordId: '31000000-0000-4000-8000-000000000093',
+        claimToken: '31000000-0000-4000-8000-000000000193',
+        outcome: 'submitted',
+        destinationTransactionHash: result.destinationTransactionHash,
+        sourceTransactionHashes: result.sourceTransactionHashes,
+        providerState: 'pending',
+      }),
+    ).not.toThrow();
+  });
+
   it('opens the account permission request only when connect is explicitly called', async () => {
     const request = vi.fn(async () => ['0x1111111111111111111111111111111111111111']);
     expect(request).not.toHaveBeenCalled();
@@ -285,10 +442,7 @@ describe('CP-12 wallet and retry safety', () => {
       request: vi.fn(async () => ['0x2222222222222222222222222222222222222222']),
     };
     await expect(
-      assertConnectedWalletAccount(
-        provider as never,
-        '0x1111111111111111111111111111111111111111',
-      ),
+      assertConnectedWalletAccount(provider as never, '0x1111111111111111111111111111111111111111'),
     ).rejects.toThrow('active wallet account changed');
     expect(provider.request).toHaveBeenCalledWith({
       method: 'eth_accounts',
@@ -303,9 +457,7 @@ describe('CP-12 wallet and retry safety', () => {
         { token: 'usdc', amount: '0.1' },
       ]),
     ).toBe(100_001n);
-    expect(() => sumUsdcFees([{ token: 'ETH', amount: '0.1' }])).toThrow(
-      'Unsupported fee token',
-    );
+    expect(() => sumUsdcFees([{ token: 'ETH', amount: '0.1' }])).toThrow('Unsupported fee token');
     expect(() => sumUsdcFees([{ token: 'USDC', amount: null }])).toThrow(
       'complete USDC fee estimate',
     );
@@ -330,23 +482,16 @@ describe('CP-12 wallet and retry safety', () => {
     ];
     expect(unifiedBalanceSourceDebitFeeTotal(supportedFees)).toBe(30_000n);
     expect(
-      unifiedBalanceFeeReserveByNetwork(supportedFees, [
-        'Ethereum_Sepolia',
-        'Base_Sepolia',
-      ]),
+      unifiedBalanceFeeReserveByNetwork(supportedFees, ['Ethereum_Sepolia', 'Base_Sepolia']),
     ).toEqual({
       Ethereum_Sepolia: '0.01',
       Base_Sepolia: '0.02',
     });
     expect(() =>
-      unifiedBalanceSourceDebitFeeTotal([
-        { type: 'kit', token: 'USDC', amount: '0.01' },
-      ]),
+      unifiedBalanceSourceDebitFeeTotal([{ type: 'kit', token: 'USDC', amount: '0.01' }]),
     ).toThrow('kit fees are disabled');
     expect(() =>
-      unifiedBalanceSourceDebitFeeTotal([
-        { type: 'forwarder', token: 'USDC', amount: '0.01' },
-      ]),
+      unifiedBalanceSourceDebitFeeTotal([{ type: 'forwarder', token: 'USDC', amount: '0.01' }]),
     ).toThrow('forwarder fees are disabled');
     expect(() =>
       unifiedBalanceFeeReserveByNetwork(
@@ -354,6 +499,42 @@ describe('CP-12 wallet and retry safety', () => {
         ['Ethereum_Sepolia', 'Base_Sepolia'],
       ),
     ).toThrow('missing its required per-chain allocation');
+    expect(() =>
+      unifiedBalanceFeeReserveByNetwork(
+        [
+          {
+            type: 'provider',
+            token: 'USDC',
+            amount: '0.01',
+            allocations: [{ chain: 'Arbitrum_Sepolia', amount: '0.01' }],
+          },
+        ],
+        ['Ethereum_Sepolia', 'Base_Sepolia'],
+      ),
+    ).toThrow('unselected chain');
+    expect(() =>
+      unifiedBalanceFeeReserveByNetwork(
+        [
+          {
+            type: 'provider',
+            token: 'USDC',
+            amount: '0.02',
+            allocations: [{ chain: 'Ethereum_Sepolia', amount: '0.01' }],
+          },
+        ],
+        ['Ethereum_Sepolia'],
+      ),
+    ).toThrow('do not equal the quoted fee total');
+  });
+
+  it('recognizes only deterministic wallet rejection codes through wrapped causes', () => {
+    expect(isExplicitWalletRejection({ code: 4001 })).toBe(true);
+    expect(isExplicitWalletRejection({ code: '4001' })).toBe(true);
+    expect(isExplicitWalletRejection({ cause: { cause: { code: 'ACTION_REJECTED' } } })).toBe(true);
+    expect(isExplicitWalletRejection({ code: 'USER_REJECTED' })).toBe(false);
+    expect(isExplicitWalletRejection({ name: 'UserRejectedRequestError' })).toBe(false);
+    expect(isExplicitWalletRejection(new Error('user rejected maybe'))).toBe(false);
+    expect(isExplicitWalletRejection({ code: -32000, message: 'timeout' })).toBe(false);
   });
 
   it('rejects sufficient aggregate Unified Balance held on the wrong selected domain', () => {
@@ -418,16 +599,11 @@ describe('CP-12 wallet and retry safety', () => {
     };
     const adapter = {
       getAddress: vi.fn(async () => address),
-      readContract: vi.fn(
-        async ({ functionName }: { readonly functionName: string }) =>
-          functionName === 'decimals' ? 6 : 3_000_000n,
+      readContract: vi.fn(async ({ functionName }: { readonly functionName: string }) =>
+        functionName === 'decimals' ? 6 : 3_000_000n,
       ),
     };
-    const executor = new CircleAppKitFundingExecutor(
-      adapter as never,
-      provider as never,
-      address,
-    );
+    const executor = new CircleAppKitFundingExecutor(adapter as never, provider as never, address);
 
     await expect(
       executor.assertFundingSourceBalances([
@@ -446,12 +622,55 @@ describe('CP-12 wallet and retry safety', () => {
   it('blocks an expired or changed fee quote before a destination signature', () => {
     const intent = {
       estimatedFeeReserve: '0.1',
-      feeAllocations: [{ network: 'Arc_Testnet', amount: '0.1' }],
+      feeAllocations: [
+        {
+          network: 'Arc_Testnet',
+          amount: '0.1',
+          components: [
+            { network: 'Arc_Testnet', type: 'provider', token: 'USDC', amount: '0.1' },
+            { network: 'Arc_Testnet', type: 'gas', token: 'USDC', amount: '0' },
+            { network: 'Arc_Testnet', type: 'kit', token: 'USDC', amount: '0' },
+            { network: 'Arc_Testnet', type: 'forwarder', token: 'USDC', amount: '0' },
+          ],
+        },
+      ],
     } as never;
     const baseQuote = {
       estimatedFeeReserve: '0.1',
       estimatedFeeReserveBaseUnits: 100_000n,
       estimatedFeeReserveByNetwork: { Arc_Testnet: '0.1' },
+      feeAllocations: [
+        {
+          network: 'Arc_Testnet' as const,
+          amount: '0.1',
+          components: [
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'provider' as const,
+              token: 'USDC' as const,
+              amount: '0.1',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'gas' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'kit' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'forwarder' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+          ],
+        },
+      ],
       quotedAt: '2026-07-29T00:00:00.000Z',
       expiresAt: '2026-07-29T00:02:00.000Z',
     };
@@ -476,6 +695,26 @@ describe('CP-12 wallet and retry safety', () => {
         Date.parse('2026-07-29T00:01:00.000Z'),
       ),
     ).toThrow('fees changed');
+    expect(() =>
+      assertFreshFundingQuoteMatchesIntent(
+        intent,
+        {
+          ...baseQuote,
+          feeAllocations: [
+            {
+              ...baseQuote.feeAllocations[0]!,
+              components: [
+                { network: 'Arc_Testnet', type: 'provider', token: 'USDC', amount: '0.09' },
+                { network: 'Arc_Testnet', type: 'gas', token: 'USDC', amount: '0.01' },
+                { network: 'Arc_Testnet', type: 'kit', token: 'USDC', amount: '0' },
+                { network: 'Arc_Testnet', type: 'forwarder', token: 'USDC', amount: '0' },
+              ],
+            },
+          ],
+        },
+        Date.parse('2026-07-29T00:01:00.000Z'),
+      ),
+    ).toThrow('fee components changed');
   });
 
   it('recovers a returned destination hash without signing a replacement transaction', () => {
@@ -492,11 +731,28 @@ describe('CP-12 wallet and retry safety', () => {
     };
     persistPendingFundingResult(storage, 'program', 'intent', result);
     expect(readPendingFundingResult(storage, 'program', 'intent')).toEqual(result);
-    expect(fundingContinuationAction('source_submitted', false, true)).toBe(
-      'observe_destination',
-    );
+    expect(fundingContinuationAction('source_submitted', false, true)).toBe('observe_destination');
     clearPendingFundingResult(storage, 'program', 'intent');
     expect(readPendingFundingResult(storage, 'program', 'intent')).toBeUndefined();
+  });
+
+  it('preserves exact Unified Balance source network bindings across reload', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } as unknown as Storage;
+    const sourceHash = `0x${'b'.repeat(64)}`;
+    const result = {
+      routeMode: 'unified_balance' as const,
+      destinationTransactionHash: `0x${'c'.repeat(64)}`,
+      sourceTransactionHashes: [sourceHash],
+      sourceTransactions: [{ network: 'Base_Sepolia' as const, transactionHash: sourceHash }],
+    };
+
+    persistPendingFundingResult(storage, 'program', 'intent', result);
+    expect(readPendingFundingResult(storage, 'program', 'intent')).toEqual(result);
   });
 
   it('preserves a returned source-deposit hash until the API durably observes it', () => {
@@ -508,13 +764,9 @@ describe('CP-12 wallet and retry safety', () => {
     } as unknown as Storage;
     const depositHash = `0x${'b'.repeat(64)}`;
     persistPendingSourceDepositHash(storage, 'program', 'intent', 'deposit', depositHash);
-    expect(readPendingSourceDepositHash(storage, 'program', 'intent', 'deposit')).toBe(
-      depositHash,
-    );
+    expect(readPendingSourceDepositHash(storage, 'program', 'intent', 'deposit')).toBe(depositHash);
     clearPendingSourceDepositHash(storage, 'program', 'intent', 'deposit');
-    expect(
-      readPendingSourceDepositHash(storage, 'program', 'intent', 'deposit'),
-    ).toBeUndefined();
+    expect(readPendingSourceDepositHash(storage, 'program', 'intent', 'deposit')).toBeUndefined();
   });
 
   it('resumes only before the durable wallet boundary and never replays after it', () => {
@@ -522,15 +774,13 @@ describe('CP-12 wallet and retry safety', () => {
       id: 'deposit',
       status: 'awaiting_signature',
     } as never;
-    expect(sourceDepositContinuationAction(claimed, undefined, undefined)).toBe(
-      'execute_claimed',
+    expect(sourceDepositContinuationAction(claimed, undefined, undefined)).toBe('execute_claimed');
+    expect(sourceDepositContinuationAction(claimed, `0x${'c'.repeat(64)}`, undefined)).toBe(
+      'observe_local_hash',
     );
-    expect(
-      sourceDepositContinuationAction(claimed, `0x${'c'.repeat(64)}`, undefined),
-    ).toBe('observe_local_hash');
-    expect(
-      sourceDepositContinuationAction(claimed, undefined, `0x${'d'.repeat(64)}`),
-    ).toBe('attach_manual_hash');
+    expect(sourceDepositContinuationAction(claimed, undefined, `0x${'d'.repeat(64)}`)).toBe(
+      'attach_manual_hash',
+    );
     expect(
       sourceDepositContinuationAction(
         {
@@ -581,13 +831,13 @@ describe('CP-12 wallet and retry safety', () => {
     expect(fundingRecoveryAction('delivery_pending')).toBe('Continue delivery');
     expect(fundingRecoveryAction('source_submitted')).toBe('Check delivery recovery');
     expect(fundingSourceSubmittedRecoveryMessage('send')).toContain('never submit another Send');
-    expect(fundingSourceSubmittedRecoveryMessage('bridge')).toContain('original in-memory BridgeResult');
+    expect(fundingSourceSubmittedRecoveryMessage('bridge')).toContain(
+      'original in-memory BridgeResult',
+    );
     expect(fundingSourceSubmittedRecoveryMessage('unified_balance')).toContain(
       'does not expose a documented retrySpend',
     );
-    expect(fundingContinuationAction('source_submitted', false)).toBe(
-      'recovery_required',
-    );
+    expect(fundingContinuationAction('source_submitted', false)).toBe('recovery_required');
     expect(fundingContinuationAction('source_submitted', true)).toBe('retry_bridge');
     expect(fundingContinuationAction('delivery_pending', false)).toBe('reconcile');
     expect(fundingSubmissionFailurePhase(true)).toBe('source_submitted');
