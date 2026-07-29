@@ -276,18 +276,32 @@ readiness.
 
 #### Phase 2: allow-list, enable, and recreate the API
 
-Open `/opt/bounty-escrow/.env.production` in an editor and set the following.
-There must be exactly one subscription UUID: do not use a comma-separated
-migration list.
+The production CI workflow atomically upserts the following three nonsecret
+values immediately before it validates the new API image. The checked-in helper
+rejects duplicate managed keys, symlinks and any path other than
+`/opt/bounty-escrow/.env.production`; it preserves every other line, secret,
+file mode and owner/group.
 
 ```dotenv
 CIRCLE_CONTRACTS_ENABLED=true
 CIRCLE_GATEWAY_WEBHOOKS_ENABLED=true
-CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS=replace-with-the-created-subscription-id
-CIRCLE_API_KEY=replace-with-circle-api-key
-CIRCLE_ENTITY_SECRET=replace-with-64-character-circle-entity-secret
-CIRCLE_DEPLOYMENT_WALLET_ID=replace-with-circle-sca-wallet-uuid
+CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS=39f66f5f-600d-4efa-9d99-a725c0af80f8
 ```
+
+The existing `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`,
+`CIRCLE_DEPLOYMENT_WALLET_ID` and all unrelated settings are never printed or
+modified. They must already be present. If the updater or production validation
+fails, the workflow exits before Docker recreates the running API/web
+containers.
+
+After the new containers pass their health checks, but before the deployment is
+recorded as good, the fixed checked-in verifier prints only nonsecret booleans
+plus the subscription ID count. It asks Circle to send a signed test for the
+same stable subscription (it never creates another subscription), then polls
+the service-role database projection for a new receipt. The smoke output never
+contains the API key, entity secret, webhook payload or signature. Any verifier
+failure triggers the existing image rollback and the failed tag is not written
+to `.deployment.env`.
 
 Also verify the Arc Testnet values required by the production preflight:
 

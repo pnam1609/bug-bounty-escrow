@@ -38,6 +38,7 @@ jobs:
           set -Eeuo pipefail
           docker version
           docker compose version
+          python3 --version
           test -r "${PUBLIC_ENV_FILE}"
           test -r "${PRODUCTION_ENV_FILE}"
           test -w "${APP_DIR}"
@@ -126,6 +127,15 @@ jobs:
           set -Eeuo pipefail
           install -m 640 docker-compose.production.yml "${APP_DIR}/docker-compose.production.yml"
           install -m 750 deploy/deploy.sh "${APP_DIR}/deploy.sh"
+          install -m 750 deploy/verify-circle-phase2.sh "${APP_DIR}/verify-circle-phase2.sh"
+
+      - name: Enable audited Circle phase-2 configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m unittest deploy/test_upsert_circle_phase2_env.py
+          python3 deploy/upsert_circle_phase2_env.py \
+            --path "${PRODUCTION_ENV_FILE}"
 
       - name: Apply migrations and deploy
         shell: bash
@@ -136,6 +146,7 @@ jobs:
           IMAGE_NAMESPACE="${IMAGE_NAMESPACE}" \
           IMAGE_TAG="${GITHUB_SHA}" \
           PULL_IMAGES=false \
+          VERIFY_CIRCLE_PHASE2=true \
             "${APP_DIR}/deploy.sh"
 
       - name: Remove temporary quality image tag

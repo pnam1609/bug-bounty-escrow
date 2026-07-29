@@ -7,6 +7,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-${APP_DIR}/docker-compose.production.yml}"
 ENV_FILE="${ENV_FILE:-${APP_DIR}/.env.production}"
 STATE_FILE="${STATE_FILE:-${APP_DIR}/.deployment.env}"
 PULL_IMAGES="${PULL_IMAGES:-true}"
+VERIFY_CIRCLE_PHASE2="${VERIFY_CIRCLE_PHASE2:-false}"
 
 : "${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required, for example bbe-local}"
 : "${IMAGE_TAG:?IMAGE_TAG is required, normally the Git commit SHA}"
@@ -24,6 +25,16 @@ fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   printf 'Production environment file not found: %s\n' "${ENV_FILE}" >&2
+  exit 1
+fi
+
+if [[ "${VERIFY_CIRCLE_PHASE2}" == 'true' ]]; then
+  if [[ ! -x "${APP_DIR}/verify-circle-phase2.sh" ]]; then
+    printf 'Circle phase-2 verifier is not installed or executable\n' >&2
+    exit 1
+  fi
+elif [[ "${VERIFY_CIRCLE_PHASE2}" != 'false' ]]; then
+  printf 'VERIFY_CIRCLE_PHASE2 must be true or false\n' >&2
   exit 1
 fi
 
@@ -47,6 +58,9 @@ rollback() {
     printf 'Deployment failed; restoring application images tagged %s\n' "${previous_tag}" >&2
     export IMAGE_TAG="${previous_tag}"
     compose up --detach --remove-orphans --wait api web || true
+  elif [[ -z "${previous_tag}" ]]; then
+    printf 'Deployment failed with no previous image tag; stopping failed application containers\n' >&2
+    compose stop api web || true
   fi
 
   exit "${exit_code}"
@@ -76,6 +90,14 @@ compose run --rm migrate
 printf 'Starting application images for %s\n' "${IMAGE_TAG}"
 trap rollback ERR
 compose up --detach --remove-orphans --wait api web
+
+if [[ "${VERIFY_CIRCLE_PHASE2}" == 'true' ]]; then
+  printf 'Verifying Circle phase-2 runtime and signed receipt\n'
+  APP_DIR="${APP_DIR}" \
+  COMPOSE_FILE="${COMPOSE_FILE}" \
+  ENV_FILE="${ENV_FILE}" \
+    "${APP_DIR}/verify-circle-phase2.sh"
+fi
 
 state_tmp="${STATE_FILE}.tmp"
 printf 'IMAGE_NAMESPACE=%s\nIMAGE_TAG=%s\n' "${IMAGE_NAMESPACE}" "${IMAGE_TAG}" >"${state_tmp}"
