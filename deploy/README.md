@@ -617,6 +617,13 @@ PostgREST or Storage, or cancel an existing signed URL before that URL's own
 TTL. Complete `SEC-PROD-001` cleanup at or before the expiry; do not treat the
 timestamp as credential or session revocation.
 
+For Release A, CI atomically manages only
+`LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL=2026-08-07T16:59:00Z` in the protected VPS
+environment file before migrations run. It preserves every other assignment
+and the file mode, and refuses duplicate managed keys or an unexpected target.
+Remove this CI updater at or before expiry as part of `SEC-PROD-001` cleanup;
+the workflow must not extend or replace the approved timestamp.
+
 While the waiver is active, Arc, Ethereum, Arbitrum, and Base must remain on
 their configured testnets. Do not use real funds, real personal information, or
 confidential vulnerability reports. Stop the release immediately if any
