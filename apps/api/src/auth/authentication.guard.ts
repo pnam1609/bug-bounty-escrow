@@ -35,10 +35,37 @@ const LOCAL_DEMO_USER_IDS = new Set([
   '30000000-0000-4000-8000-000000000007',
 ]);
 
-function isLocalDemoIdentity(user: { readonly id: string; readonly email?: string }): boolean {
+function isApprovedLocalDemoIdentity(user: { readonly id: string }): boolean {
+  return LOCAL_DEMO_USER_IDS.has(user.id);
+}
+
+function hasLocalDemoIdentityMarker(user: {
+  readonly id: string;
+  readonly email?: string;
+}): boolean {
   return (
-    LOCAL_DEMO_USER_IDS.has(user.id) ||
+    isApprovedLocalDemoIdentity(user) ||
     (typeof user.email === 'string' && user.email.toLowerCase().endsWith('@local.demo'))
+  );
+}
+
+export function isLocalDemoIdentityWaiverActive(
+  config: Pick<ApiEnvironment, 'LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL'>,
+  now = Date.now(),
+): boolean {
+  const allowedUntil = config.LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL ?? '';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(allowedUntil)) {
+    return false;
+  }
+
+  const expiresAt = Date.parse(allowedUntil);
+  const canonicalAllowedUntil = /\.\d{3}Z$/.test(allowedUntil)
+    ? allowedUntil
+    : allowedUntil.replace(/Z$/, '.000Z');
+  return (
+    Number.isFinite(expiresAt) &&
+    new Date(expiresAt).toISOString() === canonicalAllowedUntil &&
+    expiresAt > now
   );
 }
 
@@ -49,7 +76,10 @@ export class AuthenticationGuard implements CanActivate {
     @Inject(SUPABASE_CLIENT) private readonly client: SupabaseClient,
     @Inject(AuthRepository) private readonly repository: AuthRepository,
     @Inject(API_CONFIG)
-    private readonly config: Pick<ApiEnvironment, 'NODE_ENV'>,
+    private readonly config: Pick<
+      ApiEnvironment,
+      'NODE_ENV' | 'LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL'
+    >,
   ) {}
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -74,8 +104,12 @@ export class AuthenticationGuard implements CanActivate {
       throw new UnauthorizedException();
     }
 
-    if (this.config.NODE_ENV === 'production' && isLocalDemoIdentity(data.user)) {
-      throw new UnauthorizedException();
+    if (this.config.NODE_ENV === 'production' && hasLocalDemoIdentityMarker(data.user)) {
+      const isWaivedExactIdentity =
+        isApprovedLocalDemoIdentity(data.user) && isLocalDemoIdentityWaiverActive(this.config);
+      if (!isWaivedExactIdentity) {
+        throw new UnauthorizedException();
+      }
     }
 
     // Email/password and Google OAuth are the only supported product identities. Supabase's

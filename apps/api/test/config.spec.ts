@@ -42,6 +42,48 @@ describe('API configuration', () => {
     await module.close();
   });
 
+  it('keeps the temporary local-demo waiver server-side and trims its timestamp', () => {
+    const waiverConfig = parseApiEnvironment({
+      ...config,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: ' 2026-08-07T16:59:00Z ',
+    });
+
+    expect(waiverConfig.LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL).toBe('2026-08-07T16:59:00Z');
+  });
+
+  it.each([
+    'not-a-timestamp',
+    '2026-08-07T23:59:00+07:00',
+    '2026-02-30T00:00:00Z',
+    '2026-08-07T16:59:00z',
+    '2026-08-07T16:59:00.1Z',
+    '2026-08-07T16:59:00.0000Z',
+  ])('rejects malformed nonblank local-demo waiver timestamps: %s', (allowedUntil) => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+        LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: allowedUntil,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: EnvironmentValidationError.name,
+        message: expect.stringContaining('LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL'),
+      }),
+    );
+  });
+
+  it('treats a blank local-demo waiver timestamp as inactive', () => {
+    const withoutWaiver = parseApiEnvironment({
+      ...config,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: '   ',
+    });
+
+    expect(withoutWaiver.LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL).toBeUndefined();
+  });
+
   it('allows only the configured browser origin', () => {
     const options = createCorsOptions(config);
     const resolveOrigin = options.origin as OriginResolver;

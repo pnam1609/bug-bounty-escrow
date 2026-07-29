@@ -8,6 +8,7 @@ import {
   assertProductionDemoIdentitySafety,
   DEMO_PASSWORD,
   DEMO_PASSWORD_SALT,
+  isLocalDemoIdentityWaiverActive,
   productionSafetyTestConstants,
 } from './production-safety.mjs';
 import { ensureCompatibilityLayer } from './migrate.mjs';
@@ -46,9 +47,33 @@ assert.throws(
       DATABASE_URL: 'postgresql://postgres:secret@supabase-db:5432/postgres',
       DEMO_ENV: 'demo',
       DEMO_SEED_CONFIRM: productionSafetyTestConstants.remoteDemoConfirmation,
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: '2999-01-01T00:00:00.000Z',
     }),
   /Demo data cannot be seeded in production/,
 );
+
+const waiverClock = Date.parse('2026-08-07T16:59:00.000Z');
+for (const [allowedUntil, expected] of [
+  [undefined, false],
+  ['', false],
+  ['not-a-timestamp', false],
+  ['2026-08-07T23:59:00+07:00', false],
+  ['2026-02-30T00:00:00Z', false],
+  ['2026-08-07T16:59:00z', false],
+  ['2026-08-07T16:59:00.1Z', false],
+  ['2026-08-07T16:59:00.0000Z', false],
+  ['2026-08-07T16:59:00.000Z', false],
+  ['2026-08-07T16:59:00.001Z', true],
+]) {
+  assert.equal(
+    isLocalDemoIdentityWaiverActive(
+      { LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: allowedUntil },
+      waiverClock,
+    ),
+    expected,
+  );
+}
+const boundedFutureWaiver = new Date(Date.now() + 60_000).toISOString();
 assert.throws(
   () =>
     assertDemoSeedTargetSafety({
@@ -100,9 +125,65 @@ for (const suffix of ['001', '002', '003', '004', '005', '006', '007']) {
 }
 assert.match(productionQuery, /lower\(coalesce\(email, ''\)\) like '%@local\.demo'/);
 assert.match(productionQuery, /encrypted_password = \$1/);
-assert.deepEqual(productionValues, [hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT)]);
+assert.deepEqual(productionValues, [hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT), false]);
 assert.match(productionQuery.trim(), /^select exists \(/);
 assert.doesNotMatch(productionQuery, /select\s+(email|encrypted_password|banned_until)\b/i);
+
+const waivedClient = fakeClient([
+  validHostedCatalog,
+  { rows: [{ has_active_demo_identity: false }] },
+]);
+await assertProductionDemoIdentitySafety(waivedClient, {
+  NODE_ENV: 'production',
+  LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+});
+assert.equal(waivedClient.calls, 2);
+assert.deepEqual(waivedClient.statements[1].values, [
+  hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT),
+  true,
+]);
+
+await assert.rejects(
+  assertProductionDemoIdentitySafety(
+    fakeClient([validHostedCatalog, { rows: [{ has_active_demo_identity: true }] }]),
+    {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+    },
+  ),
+  (error) => {
+    assert.equal(error.message, productionSafetyTestConstants.productionPreflightError);
+    return true;
+  },
+);
+
+await assert.rejects(
+  assertProductionDemoIdentitySafety(
+    fakeClient([validHostedCatalog, { rows: [{ has_active_demo_identity: true }] }]),
+    {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: '2000-01-01T00:00:00Z',
+    },
+  ),
+  (error) => {
+    assert.equal(error.message, productionSafetyTestConstants.productionPreflightError);
+    return true;
+  },
+);
+
+await assert.rejects(
+  assertProductionDemoIdentitySafety(
+    fakeClient({ rows: [{ has_auth_users: true, has_authenticated_role: false }] }),
+    {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+    },
+  ),
+  (error) => {
+    assert.equal(error.message, productionSafetyTestConstants.productionPreflightError);
+    return true;
+  },
+);
 
 const freshBareClient = fakeClient({
   rows: [{ has_auth_users: false, has_authenticated_role: false }],
@@ -235,6 +316,10 @@ try {
       id,
       `fixture-${suffix}@example.test`,
     ]);
+    await assertProductionDemoIdentitySafety(productionDatabase, {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+    });
     await assertRealPreflightRejects();
     await productionDatabase.query(
       `update auth.users set banned_until = now() + interval '100 years' where id = $1::uuid`,
@@ -247,6 +332,16 @@ try {
     '10000000-0000-4000-8000-000000000010',
     'mixed-case@LOCAL.DEMO',
   ]);
+  await assert.rejects(
+    assertProductionDemoIdentitySafety(productionDatabase, {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+    }),
+    (error) => {
+      assert.equal(error.message, productionSafetyTestConstants.productionPreflightError);
+      return true;
+    },
+  );
   await assertRealPreflightRejects();
   await productionDatabase.query(
     `update auth.users set banned_until = now() + interval '100 years' where id = $1::uuid`,
@@ -260,6 +355,16 @@ try {
       'known-hash@example.test',
       hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT),
     ],
+  );
+  await assert.rejects(
+    assertProductionDemoIdentitySafety(productionDatabase, {
+      NODE_ENV: 'production',
+      LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: boundedFutureWaiver,
+    }),
+    (error) => {
+      assert.equal(error.message, productionSafetyTestConstants.productionPreflightError);
+      return true;
+    },
   );
   await assertRealPreflightRejects();
   await productionDatabase.query(

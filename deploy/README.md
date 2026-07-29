@@ -593,14 +593,40 @@ been proven healthy and has become the only supported rollback baseline.
 
 #### Release A prerequisites and snapshot
 
-`SEC-PROD-001` is a separate prerequisite, not part of the Arc feature rollout.
-Before Release A, its reviewed security image and migration must already be
-deployed and verified: all seven repository-known demo Auth identities are
-disabled, their refresh sessions are revoked, password login and pre-ban JWT
-access are rejected, and the recorded profile/program/report/attachment and
-other business-row counts are unchanged. This production mutation still
-requires explicit owner approval. Do not infer approval from a Release A
-request, and do not delete Auth, profile, program, report, or attachment rows.
+`SEC-PROD-001` is a separate security requirement, not part of the Arc feature
+rollout. Release A may proceed only through one of these explicitly recorded
+gates:
+
+1. The reviewed security image and migration have been deployed and verified:
+   all seven repository-known demo Auth identities are disabled, their refresh
+   sessions are revoked, password login and pre-ban JWT access are rejected,
+   and the recorded profile/program/report/attachment and other business-row
+   counts are unchanged.
+2. A time-bounded hackathon waiver is active. The owner approved retaining the
+   demo identities through `2026-08-07T16:59:00Z`. This exception permits only
+   a testnet hackathon release; it does not complete `SEC-PROD-001` and must not
+   be represented as hardened production or general availability. No Auth
+   identity, session, database row, image, or deployment was mutated when the
+   waiver was recorded.
+
+The waiver expiry is only an application and deployment control: at expiry the
+Nest API rejects the seven exact UUIDs again, and future production migrations
+fail their active-demo preflight. Expiry does **not** rotate a Supabase password,
+revoke an Auth session or refresh token, invalidate an already-issued JWT at
+PostgREST or Storage, or cancel an existing signed URL before that URL's own
+TTL. Complete `SEC-PROD-001` cleanup at or before the expiry; do not treat the
+timestamp as credential or session revocation.
+
+While the waiver is active, Arc, Ethereum, Arbitrum, and Base must remain on
+their configured testnets. Do not use real funds, real personal information, or
+confidential vulnerability reports. Stop the release immediately if any
+mainnet asset, real user data, unexpected demo identity, credential abuse,
+security discrepancy, or waiver-boundary violation is observed. The waiver is
+invalid at and after `2026-08-07T16:59:00Z`: stop further releases and privileged
+demo-account use, then complete the original exact-UUID password rotation, ban,
+session revocation, old-JWT/PostgREST/Storage rejection, and preservation-count
+checks before resuming. The exception does not authorize deleting Auth,
+profile, program, report, attachment, or other referenced business rows.
 
 The last recorded read-only inventory found 9 Auth users, with 7 exact demo
 targets, 0 targets banned, 1 active target session, and 1 unrevoked target
@@ -646,8 +672,10 @@ retains the old service-role RPC grants.
 
 Deploy Release A in this order:
 
-1. Confirm the separate `SEC-PROD-001` deployment evidence and unchanged
-   preservation counts. Stop if that evidence is absent or stale.
+1. Confirm either the completed `SEC-PROD-001` deployment evidence and unchanged
+   preservation counts, or the owner-approved hackathon waiver above with its
+   exact expiry and every restriction still satisfied. Stop if the selected
+   evidence is absent, stale, expired, or contradicted by current state.
 2. Build and verify immutable API, web, and migration images from one Release A
    SHA. Confirm that the migration image contains the exact `004`-through-`010`
    set above and no Release B revoke migration.

@@ -35,6 +35,19 @@ const durationMillisecondsSchema = positiveIntegerSchema.pipe(z.number().max(600
 const booleanStringSchema = z
   .union([z.boolean(), z.enum(['true', 'false'])])
   .transform((value) => value === true || value === 'true');
+const canonicalUtcTimestampSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/, 'Expected a canonical UTC timestamp')
+  .refine((value) => {
+    const timestamp = Date.parse(value);
+    const canonicalValue = /\.\d{3}Z$/.test(value) ? value : value.replace(/Z$/, '.000Z');
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === canonicalValue;
+  }, 'Expected a real UTC calendar timestamp');
+const optionalCanonicalUtcTimestampSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}, canonicalUtcTimestampSchema.optional());
 const uuidAllowlistSchema = z
   .string()
   .default('')
@@ -55,6 +68,9 @@ export const apiEnvironmentSchema = z
     SUPABASE_URL: httpUrlSchema,
     SUPABASE_ANON_KEY: secretValueSchema,
     SUPABASE_SERVICE_ROLE_KEY: secretValueSchema,
+    // Temporary, server-only hackathon waiver. A missing or blank value is
+    // inactive; malformed nonblank values fail startup validation.
+    LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL: optionalCanonicalUtcTimestampSchema,
     ARC_RPC_URL: httpUrlSchema,
     ETHEREUM_SEPOLIA_RPC_URL: httpUrlSchema.default('https://ethereum-sepolia-rpc.publicnode.com'),
     ARBITRUM_SEPOLIA_RPC_URL: httpUrlSchema.default('https://sepolia-rollup.arbitrum.io/rpc'),
@@ -113,10 +129,7 @@ export const apiEnvironmentSchema = z
           message: 'Circle escrow deployment is locked to Arc Testnet chain ID 5042002',
         });
       }
-      if (
-        environment.USDC_ADDRESS.toLowerCase() !==
-        '0x3600000000000000000000000000000000000000'
-      ) {
+      if (environment.USDC_ADDRESS.toLowerCase() !== '0x3600000000000000000000000000000000000000') {
         context.addIssue({
           code: 'custom',
           path: ['USDC_ADDRESS'],

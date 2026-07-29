@@ -45,10 +45,29 @@ export function assertDemoSeedTargetSafety(environment) {
   );
 }
 
+export function isLocalDemoIdentityWaiverActive(environment, now = Date.now()) {
+  const allowedUntil = environment.LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL ?? '';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(allowedUntil)) {
+    return false;
+  }
+
+  const expiresAt = Date.parse(allowedUntil);
+  const canonicalAllowedUntil = /\.\d{3}Z$/.test(allowedUntil)
+    ? allowedUntil
+    : allowedUntil.replace(/Z$/, '.000Z');
+  return (
+    Number.isFinite(expiresAt) &&
+    new Date(expiresAt).toISOString() === canonicalAllowedUntil &&
+    expiresAt > now
+  );
+}
+
 /**
  * Production migrations fail before making schema changes while a known local
- * demo identity can authenticate. The query returns one aggregate boolean and
- * never returns an email, credential, token, password hash, or user row.
+ * demo identity can authenticate. During the temporary waiver, only the seven
+ * exact approved UUIDs are ignored; every other demo email/password marker
+ * remains a hard failure. The query returns one aggregate boolean and never
+ * returns an email, credential, token, password hash, or user row.
  *
  * Any unavailable or unexpected Auth-schema result fails closed with the same
  * generic message so deployment logs cannot disclose database details.
@@ -90,28 +109,45 @@ export async function assertProductionDemoIdentitySafety(client, environment) {
     }
 
     const deterministicDemoPasswordHash = hashSync(DEMO_PASSWORD, DEMO_PASSWORD_SALT);
+    const exactIdentityWaiverActive = isLocalDemoIdentityWaiverActive(environment);
     const result = await client.query(
       `
         select exists (
           select 1
           from auth.users
           where (
-            id in (
-              '30000000-0000-4000-8000-000000000001'::uuid,
-              '30000000-0000-4000-8000-000000000002'::uuid,
-              '30000000-0000-4000-8000-000000000003'::uuid,
-              '30000000-0000-4000-8000-000000000004'::uuid,
-              '30000000-0000-4000-8000-000000000005'::uuid,
-              '30000000-0000-4000-8000-000000000006'::uuid,
-              '30000000-0000-4000-8000-000000000007'::uuid
+            (
+              not $2::boolean
+              and id in (
+                '30000000-0000-4000-8000-000000000001'::uuid,
+                '30000000-0000-4000-8000-000000000002'::uuid,
+                '30000000-0000-4000-8000-000000000003'::uuid,
+                '30000000-0000-4000-8000-000000000004'::uuid,
+                '30000000-0000-4000-8000-000000000005'::uuid,
+                '30000000-0000-4000-8000-000000000006'::uuid,
+                '30000000-0000-4000-8000-000000000007'::uuid
+              )
             )
-            or lower(coalesce(email, '')) like '%@local.demo'
-            or encrypted_password = $1
+            or (
+              id not in (
+                '30000000-0000-4000-8000-000000000001'::uuid,
+                '30000000-0000-4000-8000-000000000002'::uuid,
+                '30000000-0000-4000-8000-000000000003'::uuid,
+                '30000000-0000-4000-8000-000000000004'::uuid,
+                '30000000-0000-4000-8000-000000000005'::uuid,
+                '30000000-0000-4000-8000-000000000006'::uuid,
+                '30000000-0000-4000-8000-000000000007'::uuid
+              )
+              and (
+                lower(coalesce(email, '')) like '%@local.demo'
+                or encrypted_password = $1
+              )
+            )
           )
           and (banned_until is null or banned_until <= now())
         ) as has_active_demo_identity
       `,
-      [deterministicDemoPasswordHash],
+      [deterministicDemoPasswordHash, exactIdentityWaiverActive],
     );
 
     if (
