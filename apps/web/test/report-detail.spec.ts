@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { NeedsInformationAlert } from '@/components/reports/needs-information-alert';
 import { ReportContent } from '@/components/reports/report-content';
+import { ReportAiReviewCard } from '@/components/reports/report-ai-review-card';
 import {
   InformationRequestCallout,
   REPORT_NOT_FOUND_DESCRIPTION,
@@ -83,6 +84,53 @@ const report: ReportDetail = reportDetailSchema.parse({
 });
 
 describe('SR-12 report detail', () => {
+  it('keeps AI duplicate candidates private to authorized reviewers', () => {
+    const review = {
+      status: 'ready' as const,
+      summary: 'The report describes an access-control issue.',
+      duplicateAssessment: 'likely' as const,
+      duplicateConfidence: 0.94,
+      duplicateCandidates: [
+        {
+          candidateReportId: '10000000-0000-4000-8000-000000000099',
+          assessment: 'likely' as const,
+          reason: 'The affected function and outcome match.',
+          confidence: 0.94,
+        },
+      ],
+    };
+    const candidateId = '10000000-0000-4000-8000-000000000099';
+
+    const researcherMarkup = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, { audience: 'researcher', review }),
+    );
+    const reviewerMarkup = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, { audience: 'reviewer', review }),
+    );
+
+    expect(researcherMarkup).toContain('A prior report may describe the same issue.');
+    expect(researcherMarkup).not.toContain(candidateId);
+    expect(reviewerMarkup).toContain(candidateId);
+    expect(reviewerMarkup).toContain('Authorized duplicate candidates');
+  });
+
+  it('renders safe Processing and Unavailable states when the API has no AI projection', () => {
+    const processing = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'researcher',
+        review: { status: 'processing' },
+      }),
+    );
+    const unavailable = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, { audience: 'researcher', review: undefined }),
+    );
+
+    expect(processing).toContain('Processing');
+    expect(processing).toContain('AI review is queued for this program');
+    expect(unavailable).toContain('Unavailable');
+    expect(unavailable).toContain('Human review and report actions are still available.');
+  });
+
   it('pins the submitted-success and private-content copy', () => {
     expect(SUBMITTED_SUCCESS_TITLE).toBe('Report submitted privately');
     expect(SUBMITTED_SUCCESS_DESCRIPTION).toBe(

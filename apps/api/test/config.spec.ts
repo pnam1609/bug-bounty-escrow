@@ -42,6 +42,45 @@ describe('API configuration', () => {
     await module.close();
   });
 
+  it('validates provider-neutral DeepSeek configuration and keeps retry bounds finite', () => {
+    const deepseek = parseApiEnvironment({
+      ...config,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+      AI_PROVIDER: 'deepseek',
+      DEEPSEEK_API_KEY: 'deepseek-test-key',
+      AI_MODEL: 'deepseek-v4-flash',
+      AI_API_BASE_URL: 'https://api.deepseek.example.test',
+      AI_PRIVACY_MODE: 'demo',
+      AI_MAX_RETRIES: '3',
+    });
+    expect(deepseek).toMatchObject({
+      AI_PROVIDER: 'deepseek',
+      AI_MODEL: 'deepseek-v4-flash',
+      AI_MAX_RETRIES: 3,
+    });
+  });
+
+  it.each(['missing', ''])('rejects DeepSeek without a nonblank API key (%s)', (key) => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+        AI_PROVIDER: 'deepseek',
+        ...(key === 'missing' ? {} : { DEEPSEEK_API_KEY: key }),
+      }),
+    ).toThrow(expect.objectContaining({ message: expect.stringContaining('DEEPSEEK_API_KEY') }));
+  });
+
+  it('rejects unbounded AI retries', () => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+        AI_MAX_RETRIES: '6',
+      }),
+    ).toThrow(expect.objectContaining({ message: expect.stringContaining('AI_MAX_RETRIES') }));
+  });
+
   it('keeps the temporary local-demo waiver server-side and trims its timestamp', () => {
     const waiverConfig = parseApiEnvironment({
       ...config,

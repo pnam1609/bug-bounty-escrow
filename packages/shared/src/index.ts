@@ -254,6 +254,10 @@ export type {
 } from './contracts/notification.js';
 export {
   approveRewardRequestSchema,
+  aiDuplicateAssessmentSchema,
+  aiDuplicateCandidateSchema,
+  aiReportFingerprintSchema,
+  aiReviewStatusSchema,
   attachmentUploadRequestSchema,
   commentListQuerySchema,
   commentListResponseSchema,
@@ -281,6 +285,7 @@ export {
   reportListResponseSchema,
   reportProgramFilterOptionSchema,
   reportProgramFilterOptionsResponseSchema,
+  reportAiReviewSchema,
   reportResponseSchema,
   reportSeveritySchema,
   reportStatusSchema,
@@ -310,6 +315,10 @@ export type {
 } from './contracts/reward-settlement.js';
 export type {
   ApproveRewardRequest,
+  AiDuplicateAssessment,
+  AiDuplicateCandidate,
+  AiReportFingerprint,
+  AiReviewStatus,
   AttachmentUploadRequest,
   CommentListResponse,
   ConfirmPaymentRequest,
@@ -322,6 +331,7 @@ export type {
   PublicDisclosureListResponse,
   RejectReportRequest,
   ReportComment,
+  ReportAiReview,
   ReportDetail,
   ReportImpact,
   ReportListQuery,

@@ -342,6 +342,61 @@ export const reportInformationRequestSchema = z
     requestedAt: isoDateTimeSchema,
   })
   .strict();
+
+/**
+ * AI assistance is an advisory sub-state, not a report lifecycle status. The field is optional
+ * for compatibility while an API deployment is being upgraded; the UI treats an omitted value
+ * as unavailable rather than inventing a result. Fingerprints and duplicate candidates are only
+ * present in an owner/reviewer projection after server-side authorization.
+ */
+export const aiReviewStatusSchema = z.enum(['processing', 'ready', 'unavailable']);
+export const aiDuplicateAssessmentSchema = z.enum(['none', 'possible', 'likely']);
+
+export const aiReportFingerprintSchema = z
+  .object({
+    affectedComponents: z.array(z.string()),
+    functions: z.array(z.string()),
+    attackVector: z.string(),
+    vulnerabilityClasses: z.array(z.string()),
+    prerequisites: z.array(z.string()),
+    securityImpacts: z.array(z.string()),
+    normalizedSummary: z.string(),
+  })
+  .strict();
+
+export const aiDuplicateCandidateSchema = z
+  .object({
+    candidateReportId: uuidSchema,
+    assessment: z.enum(['possible', 'likely']),
+    reason: z.string(),
+    confidence: z.number().min(0).max(1),
+  })
+  .strict();
+
+export const reportAiReviewSchema = z
+  .object({
+    status: aiReviewStatusSchema,
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    schemaVersion: z.number().int().positive().optional(),
+    submissionRevision: z.number().int().positive().optional(),
+    submissionSequence: z.number().int().positive().optional(),
+    sourceContentHash: z.string().optional(),
+    fingerprint: aiReportFingerprintSchema.optional(),
+    summary: z.string().optional(),
+    completenessScore: z.number().min(0).max(1).optional(),
+    suggestedSeverity: reportSeveritySchema.optional(),
+    scopeAssessment: z.enum(['in_scope', 'out_of_scope', 'uncertain']).optional(),
+    missingInformation: z.array(z.string()).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    duplicateAssessment: aiDuplicateAssessmentSchema.optional(),
+    duplicateConfidence: z.number().min(0).max(1).optional(),
+    duplicateCandidates: z.array(aiDuplicateCandidateSchema).max(10).optional(),
+    generatedAt: isoDateTimeSchema.optional(),
+    persistedAt: isoDateTimeSchema.optional(),
+    errorCode: z.string().optional(),
+  })
+  .strict();
 export const reportSummarySchema = z
   .object({
     id: uuidSchema,
@@ -374,6 +429,7 @@ export const reportDetailSchema = reportSummarySchema
     latestInformationRequest: reportInformationRequestSchema.optional(),
     contentHash: z.string(),
     createdAt: isoDateTimeSchema,
+    aiReview: reportAiReviewSchema.optional(),
   })
   .strict();
 
@@ -451,6 +507,11 @@ export type SignedUploadResponse = z.output<typeof signedUploadResponseSchema>;
 export type SignedDownloadResponse = z.output<typeof signedDownloadResponseSchema>;
 export type ReportComment = z.output<typeof reportCommentSchema>;
 export type ReportImpact = z.output<typeof reportImpactSchema>;
+export type AiReviewStatus = z.output<typeof aiReviewStatusSchema>;
+export type AiDuplicateAssessment = z.output<typeof aiDuplicateAssessmentSchema>;
+export type AiReportFingerprint = z.output<typeof aiReportFingerprintSchema>;
+export type AiDuplicateCandidate = z.output<typeof aiDuplicateCandidateSchema>;
+export type ReportAiReview = z.output<typeof reportAiReviewSchema>;
 export type ReportSummary = z.output<typeof reportSummarySchema>;
 export type ReportDetail = z.output<typeof reportDetailSchema>;
 export type ReportResponse = z.output<typeof reportResponseSchema>;

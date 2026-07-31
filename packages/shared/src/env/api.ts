@@ -93,8 +93,14 @@ export const apiEnvironmentSchema = z
       .string()
       .min(1)
       .default('packages/contracts/artifacts/BountyEscrow.v1.json'),
-    AI_PROVIDER: z.enum(['mock', 'gemini', 'disabled']).default('mock'),
+    AI_PROVIDER: z.enum(['mock', 'gemini', 'deepseek', 'disabled']).default('mock'),
     GEMINI_API_KEY: secretValueSchema.optional(),
+    DEEPSEEK_API_KEY: secretValueSchema.optional(),
+    AI_MODEL: secretValueSchema.optional(),
+    AI_API_BASE_URL: httpUrlSchema.optional(),
+    AI_PRIVACY_MODE: z.enum(['demo', 'paid']).default('demo'),
+    AI_REQUEST_TIMEOUT_MS: durationMillisecondsSchema.default(15_000),
+    AI_MAX_RETRIES: positiveIntegerSchema.default(2),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
@@ -106,6 +112,20 @@ export const apiEnvironmentSchema = z
         code: 'custom',
         path: ['GEMINI_API_KEY'],
         message: 'GEMINI_API_KEY is required when AI_PROVIDER is gemini',
+      });
+    }
+    if (environment.AI_PROVIDER === 'deepseek' && environment.DEEPSEEK_API_KEY === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DEEPSEEK_API_KEY'],
+        message: 'DEEPSEEK_API_KEY is required when AI_PROVIDER is deepseek',
+      });
+    }
+    if (environment.AI_MAX_RETRIES > 5) {
+      context.addIssue({
+        code: 'custom',
+        path: ['AI_MAX_RETRIES'],
+        message: 'AI_MAX_RETRIES must be at most 5',
       });
     }
     if (environment.CIRCLE_CONTRACTS_ENABLED) {

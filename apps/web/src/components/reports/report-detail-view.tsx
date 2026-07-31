@@ -20,6 +20,7 @@ import { useEffect, type ReactNode } from 'react';
 import { CommentThread } from './comment-thread';
 import { ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
+import { ReportAiReviewCard } from './report-ai-review-card';
 import { getReportAccessFailure, REPORTS_LOGIN_HREF } from './report-access';
 import { safeReportListReturnTo } from './report-detail-model';
 import {
@@ -365,6 +366,8 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
 
         <DisclosureSummary report={report} />
       </div>
+
+      <ReportAiReviewCard audience="researcher" review={report.aiReview} />
 
       <ReportContent report={report} token={token} />
 

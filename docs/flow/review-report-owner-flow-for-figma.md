@@ -26,6 +26,8 @@ ký approval và khởi động reward settlement.
 - Private report detail, attachment download, comment thread và audit timeline.
 - Các quyết định: request information, validate, reject và mark duplicate.
 - Vòng `needs_information` → researcher bổ sung → resubmit → review tiếp.
+- Kết quả AI review đã được tự động tạo từ lần submit/resubmit hiện hành, persist theo report revision
+  và content hash, rồi hiển thị read-only như thông tin tư vấn cho human reviewer.
 - Owner-only reward approval cho tier range, flat và percentage.
 - Durable Arc reward settlement, recovery và terminal presentation.
 - Desktop, tablet và mobile tại 1440 px, 768 px và 390 px.
@@ -39,9 +41,13 @@ ký approval và khởi động reward settlement.
 - Tạo, deploy hoặc fund program escrow; xem `create-program-owner-flow-for-figma.md`.
 - Public disclosure/Known Issues sau khi program end.
 - Reviewer invitation/assignment management.
-- AI provider implementation hoặc tự động chạy AI khi mở report.
+- UI/implementation chi tiết của submit/resubmit; flow đó chịu trách nhiệm atomically ghi nhận lần
+  gửi và queue AI job tương ứng.
+- AI provider, prompt orchestration, worker retry hoặc queue implementation. Inbox/detail chỉ đọc
+  trạng thái và kết quả đã persist; mở screen không khởi chạy AI.
+- Bất kỳ owner/reviewer control nào để Generate, Regenerate hoặc Retry AI review.
 - Mainnet, token khác canonical Arc USDC hoặc payout qua chain khác Arc Testnet.
-- Thay đổi smart contract, database, API, code hoặc Figma trong chính task viết flow này.
+- Thay đổi smart contract, database, API hoặc application code trong chính task viết flow này.
 
 ## 3. Nguồn sự thật và source map
 
@@ -53,7 +59,7 @@ ký approval và khởi động reward settlement.
 | `docs/tasks/frontend.md`                          | Ticket family `FE-REV-001` đến `FE-REV-009` và frontend guardrails                          |
 | `docs/tasks/backend.md`                           | Contract `BE-RPT-001`, `BE-RPT-003`, `BE-RPT-006` đến `BE-RPT-011`, attachment/comment APIs |
 | Notion project `06a0ee55892f4852bffd3b871ef4df8d` | Status/dependency của ticket đang thực hiện; phải đọc live trước khi implement              |
-| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-07                                       |
+| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-08                                       |
 
 Notion là nguồn sự thật cho **trạng thái công việc**, không tự thay thế acceptance criteria trong
 tài liệu này. Trước khi bắt đầu implementation, agent phải map RR screens vào ticket FE-REV tương
@@ -71,6 +77,7 @@ Mapping dự kiến:
 | Reject                       | FE-REV-006, BE-RPT-008                                                     |
 | Duplicate                    | FE-REV-007, BE-RPT-009                                                     |
 | Reward approval/settlement   | FE-REV-008/009, BE-RPT-010/011 và Arc reward-settlement contract hiện hành |
+| Persisted AI review          | Ticket AI review tương ứng phải được map từ Notion live; không suy đoán ID |
 
 ### 3.2 Current code map
 
@@ -94,6 +101,10 @@ Code hiện tại đã có `/review` và `/review/[id]`, nhưng comment trong so
 Vì vậy Figma phải mô tả lại flow có hệ thống; không được lấy layout hiện tại làm bằng chứng rằng tất
 cả responsive, access, privacy và settlement states đã đạt.
 
+Current review UI chưa phải bằng chứng cho persisted AI review của revision hiện hành. Target flow
+phải đọc AI run/result từ backend; không gọi AI provider từ inbox/detail và không suy ra result mới
+chỉ vì owner/reviewer mở hoặc reload screen.
+
 Legacy endpoints `POST /approve-reward`, `/pay` và `/confirm-payment` hiện trả
 `reward_settlement_flow_required`. Figma/implementation mới không được gọi hoặc mô tả chúng như
 happy path. Reward phải đi qua durable reward-settlement intents.
@@ -104,16 +115,21 @@ File:
 
 [Bug Bounty Escrow — Dark Desktop Preview](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview)
 
-| Nguồn      | Mục đích                                                                         |
-| ---------- | -------------------------------------------------------------------------------- |
-| `106:680`  | Program-owner workspace/sidebar geometry reference                               |
-| `106:535`  | Program-owner page composition reference                                         |
-| `95:624`   | Program-owner navigation/reference state                                         |
-| `272:1882` | Researcher report-detail content/status reference; không copy researcher actions |
+| Nguồn                             | Mục đích                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `462:252`                         | Canonical target page `Review report`; không tạo page hoặc Figma file mới       |
+| `462:253`                         | Canonical target section `RR · Owner review report flow` cho RR-01 đến RR-08    |
+| `518:252`, `518:5068`, `518:5093` | RR-02 inline AI result tại desktop/tablet/mobile; không có `View AI review` CTA |
+| `543:489`                         | Supporting reference: external AI state badge mapping; không phải runtime route |
+| `106:680`                         | Program-owner workspace/sidebar geometry reference only                         |
+| `106:535`                         | Program-owner page composition reference only                                   |
+| `95:624`                          | Program-owner navigation/reference state only                                   |
+| `272:1882`                        | Researcher report-detail visual reference only; không copy researcher actions   |
 
-Các node trên là visual reference, không phải contract đầy đủ cho review flow. RR-01 đến RR-07 là
-frame inventory mới cần đặt trong page Program owner, reuse BBE Design System và semantic layer
-names. Sample report IDs, wallet, reward, comments và timestamps chỉ là fixture review.
+RR-01 đến RR-08 phải được đặt trong page `Review report` node `462:252`, section
+`RR · Owner review report flow` node `462:253`, reuse BBE Design System và semantic layer names.
+Các Program owner/Researcher node cũ chỉ là visual reference, không phải target hay contract đầy đủ.
+Sample report IDs, wallet, reward, comments và timestamps chỉ là fixture review.
 
 ## 4. Roles, quyền và privacy
 
@@ -146,8 +162,8 @@ names. Sample report IDs, wallet, reward, comments và timestamps chỉ là fixt
 - Session/role đang loading phải render full-page loading, không flash report data.
 - Server authorization và RLS là boundary; ẩn button phía client không phải authorization.
 - Report body, reproduction steps, custom impacts, secret Gist URL, attachment metadata, comments,
-  content hash, report UUID và duplicate target không vào analytics, browser console, error tracker,
-  notification preview hoặc public cache.
+  content hash, report UUID, duplicate target và AI input/result không vào analytics, browser
+  console, error tracker, notification preview hoặc public cache.
 - 403 và 404 dùng cùng safe detail `This report is not available` để tránh enumeration.
 - Logout hoặc principal change phải clear/invalidate toàn bộ private query cache.
 
@@ -194,6 +210,17 @@ rejected | duplicate | paid
   └─ terminal for this review flow
 ```
 
+Mỗi successful submit và resubmit đồng thời ghi nhận submission revision/content hash hiện hành và
+queue đúng một AI review job bằng transaction/outbox semantics. AI run được bind bằng `reportId` +
+submission revision + source content hash; completed structured result được persist trước khi trở
+thành `Ready` trên review UI. Queue/run/result không tạo report status mới và không được tự chuyển
+report qua bất kỳ review hoặc settlement transition nào.
+
+Happy path khi owner/reviewer mở detail là AI result của revision hiện hành đã `completed` và được
+persist. `queued | running | failed` chỉ là trạng thái của AI run, độc lập với report lifecycle;
+AI result luôn là optional/advisory input và human review tiếp tục được khi AI đang xử lý hoặc không
+khả dụng.
+
 `resolvedAt` là human review đầu tiên chuyển sang `validated | rejected | duplicate`; thời gian
 reward/payout không thuộc resolution metric. Không tạo status UI mới để biểu diễn modal, wallet
 prompt hoặc provider progress.
@@ -226,6 +253,7 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 | RR-05 | Validated / approve reward | Range-flat, percentage, reviewer-waiting, reserve error                        |
 | RR-06 | Arc settlement             | Awaiting signature, uncertain, submitted/reconciling, failed/replacement, paid |
 | RR-07 | Terminal/system states     | Rejected, duplicate, paid, safe unavailable và access denied                   |
+| RR-08 | Persisted AI review        | Current revision result + processing/unavailable/stale/access-safe states      |
 
 ## 8. RR-01 — Review inbox
 
@@ -235,6 +263,10 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Copy nói rõ owner chỉ thấy owned programs; reviewer chỉ thấy assigned programs.
 - Privacy/audit callout: quyết định được ghi nhận theo account.
 - Không hiển thị tổng số private reports ở public header hoặc browser title.
+- Có thể hiển thị indicator read-only `AI review: Ready | Processing | Unavailable`; indicator chỉ
+  phản ánh persisted run hiện hành, không phải report decision/status.
+- Không thêm AI action hoặc AI filter khi chưa có API contract tương ứng. Không có Generate,
+  Regenerate hoặc Retry AI control trên inbox.
 
 ### Filters
 
@@ -291,6 +323,17 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Content hash hiển thị đầy đủ để đối chiếu, không dùng làm public identifier.
 - Private comments dùng chung giữa researcher và authorized owner/reviewer.
 
+### Persisted AI summary
+
+- Sau report evidence và audit context, trước full human decision controls, hiển thị summary của AI
+  result đã persist và khớp current submission revision/content hash.
+- Summary và inline result luôn mang label `AI suggestion`; không có action `View full AI review` và
+  không mở AI result trong panel/dialog riêng.
+- AI output không prefill final severity, duplicate target, decision form hoặc reward field. Human
+  reviewer phải tự chọn và confirm mọi quyết định.
+- Nếu result chưa current/valid/available, dùng safe state của RR-08 và vẫn để human decision
+  controls khả dụng theo report status.
+
 ### Decision rail
 
 - Desktop: hai cột; content chính và rail 338 px, rail sticky sau khi header đã qua.
@@ -327,6 +370,9 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Researcher bổ sung ở private detail của họ rồi `PATCH ... { resubmit: true }`.
 - Server transition report về `submitted`; owner inbox/detail refetch hiển thị action set mới.
 - Timeline giữ request và resubmit audit event; `submittedAt` ban đầu không reset.
+- Cùng resubmit transaction/outbox path tự động queue một AI run mới cho revision/content hash mới.
+- AI result của revision trước chuyển thành `superseded`; không được render như current suggestion,
+  kể cả khi run mới còn queued/running/failed.
 - Nếu owner đang mở stale `needs_information`, mutation conflict phải refresh, không ghi đè response.
 
 ## 11. RR-04 — Decision dialogs
@@ -489,7 +535,239 @@ coi Circle provider acceptance là paid.
 - Session expired đưa về login với safe returnTo; clear private cache.
 - Wrong role render access denied trong shell an toàn, không render report title/content phía sau.
 
-## 15. Attachment, comment và AI boundaries
+## 15. RR-08 — Persisted AI review
+
+### 15.1 Trigger và per-program serialization
+
+- Mỗi successful submit/resubmit atomically persist immutable submission revision/content hash,
+  allocate monotonic `programSubmissionSequence` và enqueue đúng một AI run. Unique key tối thiểu là
+  `(reportId, submissionRevision, contentHash)`.
+- Queue/outbox phải durable trong PostgreSQL. Không dùng process-memory queue vì nhiều API/worker
+  replica có thể nhận hai report cùng lúc.
+- Worker concurrency là `1` trên mỗi `programId` và FIFO theo `programSubmissionSequence`; các program
+  khác có thể chạy song song. Job sequence `N` chỉ duplicate-check với report cùng program có sequence
+  `< N`.
+- Hai report giống nhau submit đồng thời vào cùng program phải nhận sequence khác nhau. Job sau chỉ
+  được claim khi job trước completed hoặc terminal, nên report sau không thể bỏ qua report trước do
+  race.
+- Retry/double-click/reload không enqueue thêm run. Transient provider errors retry bounded với
+  backoff/jitter; terminal failure giải phóng queue để job tiếp theo chạy và không chặn human review.
+- Submit API không giữ HTTP request vô hạn để chờ Gemini. UI mở report detail ngay với
+  `AI review: Processing`, rồi polling/realtime đọc result đã persist. Khi queue/quota khỏe, worker bắt
+  đầu ngay sau commit; không hứa một latency cố định mà free tier không bảo đảm.
+
+Duplicate pipeline là hai AI pass xen giữa một BE retrieval pass:
+
+1. AI pass 1 đọc current report và tạo validated semantic fingerprint gồm affected components,
+   functions, attack vector, vulnerability classes, prerequisites, security impacts và normalized
+   summary. Fingerprint không lấy scope/impact researcher chọn làm authority.
+2. BE persist fingerprint rồi union candidate signals trên mọi prior sequence cùng program: exact
+   content hash, contract/function/endpoint identifiers, normalized full-text/trigram similarity,
+   affected component, vulnerability class và attack vector. Scope/impact chỉ tăng ranking score,
+   không được hard-filter; metadata cố tình sai vẫn có thể match nội dung thực.
+3. AI pass 2 nhận current fingerprint/report và bounded top candidates để trả
+   `duplicateAssessment = none | possible | likely`, confidence và bounded matching reasons.
+4. Không gửi future sequence hoặc report thuộc program khác. Owner/reviewer candidate references được
+   re-authorize lúc đọc; researcher chỉ thấy safe aggregate assessment, không thấy report
+   ID/title/author/private excerpt của người khác.
+5. AI không tự mark duplicate; RR-04 human duplicate dialog vẫn là transition authority duy nhất.
+
+### 15.2 Data và provenance
+
+- AI run status dùng `queued | running | completed | failed` hoặc equivalent stable server enum.
+- Completed result gồm structured summary, completeness, suggested severity, scope assessment,
+  missing information, confidence và authorized duplicate candidates nếu feature này được bật.
+- Mỗi run/result ghi `reportId`, source submission revision, source content hash, `generatedAt` và
+  `persistedAt`. UI chỉ coi result là current khi cả revision và hash khớp report đang đọc.
+- Prior result được giữ cho audit nhưng mang `superseded`; không dùng làm current summary hoặc
+  fallback khi revision mới chưa completed.
+- Persist thêm `programId`, `programSubmissionSequence`, `provider`, exact `model`, `schemaVersion`,
+  `attemptCount`, `startedAt`, terminal status/error code, `fingerprintSchemaVersion`,
+  `candidateRetrievalVersion` và `comparisonSchemaVersion`. Persist validated fingerprint và result,
+  nhưng không persist raw prompt hoặc raw provider response.
+
+### 15.2a AI request contract
+
+AI worker tách request thành **internal job envelope** và **provider-safe report snapshot**. Envelope dùng
+để idempotency/authorization ở backend; snapshot mới là dữ liệu được gửi cho model.
+
+```json
+{
+  "job": {
+    "reportId": "internal-only",
+    "programId": "internal-only",
+    "submissionRevision": 8,
+    "contentHash": "sha256:...",
+    "programSubmissionSequence": 42,
+    "idempotencyKey": "reportId:8:sha256:...",
+    "promptVersion": "review-v1",
+    "schemaVersion": "ai-review-v1",
+    "model": "gemini-3.5-flash"
+  },
+  "report": {
+    "title": "...",
+    "affectedAsset": "...",
+    "policyAndScope": "...",
+    "description": "...",
+    "reproductionSteps": ["..."],
+    "expectedBehavior": "...",
+    "actualBehavior": "...",
+    "impact": "...",
+    "researcherSeverity": "high"
+  },
+  "programRules": {
+    "severityRubric": "...",
+    "duplicatePolicy": "..."
+  },
+  "duplicateContext": {
+    "priorSameProgramCandidates": [
+      { "candidateRef": "opaque-ref", "sequence": 17, "fingerprint": "...", "boundedReasons": ["..."] }
+    ]
+  }
+}
+```
+
+Request requirements:
+
+- Snapshot phải lấy từ immutable current submission revision; không đọc lại mutable draft trong lúc worker
+  chạy. `contentHash` và revision phải được kiểm tra trước khi claim job.
+- `duplicateContext` chỉ gồm candidate cùng `programId` có sequence nhỏ hơn current sequence; candidate
+  reference là opaque và được re-authorize ở read time.
+- Có thể gửi policy/scope/severity rubric và report evidence đã sanitize; không gửi researcher identity,
+  owner/reviewer identity, private comments không cần cho analysis, reward/wallet data hoặc decision history.
+- Không gửi attachment binary, video, private Gist URL, signed URL, storage key, access token, API key,
+  seed/private key, raw database row, report UUID của người khác hoặc provider metadata không cần thiết.
+- Request phải bounded về độ dài field, số bước, số candidate và prompt variables; HTML/script/URL nhạy cảm
+  phải được redact hoặc canonicalize trước khi gọi provider.
+- Free/demo provider chỉ nhận synthetic data theo policy; private production report phải fail closed nếu
+  provider mode/privacy acknowledgement không hợp lệ.
+
+### 15.2b AI response contract
+
+Provider chỉ được trả structured JSON theo schema versioned; backend validate bằng Zod (hoặc validator
+tương đương) trước khi persist. Response hợp lệ là advisory, không phải transition command.
+
+```json
+{
+  "schemaVersion": "ai-review-v1",
+  "summary": "...",
+  "completeness": {
+    "score": 0.78,
+    "checks": [
+      { "key": "title_and_affected_component", "status": "present", "reason": "..." },
+      { "key": "reproduction_steps", "status": "present", "reason": "..." },
+      { "key": "expected_vs_actual", "status": "missing", "reason": "..." }
+    ]
+  },
+  "suggestedSeverity": {
+    "level": "high",
+    "confidence": 0.82,
+    "rationale": "..."
+  },
+  "scopeAssessment": {
+    "result": "in_scope",
+    "confidence": 0.76,
+    "rationale": "..."
+  },
+  "missingInformation": ["..."],
+  "duplicateAssessment": {
+    "assessment": "possible",
+    "confidence": 0.71,
+    "matchingReasons": ["..."],
+    "candidates": [
+      { "candidateRef": "opaque-ref", "assessment": "possible", "confidence": 0.71, "reasons": ["..."] }
+    ]
+  }
+}
+```
+
+Response requirements:
+
+- `summary`, completeness checks, severity/scope suggestions, missing information và duplicate assessment
+  đều có bounded length/count; confidence nằm trong `[0,1]`; enum ngoài allowlist là invalid.
+- `candidateRef` chỉ là reference để backend re-authorize; AI không được trả private title, author,
+  report UUID, excerpt hoặc metadata của candidate không được phép đọc.
+- Không cho phép các field/command `decision`, `finalSeverity`, `reportStatus`, `validate`, `reject`,
+  `requestInformation`, `markDuplicate`, `rewardAmount`, `reserve`, `sign`, `payout`, `disclose` hoặc
+  `transaction`. Nếu provider trả các field này, schema validation phải reject hoặc strip fail-closed.
+- Không render raw provider JSON, raw rationale có secret/URL hoặc lỗi provider. Parse/schema failure,
+  prompt-injection signal, unauthorized candidate và privacy violation chuyển thành `AI review: Unavailable`
+  hoặc safe redaction; human review không bị chặn.
+- Persist result cùng source revision/content hash, `generatedAt`, `persistedAt`, provider/model,
+  schema/prompt version, attempt/terminal status và validated fingerprint; không persist raw prompt/raw
+  provider response.
+
+### 15.3 Gemini Flash provider và privacy mode
+
+- Exact default stable model: `gemini-3.5-flash`; không dùng `gemini-flash-latest` để tránh silent
+  model changes. Model ID vẫn là server configuration và phải được allowlist.
+- Dùng Gemini structured JSON output, sau đó validate lại bằng versioned Zod schema trước khi persist.
+  Schema-conformant output vẫn chỉ là advisory, không phải business authority.
+- Rate limit là per Gemini project và có thể thay đổi theo model/tier. Worker có global/provider rate
+  limiter ngoài per-program serialization, xử lý `429 RESOURCE_EXHAUSTED`, timeout và `5xx` bằng
+  bounded retry; không hard-code quota như một product guarantee.
+- `gemini_free_demo` chỉ được nhận synthetic/demo/non-confidential report. Gemini unpaid service có
+  thể dùng input/output để cải thiện sản phẩm và Terms yêu cầu không gửi sensitive/confidential data;
+  vì vậy private vulnerability report thật phải fail closed ở mode này.
+- Report thật chỉ dùng `gemini_paid` với active billing/privacy acknowledgement hoặc provider khác đã
+  được duyệt. `disabled`/provider unavailable vẫn giữ đầy đủ submit và human-review flow.
+- API key chỉ ở backend/worker; không browser bundle, database result, logs hoặc error payload.
+- Official references: [models](https://ai.google.dev/gemini-api/docs/models),
+  [pricing](https://ai.google.dev/gemini-api/docs/pricing),
+  [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits),
+  [structured outputs](https://ai.google.dev/gemini-api/docs/structured-output),
+  [terms](https://ai.google.dev/gemini-api/terms).
+
+### 15.4 Read-only states
+
+| Server/evidence state                                        | Review UI                                                                                                                     |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Current result `completed`, schema valid                     | Compact `AI review · Ready` badge outside the AI box; persisted result is rendered inline in the RR-02 detail evidence column |
+| Current run `queued \| running`                              | `AI review: Processing`; không spinner vô hạn, human actions vẫn dùng được                                                    |
+| Current run `failed`                                         | `AI review: Unavailable`; safe copy, backend retry only                                                                       |
+| Result parse/schema invalid                                  | Safe unavailable/invalid copy; không render raw payload                                                                       |
+| Result hash/revision không khớp current report               | `AI review is being refreshed`; stale/superseded result bị ẩn                                                                 |
+| AI endpoint/network load error                               | Safe unavailable; report/evidence/human actions không bị thay thế                                                             |
+| Unauthorized candidate/result hoặc principal không còn quyền | Không render AI metadata; dùng cùng non-enumerating report access boundary                                                    |
+
+Không có Generate, Regenerate hoặc Retry AI button ở bất kỳ state nào. Worker/backend chịu trách
+nhiệm retry theo policy; UI reload/refetch thông thường chỉ đọc trạng thái đã persist và không tạo
+AI run mới.
+
+### 15.4a Inline result và external state badge
+
+- RR-02 là màn hình quyết định duy nhất. Không dùng flow `View AI review`, không mở AI result trong
+  panel/dialog riêng và không tạo navigation mới chỉ để đọc AI.
+- AI result hiện ngay trong một box read-only của RR-02, sau audit timeline/evidence và trước human
+  decision controls. Box gồm summary, completeness, suggested severity/scope, missing information,
+  authorized duplicate candidates, provenance (revision + content hash + timestamps) và human decision
+  boundary. Các action `Validate`, `Request information`, `Reject`, `Mark duplicate` vẫn nằm ở human
+  action rail, không bị AI preselect.
+- Bên ngoài box chỉ render một badge trạng thái nhỏ, không có affordance click:
+  `AI review · Ready`, `AI review · Processing`, `AI review · Unavailable` hoặc
+  `AI review · Superseded`. Badge là indicator, không phải button và không được diễn đạt như một
+  recommendation/decision.
+- Badge dùng outline semantic trên nền trong suốt (`fill: none`); dot, border và text dùng cùng màu
+  state. Suggested severity badge cũng là outline transparent (ví dụ High dùng orange), không dùng
+  dark/white filled pill làm nền trong AI result.
+- `Ready` chỉ được render khi result completed/schema-valid và revision + content hash khớp report
+  hiện tại. `Processing`/`Unavailable`/`Superseded` không render stale result như current; human review
+  luôn tiếp tục được.
+- Figma state inventory phải trình bày badge mapping như các ví dụ riêng; production chỉ render đúng
+  một badge theo server state hiện tại. Không đặt các state cạnh nhau trong UI runtime.
+
+### 15.5 Responsive presentation
+
+- 1440 px: AI badge nằm ngoài inline AI box ở report/action summary; inline result nằm trong evidence
+  column sau evidence/audit và trước decision rail action.
+- 768 px: một cột theo reading order evidence → audit → external AI badge + inline result → human
+  decision; provenance fields wrap, không tạo horizontal overflow.
+- 390 px: badge compact, inline result xếp dọc trong cùng RR-02; long hash/timestamp/candidate
+  reference wrap hoặc truncate kèm accessible full value.
+- Processing/status announcement dùng `aria-live="polite"` có kiểm soát; polling không spam screen
+  reader và AI tone không cạnh tranh với destructive/human decision semantics.
+
+## 16. Attachment, comment và AI boundaries
 
 ### Attachments
 
@@ -509,16 +787,30 @@ coi Circle provider acceptance là paid.
 
 ### AI
 
-- AI triage không tự chạy khi mở inbox/detail.
-- Output, nếu có ở phase riêng, chỉ gồm summary/completeness/suggested severity/scope assessment/
-  missing information/confidence và luôn có label `AI suggestion`.
+- AI review tự động được queue ngay sau mỗi successful submit/resubmit; không tự chạy lại do mở,
+  reload hoặc navigate inbox/detail.
+- Request/response phải tuân theo contract tại §15.2a–§15.2b: provider chỉ nhận current immutable
+  report snapshot + bounded same-program duplicate context và chỉ trả structured advisory fields.
+- Queue được serialize FIFO theo `programId`; concurrency giữa program được phép. Candidate universe
+  chỉ gồm prior sequence trong cùng program.
+- Inbox/detail chỉ đọc `queued | running | completed | failed` (hoặc equivalent) và completed
+  structured result đã persist cho current report revision/content hash.
+- Completed output chỉ gồm summary/completeness/suggested severity/scope assessment/missing
+  information/confidence và authorized duplicate candidates nếu enabled; luôn có label
+  `AI suggestion`.
+- Persist provenance tối thiểu gồm source revision, source content hash, `generatedAt` và
+  `persistedAt`; stale/superseded result không được trình bày như current.
 - AI không validate, reject, mark duplicate, chọn final severity, reserve reward, ký transaction,
-  relay payout hoặc thay đổi report status.
-- AI duplicate candidates chỉ search trong reports principal được phép đọc; suggestion không tự
-  điền/confirm duplicate target.
-- Không gửi toàn bộ video attachment cho AI trong scope này.
+  relay payout, thay đổi report status hoặc chặn human review.
+- Không có owner/reviewer Generate/Regenerate/Retry control; retry AI chỉ do backend policy.
+- AI duplicate candidates phải được re-authorize theo current principal khi đọc; suggestion không
+  tự điền/confirm duplicate target và candidate mất quyền được redacted/non-enumerating.
+- Không persist/render raw prompt, private attachment URL, signed URL, storage key hoặc provider raw
+  payload. Không gửi toàn bộ video attachment cho AI trong scope này.
+- Không gửi private production report qua Gemini free tier. Free mode chỉ cho synthetic/demo data;
+  mode/config mismatch phải fail closed thành AI `Unavailable`, không fail report submission.
 
-## 16. Responsive layout
+## 17. Responsive layout
 
 ### 1440 px desktop
 
@@ -541,7 +833,7 @@ coi Circle provider acceptance là paid.
 - Sticky action summary tôn trọng safe area và không che input/keyboard.
 - Primary/secondary/destructive controls không chỉ khác nhau bằng vị trí hoặc màu.
 
-## 17. Accessibility
+## 18. Accessibility
 
 - Mọi interactive target tối thiểu 44 × 44 px.
 - Visible focus ring theo BBE Design System; keyboard order đi theo visual reading order.
@@ -555,7 +847,7 @@ coi Circle provider acceptance là paid.
 - `prefers-reduced-motion` tắt animation không thiết yếu; spinner vẫn có text loading.
 - Zoom 200%, font scaling và reflow không mất content/action.
 
-## 18. Acceptance criteria
+## 19. Acceptance criteria
 
 - [ ] AC-01 — Owner inbox chỉ liệt kê report thuộc owned programs; reviewer chỉ assignments; direct
       UUID access ngoài quyền trả safe unavailable mà không lộ metadata.
@@ -581,43 +873,71 @@ coi Circle provider acceptance là paid.
       privacy boundaries được thể hiện bằng UI copy và test.
 - [ ] AC-12 — 390/768/1440 không overflow, targets ≥ 44 px, focus/labels/live regions/reduced motion
       đạt và terminal/loading/error/access states đều có frame hoặc component state reviewable.
+- [ ] AC-13 — Mỗi successful submit/resubmit atomically persist submission revision/content hash và
+      queue đúng một AI run; result completed được persist cùng `generatedAt`/`persistedAt` và chỉ
+      result khớp current revision + hash mới được trình bày là `Ready`.
+- [ ] AC-14 — RR-08 có completed/processing/unavailable/failed/invalid/stale/access-safe states tại
+      1440/768/390; prior result sau resubmit mang superseded và không fallback như current.
+- [ ] AC-15 — Inbox/detail không có Generate, Regenerate hoặc Retry AI control và mở/reload screen
+      không tạo run mới. AI luôn mang label `AI suggestion`, không prefill/mutate quyết định, reward,
+      signature hoặc report status; human review vẫn khả dụng khi AI chưa sẵn sàng.
+- [ ] AC-16 — Submit/resubmit atomically cấp monotonic per-program sequence và enqueue đúng một run;
+      durable worker concurrency `1/program`, FIFO, cross-program parallelism và multi-replica race
+      protection có automated evidence.
+- [ ] AC-17 — Hai same-program reports submit đồng thời được order canonical; job sau duplicate-check
+      được report trước. Candidate query không đọc future sequence/cross-program report và researcher
+      không thấy candidate metadata.
+- [ ] AC-18 — Gemini provider pin exact stable `gemini-3.5-flash`, structured output được Zod validate,
+      quota/timeout/invalid output retry bounded và không chặn human review. Free tier chỉ chạy với
+      synthetic/demo/non-confidential data; private production content fail closed.
 
-## 19. Test matrix
+## 20. Test matrix
 
-| Nhóm       | Scenario                                       | Expected                                                      |
-| ---------- | ---------------------------------------------- | ------------------------------------------------------------- |
-| Auth       | Anonymous mở `/review/:id`                     | Login + safe returnTo; không flash private data               |
-| Auth       | Researcher/owner khác đoán UUID                | Safe unavailable/access denied; không lộ title/status         |
-| Scope      | Owner và assigned reviewer xem inbox           | Mỗi role chỉ thấy đúng owned/assigned program reports         |
-| Inbox      | Filter + load more + next-page failure         | Query giữ filters; rows đã tải còn nguyên; retry được         |
-| Review     | Validate với từng severity                     | Một atomic transition; final severity đúng; chưa reserve tiền |
-| Review     | Request info → comment → researcher resubmit   | needs_information → submitted; audit giữ đủ vòng              |
-| Review     | Reject thiếu reason hoặc double click          | Client/server chặn; không duplicate review record             |
-| Duplicate  | Self/cross-program/cycle/unauthorized target   | Stable validation/forbidden; current report không đổi         |
-| Race       | Hai reviewer quyết định cùng lúc               | Chỉ transition hợp lệ thắng; client thua refetch state        |
-| Reward     | Range/flat ngoài tier hoặc pool thiếu          | Không tạo/reserve intent; safe field/business error           |
-| Reward     | Percentage basis                               | Server derive amount/cap đúng; client không override amount   |
-| Wallet     | Wrong owner wallet/network                     | Fail closed trước signature; không reserve/sign sai account   |
-| Recovery   | Wallet reject chắc chắn trước submit           | Continue/cancel theo safe scan; không report paid             |
-| Recovery   | Unknown wallet outcome hoặc reload sau tx      | Resume/reconcile only; không prompt approval lần hai          |
-| Payout     | Circle accepts nhưng Arc chưa confirmed        | Chưa paid; tiếp tục provider/Arc reconciliation               |
-| Payout     | Deterministic payout failure                   | Linked replacement attempt; không reserve/reapprove lại       |
-| Payout     | Exact Arc event + USDC Transfer verified       | reward_approved/payment_pending → paid đúng một lần           |
-| Attachment | Uploaded/pending/expired URL/forged attachment | Chỉ uploaded; refresh on click; forged relation denied        |
-| Privacy    | Analytics/log/error capture                    | Không report body, UUID, Gist, URL, comment, wallet secret    |
-| Responsive | 390/768/1440 + 200% zoom                       | Không overflow/che action; keyboard/focus order đúng          |
-| A11y       | Screen reader dialog/status/progress           | Label/effect/error rõ; poll không spam announcements          |
+| Nhóm        | Scenario                                       | Expected                                                        |
+| ----------- | ---------------------------------------------- | --------------------------------------------------------------- |
+| Auth        | Anonymous mở `/review/:id`                     | Login + safe returnTo; không flash private data                 |
+| Auth        | Researcher/owner khác đoán UUID                | Safe unavailable/access denied; không lộ title/status           |
+| Scope       | Owner và assigned reviewer xem inbox           | Mỗi role chỉ thấy đúng owned/assigned program reports           |
+| Inbox       | Filter + load more + next-page failure         | Query giữ filters; rows đã tải còn nguyên; retry được           |
+| Review      | Validate với từng severity                     | Một atomic transition; final severity đúng; chưa reserve tiền   |
+| Review      | Request info → comment → researcher resubmit   | needs_information → submitted; audit giữ đủ vòng                |
+| Review      | Reject thiếu reason hoặc double click          | Client/server chặn; không duplicate review record               |
+| Duplicate   | Self/cross-program/cycle/unauthorized target   | Stable validation/forbidden; current report không đổi           |
+| Race        | Hai reviewer quyết định cùng lúc               | Chỉ transition hợp lệ thắng; client thua refetch state          |
+| Reward      | Range/flat ngoài tier hoặc pool thiếu          | Không tạo/reserve intent; safe field/business error             |
+| Reward      | Percentage basis                               | Server derive amount/cap đúng; client không override amount     |
+| Wallet      | Wrong owner wallet/network                     | Fail closed trước signature; không reserve/sign sai account     |
+| Recovery    | Wallet reject chắc chắn trước submit           | Continue/cancel theo safe scan; không report paid               |
+| Recovery    | Unknown wallet outcome hoặc reload sau tx      | Resume/reconcile only; không prompt approval lần hai            |
+| Payout      | Circle accepts nhưng Arc chưa confirmed        | Chưa paid; tiếp tục provider/Arc reconciliation                 |
+| Payout      | Deterministic payout failure                   | Linked replacement attempt; không reserve/reapprove lại         |
+| Payout      | Exact Arc event + USDC Transfer verified       | reward_approved/payment_pending → paid đúng một lần             |
+| Attachment  | Uploaded/pending/expired URL/forged attachment | Chỉ uploaded; refresh on click; forged relation denied          |
+| Privacy     | Analytics/log/error capture                    | Không report body, UUID, Gist, URL, comment, wallet secret      |
+| Responsive  | 390/768/1440 + 200% zoom                       | Không overflow/che action; keyboard/focus order đúng            |
+| A11y        | Screen reader dialog/status/progress           | Label/effect/error rõ; poll không spam announcements            |
+| AI trigger  | Submit/resubmit cùng revision/hash             | Persist enqueue record đúng một lần; không phụ thuộc mở review  |
+| AI current  | Completed result khớp revision + content hash  | Ready badge + inline advisory result; human form không prefill  |
+| AI stale    | Resubmit khi prior result đã completed         | Prior result superseded/ẩn; run mới Processing hoặc Unavailable |
+| AI safety   | Failed/invalid/network/access-safe             | Không raw payload/metadata leak; không chặn human review        |
+| AI control  | Mở/reload inbox/detail                         | Không tạo run; không có Generate/Regenerate/Retry button        |
+| AI race     | Hai same-program submits đồng thời             | Sequence `N/N+1`; FIFO; report sau xét report trước             |
+| AI parallel | Hai program submit đồng thời                   | Có thể chạy song song; không dùng global concurrency `1`        |
+| AI retry    | Gemini 429/timeout/5xx                         | Bounded backoff; terminal Unavailable; queue tiếp tục           |
+| AI privacy  | Private report ở `gemini_free_demo`            | Không gọi provider; AI Unavailable; human review vẫn dùng được  |
+| AI access   | Researcher đọc possible duplicate              | Chỉ safe aggregate copy; không candidate ID/title/private body  |
 
-## 20. Implementation gates
+## 21. Implementation gates
 
 Không chuyển ticket sang Done trước khi đủ các gate sau:
 
-1. Figma review: RR-01 đến RR-07 có desktop/mobile và design-system variants; owner/reviewer
+1. Figma review: RR-01 đến RR-08 có desktop/mobile và design-system variants; owner/reviewer
    distinction, private copy, terminal/system states được duyệt.
 2. Requirement review: Notion ticket liên quan được map/update theo durable Arc settlement và
-   responsive requirements; status live được xác nhận.
+   persisted current-revision AI review, responsive requirements; status live được xác nhận.
 3. Contract review: shared schema/OpenAPI/API/database transition cùng một source of truth; legacy
-   off-chain settlement endpoints không được frontend gọi.
+   off-chain settlement endpoints không được frontend gọi; AI run/result provenance và status có
+   canonical read contract.
 4. Security review: authorization/RLS, non-enumeration, private cache clearing, attachment signed URL,
    analytics/log redaction và owner-wallet enforcement có automated evidence.
 5. State-machine review: invalid/racing/retry/uncertain/replacement paths có integration tests và

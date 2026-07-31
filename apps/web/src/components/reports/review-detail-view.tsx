@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { CommentThread } from './comment-thread';
 import { ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
+import { ReportAiReviewCard } from './report-ai-review-card';
 import {
   describeTime,
   formatUsdc,
@@ -164,6 +165,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
       <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_338px] lg:items-start">
         <div className="flex min-w-0 flex-col gap-xl">
           <ReportContent report={report} token={token} />
+          <ReportAiReviewCard audience="reviewer" review={report.aiReview} />
           <CommentThread
             principalId={principalId}
             reportId={report.id}

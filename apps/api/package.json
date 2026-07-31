@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@bug-bounty-escrow/domain": "workspace:*",
+    "@bug-bounty-escrow/ai": "workspace:*",
     "@bug-bounty-escrow/shared": "workspace:*",
     "@circle-fin/developer-controlled-wallets": "10.8.0",
     "@circle-fin/smart-contract-platform": "10.8.0",

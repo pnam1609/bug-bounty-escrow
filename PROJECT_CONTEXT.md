@@ -8,12 +8,12 @@
 
 Xây dựng một nền tảng bug bounty dành cho Web3, trong đó:
 
-* Project owner tạo bug bounty program.
-* Owner khóa USDC vào escrow contract trên Arc.
-* Security researcher gửi vulnerability report.
-* Reviewer kiểm tra và xác nhận report.
-* Khi report được chấp nhận, smart contract thanh toán USDC trực tiếp cho researcher.
-* AI chỉ hỗ trợ triage, không tự quyết định report hợp lệ hay mức payout.
+- Project owner tạo bug bounty program.
+- Owner khóa USDC vào escrow contract trên Arc.
+- Security researcher gửi vulnerability report.
+- Reviewer kiểm tra và xác nhận report.
+- Khi report được chấp nhận, smart contract thanh toán USDC trực tiếp cho researcher.
+- AI chỉ hỗ trợ triage, không tự quyết định report hợp lệ hay mức payout.
 
 Điểm khác biệt chính của sản phẩm:
 
@@ -48,7 +48,7 @@ Funds escrow with USDC
         ↓
 Researcher submits report
         ↓
-Optional AI triage
+Automatic AI-assisted review is queued (when enabled; non-blocking)
         ↓
 Human reviewer validates report
         ↓
@@ -85,26 +85,26 @@ TRIAGED
 
 ### Project Owner
 
-* Tạo bounty program.
-* Định nghĩa scope.
-* Định nghĩa reward tiers.
-* Deploy escrow.
-* Fund USDC.
-* Review report.
-* Yêu cầu thêm thông tin.
-* Validate hoặc reject.
-* Approve reward.
-* Thực hiện payout.
+- Tạo bounty program.
+- Định nghĩa scope.
+- Định nghĩa reward tiers.
+- Deploy escrow.
+- Fund USDC.
+- Review report.
+- Yêu cầu thêm thông tin.
+- Validate hoặc reject.
+- Approve reward.
+- Thực hiện payout.
 
 ### Researcher
 
-* Xem danh sách bounty program.
-* Xem scope và reward.
-* Gửi vulnerability report.
-* Upload PoC hoặc attachment.
-* Trả lời yêu cầu bổ sung.
-* Theo dõi trạng thái.
-* Nhận USDC.
+- Xem danh sách bounty program.
+- Xem scope và reward.
+- Gửi vulnerability report.
+- Upload PoC hoặc attachment.
+- Trả lời yêu cầu bổ sung.
+- Theo dõi trạng thái.
+- Nhận USDC.
 
 ### Reviewer
 
@@ -112,11 +112,11 @@ Trong MVP, owner có thể đồng thời là reviewer.
 
 Reviewer:
 
-* Đọc report.
-* Xem AI suggestion.
-* Kiểm tra PoC.
-* Chọn final severity.
-* Validate, reject hoặc đánh dấu duplicate.
+- Đọc report.
+- Xem AI suggestion.
+- Kiểm tra PoC.
+- Chọn final severity.
+- Validate, reject hoặc đánh dấu duplicate.
 
 ---
 
@@ -124,39 +124,46 @@ Reviewer:
 
 Không dùng AI để:
 
-* Quyết định bug có hợp lệ hay không.
-* Tự động chọn payout.
-* Tự động release USDC.
-* Phân tích toàn bộ video.
-* Thay thế human reviewer.
+- Quyết định bug có hợp lệ hay không.
+- Tự động chọn payout.
+- Tự động release USDC.
+- Phân tích toàn bộ video.
+- Thay thế human reviewer.
 
 AI chỉ hỗ trợ:
 
-* Tóm tắt report.
-* Kiểm tra report có đầy đủ không.
-* Gợi ý severity.
-* Gợi ý in-scope hoặc out-of-scope.
-* Liệt kê thông tin còn thiếu.
-* Optional duplicate detection.
+- Tóm tắt report.
+- Kiểm tra report có đầy đủ không.
+- Gợi ý severity.
+- Gợi ý in-scope hoặc out-of-scope.
+- Liệt kê thông tin còn thiếu.
+- Kiểm tra duplicate trong cùng program theo canonical submission order.
 
 Structured output:
 
 ```ts
+type ReportFingerprint = {
+  affectedComponents: string[];
+  functions: string[];
+  attackVector: string;
+  vulnerabilityClasses: string[];
+  prerequisites: string[];
+  securityImpacts: string[];
+  normalizedSummary: string;
+};
+
 type TriageResult = {
   summary: string;
   completenessScore: number;
-  suggestedSeverity:
-    | "critical"
-    | "high"
-    | "medium"
-    | "low"
-    | "informational";
-  scopeAssessment:
-    | "in_scope"
-    | "out_of_scope"
-    | "uncertain";
+  suggestedSeverity: 'critical' | 'high' | 'medium' | 'low' | 'informational';
+  scopeAssessment: 'in_scope' | 'out_of_scope' | 'uncertain';
   missingInformation: string[];
   confidence: number;
+  duplicateAssessment: 'none' | 'possible' | 'likely';
+  duplicateConfidence: number;
+  fingerprint: ReportFingerprint;
+  // Chỉ owner/reviewer đã re-authorize được nhận candidate IDs.
+  duplicateCandidateReportIds: string[];
 };
 ```
 
@@ -179,9 +186,18 @@ GroqProvider
 OpenRouterProvider
 ```
 
-MVP nên có `MockTriageProvider` trước.
+Mỗi successful submit/resubmit tự động enqueue đúng một AI run cho immutable revision/content hash.
+Queue được persist trong PostgreSQL và serialize FIFO theo từng program (`concurrency = 1/program`) để
+hai report giống nhau submit đồng thời vẫn có thứ tự canonical; các program khác được xử lý song song.
+AI result được validate rồi persist trước khi UI đọc và không tự đổi report status.
+AI pass 1 tạo `ReportFingerprint`; BE dùng fingerprint + deterministic signals để shortlist các prior
+sequence trong cùng program; AI pass 2 mới so sánh chi tiết với top candidates. Scope/impact researcher
+chọn không được dùng làm hard filter.
 
-Gemini có thể được thêm sau bằng free tier.
+Gemini provider pin exact stable model `gemini-3.5-flash`, không dùng `latest` alias. Free tier chỉ
+được dùng cho synthetic/demo/non-confidential data: Gemini unpaid-service terms không phù hợp để gửi
+private vulnerability report thật. Report thật yêu cầu billing-enabled Gemini project/provider có
+privacy terms phù hợp; AI disabled/quota/error không được chặn submit hoặc human review.
 
 ---
 
@@ -223,11 +239,11 @@ Frontend gọi NestJS qua REST API. NestJS xác thực Supabase access token b�
 
 Nguồn sự thật là Figma `PXhIUlWSb44xjonYNxviCN`:
 
-| Page | Nội dung |
-| --- | --- |
+| Page                        | Nội dung                                                              |
+| --------------------------- | --------------------------------------------------------------------- |
 | `BBE Design System` (`2:3`) | Foundations, tokens, components, variants, patterns, icons, app shell |
-| `Layouts` (`55:2`) | Landing, Sign In, Sign Up, section Onboarding, section Create program |
-| `researcher` (`114:92`) | Bounty table, Program detail, Submit bug |
+| `Layouts` (`55:2`)          | Landing, Sign In, Sign Up, section Onboarding, section Create program |
+| `researcher` (`114:92`)     | Bounty table, Program detail, Submit bug                              |
 
 Token được port vào `packages/ui/src/theme.css` dưới dạng Tailwind v4 `@theme`. **Component không
 được viết hex thô hay px cứng** — chỉ dùng utility ánh xạ token. Quy ước đầy đủ trong
@@ -284,20 +300,20 @@ Hai chỗ Figma và flow doc lệch nhau, đã theo flow doc:
 
 Blockchain chỉ quản lý:
 
-* Escrow.
-* USDC.
-* Payout.
-* Refund.
-* Report hash.
-* Transaction events.
+- Escrow.
+- USDC.
+- Payout.
+- Refund.
+- Report hash.
+- Transaction events.
 
 Blockchain không lưu:
 
-* Vulnerability description.
-* PoC.
-* Video.
-* Logs.
-* Private attachments.
+- Vulnerability description.
+- PoC.
+- Video.
+- Logs.
+- Private attachments.
 
 ---
 
@@ -422,17 +438,11 @@ bug-bounty-escrow/
 ### Program
 
 ```ts
-type ProgramStatus =
-  | "draft"
-  | "awaiting_funding"
-  | "active"
-  | "paused"
-  | "expired"
-  | "closed";
+type ProgramStatus = 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed';
 
 // Lifecycle mà người xem ẩn danh nhìn thấy. draft/awaiting_funding/paused
 // không có biểu diễn public nào.
-type PublicProgramStatus = "active" | "ended";
+type PublicProgramStatus = 'active' | 'ended';
 
 type BountyProgram = {
   id: string;
@@ -448,11 +458,11 @@ type BountyProgram = {
   publicStatus: PublicProgramStatus | null;
 
   // Pool accounting: approve reward phải reserve, payout mới chuyển sang paid.
-  totalPool: string;      // đã fund vào escrow
-  reservedPool: string;   // đã approve nhưng chưa payout
-  remainingPool: string;  // = totalPool - reservedPool - paidPool
-  totalPaid: string | null;  // null khi owner để private
-  totalPaidVisibility: "public" | "private";
+  totalPool: string; // đã fund vào escrow
+  reservedPool: string; // đã approve nhưng chưa payout
+  remainingPool: string; // = totalPool - reservedPool - paidPool
+  totalPaid: string | null; // null khi owner để private
+  totalPaidVisibility: 'public' | 'private';
   maxBounty: string;
 
   contractAddress?: string;
@@ -472,10 +482,10 @@ type ProgramScope = {
   id: string;
   programId: string;
   assetType:
-    | "smart_contract"
-    | "website"
-    | "api"      // enum-only, chưa enable
-    | "mobile";  // enum-only, chưa enable
+    | 'smart_contract'
+    | 'website'
+    | 'api' // enum-only, chưa enable
+    | 'mobile'; // enum-only, chưa enable
   assetName: string;
   assetUrl?: string;
   contractAddress?: string;
@@ -499,7 +509,7 @@ type ProgramImpact = {
   severity: Severity;
   title: string;
   description?: string;
-  source: "template" | "custom";
+  source: 'template' | 'custom';
   templateKey?: string;
   enabled: boolean;
   sortOrder: number;
@@ -514,22 +524,17 @@ Template impacts nằm trong `packages/domain` và được **copy** thành row 
 Tier là duy nhất theo `(program, assetType, severity)` — không phải chỉ theo severity.
 
 ```ts
-type Severity =
-  | "critical"
-  | "high"
-  | "medium"
-  | "low"
-  | "informational";
+type Severity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
 
 type RewardTier = {
   assetType: AssetType;
   severity: Severity;
-  calculationType: "range" | "flat" | "percentage";
-  minReward?: string;      // range
-  maxReward?: string;      // range
-  flatAmount?: string;     // flat
-  percentageBps?: number;  // percentage
-  maxRewardCap?: string;   // percentage
+  calculationType: 'range' | 'flat' | 'percentage';
+  minReward?: string; // range
+  maxReward?: string; // range
+  flatAmount?: string; // flat
+  percentageBps?: number; // percentage
+  maxRewardCap?: string; // percentage
   calculationNote?: string;
 };
 ```
@@ -546,25 +551,25 @@ tier đó bị `archived_at` chứ không bị xoá.
 
 ```ts
 type ReportStatus =
-  | "draft"
-  | "submitted"
-  | "triaged"
-  | "needs_information"
-  | "rejected"
-  | "duplicate"
-  | "validated"
-  | "reward_approved"
-  | "payment_pending"
-  | "paid";
+  | 'draft'
+  | 'submitted'
+  | 'triaged'
+  | 'needs_information'
+  | 'rejected'
+  | 'duplicate'
+  | 'validated'
+  | 'reward_approved'
+  | 'payment_pending'
+  | 'paid';
 
 // Impact được snapshot lúc submit: owner sửa catalog sau này không đổi nội dung
 // lịch sử của report đã gửi.
 type ReportImpact = {
   id: string;
-  source: "program" | "custom";
+  source: 'program' | 'custom';
   programImpactId?: string;
   title: string;
-  severity?: Severity;   // null với custom impact
+  severity?: Severity; // null với custom impact
   assetType: AssetType;
 };
 
@@ -575,16 +580,16 @@ type VulnerabilityReport = {
   affectedScopeId: string;
   title: string;
   description: string;
-  impacts: ReportImpact[];        // thay cho free-text `impact`
-  reproductionSteps?: string;     // bắt buộc khi program.pocPolicy = "required"
-  secretGistUrl?: string;         // optional, HTTPS; không thay thế PoC
+  impacts: ReportImpact[]; // thay cho free-text `impact`
+  reproductionSteps?: string; // bắt buộc khi program.pocPolicy = "required"
+  secretGistUrl?: string; // optional, HTTPS; không thay thế PoC
   proposedSeverity: Severity;
   // Audit signal: researcher thấy proposed severity khác severity cao nhất trong các impact
   // đã chọn và vẫn tiếp tục. Không biến proposal thành final severity.
   severityMismatchAcknowledged: boolean;
   finalSeverity?: Severity;
   status: ReportStatus;
-  contentHash: string;            // hash gồm cả impact selection
+  contentHash: string; // hash gồm cả impact selection
   approvedReward?: string;
   submittedAt?: string;
   paidAt?: string;
@@ -615,7 +620,7 @@ type ReportDisclosure = {
   id: string;
   reportId: string;
   programId: string;
-  decision: "keep_private" | "publish_summary" | "publish_full";
+  decision: 'keep_private' | 'publish_summary' | 'publish_full';
   publicTitle?: string;
   publicSummary?: string;
   publicContent?: string;
@@ -647,6 +652,7 @@ report_disclosures
 report_attachments
 report_comments
 report_reviews
+ai_triage_runs
 ai_triage_results
 escrow_contracts
 escrow_transactions
@@ -656,21 +662,21 @@ audit_logs
 
 Important security rules:
 
-* Public xem được program `active` và ended (`expired`/`closed`); `draft`,
+- Public xem được program `active` và ended (`expired`/`closed`); `draft`,
   `awaiting_funding` và `paused` không bao giờ xuất hiện trong listing công khai.
   Cột generated `programs.public_status` là ranh giới đó.
-* Researcher chỉ xem report của chính mình.
-* Owner chỉ xem report thuộc program của mình; reviewer chỉ xem program được assign.
-* Report content không bao giờ public mặc định. Chỉ `report_disclosures` đã published
+- Researcher chỉ xem report của chính mình.
+- Owner chỉ xem report thuộc program của mình; reviewer chỉ xem program được assign.
+- Report content không bao giờ public mặc định. Chỉ `report_disclosures` đã published
   mới đọc được công khai, và nội dung đó do owner tự viết.
-* `totalPaid` được server quyết định visibility trước khi serialize; không trả số thật
+- `totalPaid` được server quyết định visibility trước khi serialize; không trả số thật
   rồi che ở UI.
-* Supabase service role chỉ chạy server-side.
-* File attachments nằm trong private bucket; chỉ row `upload_status = 'uploaded'` được
+- Supabase service role chỉ chạy server-side.
+- File attachments nằm trong private bucket; chỉ row `upload_status = 'uploaded'` được
   liệt kê hoặc tải về.
-* Download attachment bằng signed URL, không persist URL.
-* Không log report content hoặc API key.
-* Tiền chỉ di chuyển qua SECURITY DEFINER RPC; role `authenticated` không có quyền
+- Download attachment bằng signed URL, không persist URL.
+- Không log report content hoặc API key.
+- Tiền chỉ di chuyển qua SECURITY DEFINER RPC; role `authenticated` không có quyền
   UPDATE trên các cột pool.
 
 ---
@@ -704,12 +710,12 @@ constructor(
 );
 ```
 
-* `token` phải là canonical Arc Testnet USDC
+- `token` phải là canonical Arc Testnet USDC
   `0x3600000000000000000000000000000000000000`, 6 decimals.
-* `refundUnlockAt` do server derive chính xác từ `program.deadline`; thiếu deadline thì deploy fail
+- `refundUnlockAt` do server derive chính xác từ `program.deadline`; thiếu deadline thì deploy fail
   closed.
-* `withdrawRecipient` immutable và được owner review trước deploy.
-* Sau deployment confirmed, deadline không được sửa database-only. Nếu hỗ trợ extension, phải tăng
+- `withdrawRecipient` immutable và được owner review trước deploy.
+- Sau deployment confirmed, deadline không được sửa database-only. Nếu hỗ trợ extension, phải tăng
   lock on-chain trước, verify final receipt/state rồi mới cập nhật projection; không được shorten.
 
 Interface target của artifact `1.1.0`:
@@ -766,18 +772,18 @@ receipt/event rồi gọi permissionless `syncExternalFunding()`.
 
 Unified Balance source deposit còn có một Gateway subscription boundary bắt buộc:
 
-* Môi trường test dùng stable permissionless subscription `TEST` với public HTTPS endpoint hỗ trợ
+- Môi trường test dùng stable permissionless subscription `TEST` với public HTTPS endpoint hỗ trợ
   `HEAD` để Circle validate endpoint và `POST` để nhận signed notification; subscription chỉ đăng ký
   exact event `gateway.deposit.finalized`.
-* Trước source-deposit operation hoặc wallet signature, backend phải remote-verify connected owner
+- Trước source-deposit operation hoặc wallet signature, backend phải remote-verify connected owner
   wallet và toàn bộ selected source domains đã được đăng ký. Local cache/config hay một write response
   không đủ; mismatch, API uncertainty hoặc registration failure đều fail closed trước khi chuyển tiền.
-* Membership update là durable serialized desired-state reconcile: merge remote state, persist
+- Membership update là durable serialized desired-state reconcile: merge remote state, persist
   revision/attempt và remote-verify sau write để concurrent intents không lost update.
-* Capacity bị bound rõ ở tối đa 50 registered addresses/developer account. Hết capacity phải fail
+- Capacity bị bound rõ ở tối đa 50 registered addresses/developer account. Hết capacity phải fail
   closed; không tự evict address khác. Không tự remove wallet/domain khi còn active, pending,
   uncertain hoặc recoverable deposit/delivery/`removeFund` operation.
-* Circle-signed `gateway.deposit.finalized` vẫn là authority duy nhất cho Gateway finalization.
+- Circle-signed `gateway.deposit.finalized` vẫn là authority duy nhất cho Gateway finalization.
   Source RPC evidence là proof on-chain bổ sung; client balance/App Kit result, polling balance và
   registration state không được thay signed webhook.
 
@@ -836,25 +842,25 @@ event RemainingFundsWithdrawn(
 
 Security requirements:
 
-* Chỉ authorized on-chain approver được tạo immutable reward snapshot; reviewer role trong database
+- Chỉ authorized on-chain approver được tạo immutable reward snapshot; reviewer role trong database
   không tự động có contract role.
-* Sau approval, `payReward(reportKey)` permissionless nhưng chỉ chuyển đúng recipient/amount đã
+- Sau approval, `payReward(reportKey)` permissionless nhưng chỉ chuyển đúng recipient/amount đã
   snapshot; không payout cùng report hai lần và không payout vượt live available balance.
-* `close()` chỉ owner, chỉ sau `refundUnlockAt`, là transition một chiều và chặn approval mới; payout
+- `close()` chỉ owner, chỉ sau `refundUnlockAt`, là transition một chiều và chặn approval mới; payout
   đã approve vẫn được thực thi.
-* `withdrawRemaining(expectedAmount)` chỉ owner, sau close/unlock và khi
+- `withdrawRemaining(expectedAmount)` chỉ owner, sau close/unlock và khi
   `totalApprovedOutstanding == 0`.
-* `expectedAmount` là exact 6-decimal base-unit snapshot từ server-verified withdrawal intent.
+- `expectedAmount` là exact 6-decimal base-unit snapshot từ server-verified withdrawal intent.
   Contract require live balance **ít nhất** snapshot rồi chỉ chuyển đúng snapshot tới immutable
   recipient; không require equality để tránh dust grief.
-* Late/dust USDC vượt snapshot ở lại escrow. Backend scan/reconcile và tạo withdrawal intent +
+- Late/dust USDC vượt snapshot ở lại escrow. Backend scan/reconcile và tạo withdrawal intent +
   idempotency key mới; không reuse intent hoặc transaction hash đã complete.
-* Transaction hash đã biết chỉ poll/reconcile, không ký lại. Unknown-after-sign đi vào recovery;
+- Transaction hash đã biết chỉ poll/reconcile, không ký lại. Unknown-after-sign đi vào recovery;
   deterministic revert kết thúc attempt cũ và retry bằng linked replacement intent.
-* Dùng `SafeERC20`.
-* Dùng `ReentrancyGuard`.
-* Dùng checks-effects-interactions; không `SELFDESTRUCT`, native sweep hoặc wrapped-USDC path.
-* Contract/integration tests bắt buộc cho unauthorized, duplicate sync/payout/withdraw, early
+- Dùng `SafeERC20`.
+- Dùng `ReentrancyGuard`.
+- Dùng checks-effects-interactions; không `SELFDESTRUCT`, native sweep hoặc wrapped-USDC path.
+- Contract/integration tests bắt buộc cho unauthorized, duplicate sync/payout/withdraw, early
   close/withdraw, outstanding guard, exact-snapshot withdrawal, late-funds intent mới và concurrent
   payout giữa funding destination receipt với reconciliation.
 
@@ -988,13 +994,13 @@ mã đó thẳng vào `error.code` để client phân biệt được trạng th
 `program_not_accepting_reports` → màn hình "program closed") thay vì đoán từ text. Danh sách mã
 nằm trong `API_ERROR_CODES` của `packages/shared`.
 
-| SQLSTATE | HTTP | Ý nghĩa |
-| --- | --- | --- |
-| `22023` | 409 | Business rule bị vi phạm ở trạng thái hiện tại |
-| `42501` | 403 | Actor không được phép thao tác trên bản ghi |
-| `P0002` | 404 | Bản ghi không tồn tại |
-| `28000` | 401 | Thiếu authentication |
-| `23505` / `40001` | 409 | Unique violation / optimistic concurrency |
+| SQLSTATE          | HTTP | Ý nghĩa                                        |
+| ----------------- | ---- | ---------------------------------------------- |
+| `22023`           | 409  | Business rule bị vi phạm ở trạng thái hiện tại |
+| `42501`           | 403  | Actor không được phép thao tác trên bản ghi    |
+| `P0002`           | 404  | Bản ghi không tồn tại                          |
+| `28000`           | 401  | Thiếu authentication                           |
+| `23505` / `40001` | 409  | Unique violation / optimistic concurrency      |
 
 Frontend không query Supabase trực tiếp trong React component.
 
@@ -1008,14 +1014,14 @@ Database access phải đi qua repository được inject vào NestJS service.
 
 Có thể tham khảo public disclosure từ:
 
-* HackerOne Hacktivity.
-* Immunefi disclosures.
-* Code4rena reports.
-* Sherlock audit findings.
-* Cyfrin CodeHawks.
-* Cantina.
-* GitHub Security Advisories.
-* CVE database.
+- HackerOne Hacktivity.
+- Immunefi disclosures.
+- Code4rena reports.
+- Sherlock audit findings.
+- Cyfrin CodeHawks.
+- Cantina.
+- GitHub Security Advisories.
+- CVE database.
 
 Không phải tất cả bug đã fix đều được public.
 
@@ -1029,12 +1035,12 @@ Web3 audit contest thường public nhiều hơn bug bounty truyền thống.
 
 Dữ liệu seed nên:
 
-* Chỉ dùng report đã public.
-* Rewrite lại nội dung.
-* Đổi tên project và researcher.
-* Không copy nguyên văn.
-* Không dùng private exploit.
-* Ghi chú đây là demo dataset dựa trên public disclosures.
+- Chỉ dùng report đã public.
+- Rewrite lại nội dung.
+- Đổi tên project và researcher.
+- Không copy nguyên văn.
+- Không dùng private exploit.
+- Ghi chú đây là demo dataset dựa trên public disclosures.
 
 Ví dụ seed:
 
@@ -1057,17 +1063,17 @@ Task breakdown chi tiết được tách theo từng mảng tại [`docs/tasks/R
 
 Mỗi task phải có một outcome nhỏ, dependency rõ ràng và acceptance criteria có thể kiểm tra độc lập. Không gom nhiều API endpoint, nhiều màn hình hoặc nhiều smart contract action vào cùng một task.
 
-| Mảng | File |
-|---|---|
-| Foundation và shared packages | [`docs/tasks/foundation.md`](docs/tasks/foundation.md) |
-| Database, Supabase Auth, RLS và Storage | [`docs/tasks/database-auth.md`](docs/tasks/database-auth.md) |
-| NestJS backend; một task cho từng API | [`docs/tasks/backend.md`](docs/tasks/backend.md) |
-| Next.js frontend; một task cho từng page/action | [`docs/tasks/frontend.md`](docs/tasks/frontend.md) |
-| Solidity smart contracts | [`docs/tasks/smart-contracts.md`](docs/tasks/smart-contracts.md) |
-| Web3/blockchain integration | [`docs/tasks/blockchain-integration.md`](docs/tasks/blockchain-integration.md) |
-| AI triage | [`docs/tasks/ai.md`](docs/tasks/ai.md) |
-| Test, security và demo | [`docs/tasks/quality-demo.md`](docs/tasks/quality-demo.md) |
-| CI/CD, deployment và observability | [`docs/tasks/operations.md`](docs/tasks/operations.md) |
+| Mảng                                            | File                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| Foundation và shared packages                   | [`docs/tasks/foundation.md`](docs/tasks/foundation.md)                         |
+| Database, Supabase Auth, RLS và Storage         | [`docs/tasks/database-auth.md`](docs/tasks/database-auth.md)                   |
+| NestJS backend; một task cho từng API           | [`docs/tasks/backend.md`](docs/tasks/backend.md)                               |
+| Next.js frontend; một task cho từng page/action | [`docs/tasks/frontend.md`](docs/tasks/frontend.md)                             |
+| Solidity smart contracts                        | [`docs/tasks/smart-contracts.md`](docs/tasks/smart-contracts.md)               |
+| Web3/blockchain integration                     | [`docs/tasks/blockchain-integration.md`](docs/tasks/blockchain-integration.md) |
+| AI triage                                       | [`docs/tasks/ai.md`](docs/tasks/ai.md)                                         |
+| Test, security và demo                          | [`docs/tasks/quality-demo.md`](docs/tasks/quality-demo.md)                     |
+| CI/CD, deployment và observability              | [`docs/tasks/operations.md`](docs/tasks/operations.md)                         |
 
 ---
 
@@ -1212,12 +1218,12 @@ Merge into main
 
 Không cho hai AI cùng lúc sửa:
 
-* Database schema.
-* Shared types.
-* Main layout.
-* Contract interface.
-* Generated ABI.
-* Global configuration.
+- Database schema.
+- Shared types.
+- Main layout.
+- Contract interface.
+- Generated ABI.
+- Global configuration.
 
 ---
 
@@ -1265,37 +1271,37 @@ Seed data
 
 Must have:
 
-* Public bounty programs.
-* Owner program management.
-* Private report submission.
-* Review workflow.
-* Escrow deployment.
-* USDC funding tới canonical Arc escrow: Arc-only Send, đúng một non-Arc Bridge hoặc multi-source
+- Public bounty programs.
+- Owner program management.
+- Private report submission.
+- Review workflow.
+- Escrow deployment.
+- USDC funding tới canonical Arc escrow: Arc-only Send, đúng một non-Arc Bridge hoặc multi-source
   Unified Balance từ exact four testnets `Arc_Testnet`, `Ethereum_Sepolia`, `Arbitrum_Sepolia`,
   `Base_Sepolia`.
-* USDC reward payout.
-* Transaction tracking.
-* Realistic seed data.
-* Basic tests.
+- USDC reward payout.
+- Transaction tracking.
+- Realistic seed data.
+- Basic tests.
 
 Optional:
 
-* Gemini triage.
-* Duplicate detection.
-* Realtime notifications.
-* Disputes.
-* Public disclosure workflow.
+- Gemini triage.
+- Duplicate detection.
+- Realtime notifications.
+- Disputes.
+- Public disclosure workflow.
 
 Do not include in the first MVP:
 
-* AI auto-approval.
-* AI auto-payout.
-* Token swap hoặc arbitrary multi-chain settlement ngoài fixed Arc escrow destination.
-* Video analysis.
-* Complex dispute court.
-* Multi-chain settlement.
-* Swap integration.
-* Fully decentralized report storage.
+- AI auto-approval.
+- AI auto-payout.
+- Token swap hoặc arbitrary multi-chain settlement ngoài fixed Arc escrow destination.
+- Video analysis.
+- Complex dispute court.
+- Multi-chain settlement.
+- Swap integration.
+- Fully decentralized report storage.
 
 ---
 
@@ -1314,10 +1320,10 @@ AI must remain optional.
 
 The application must still work when:
 
-* Gemini API is unavailable.
-* AI output is invalid.
-* AI quota is exceeded.
-* AI feature is disabled.
+- Gemini API is unavailable.
+- AI output is invalid.
+- AI quota is exceeded.
+- AI feature is disabled.
 
 The most important demo flow is:
 

@@ -24,6 +24,8 @@ export function createPinoLogger(level: LogLevel, destination?: DestinationStrea
           'SUPABASE_ANON_KEY',
           'SUPABASE_SERVICE_ROLE_KEY',
           'GEMINI_API_KEY',
+          'DEEPSEEK_API_KEY',
+          'AI_API_KEY',
           'CIRCLE_API_KEY',
           'CIRCLE_ENTITY_SECRET',
           'entitySecretCiphertext',

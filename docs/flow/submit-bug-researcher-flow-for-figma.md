@@ -4,7 +4,7 @@
 
 Tài liệu này định nghĩa user flow để **Security researcher gửi một vulnerability report riêng tư cho một active bug bounty program** trong BountyEscrow.
 
-Flow bắt đầu từ trang chi tiết program tại `/programs/:slug`, đi qua report composer tại `/reports/new?programSlug=:slug`, và kết thúc tại report detail `/reports/:reportId` sau khi server tạo report ở trạng thái `submitted`. Composer resolve public detail bằng slug rồi chỉ dùng UUID server trả về để submit report.
+Flow bắt đầu từ trang chi tiết program tại `/programs/:slug`, đi qua report composer tại `/reports/new?programSlug=:slug`, và kết thúc tại report detail `/reports/:reportId` sau khi server tạo report ở trạng thái `submitted` **và atomically queue AI review cho đúng submission revision**. Composer resolve public detail bằng slug rồi chỉ dùng UUID server trả về để submit report.
 
 Phạm vi gồm:
 
@@ -14,21 +14,25 @@ Phạm vi gồm:
 - Đính kèm một PoC file riêng tư trong MVP.
 - Review disclosure trước khi gửi.
 - Submit report, upload attachment bằng signed URL và xác nhận thành công.
+- Tự động bắt đầu AI review sau mỗi successful submit/resubmit, persist structured result và kiểm tra
+  duplicate theo thứ tự submit trong cùng program.
 - Các nhánh validation, network/API error, attachment error, session/role error và program ngừng nhận report.
 
-Review, triage, request-information, reward approval và payout là các flow kế tiếp. UI submit không được hứa hẹn report sẽ được chấp nhận hoặc được trả thưởng.
+Human review, request-information, reward approval và payout là các flow kế tiếp. AI review là advisory,
+không tự validate/reject/mark duplicate và UI submit không được hứa hẹn report sẽ được chấp nhận hoặc
+được trả thưởng.
 
 ## 2. Nguồn sự thật hiện tại
 
 ### Routes
 
-| Mục đích | Route |
-| --- | --- |
-| Browse active programs | `/programs` |
-| Program detail | `/programs/:slug` |
-| Submit report | `/reports/new?programSlug=:slug` |
-| Report detail sau submit | `/reports/:reportId` |
-| My reports | `/reports` |
+| Mục đích                 | Route                            |
+| ------------------------ | -------------------------------- |
+| Browse active programs   | `/programs`                      |
+| Program detail           | `/programs/:slug`                |
+| Submit report            | `/reports/new?programSlug=:slug` |
+| Report detail sau submit | `/reports/:reportId`             |
+| My reports               | `/reports`                       |
 
 ### API
 
@@ -45,10 +49,11 @@ Flow attachment hiện tại:
 
 ```text
 create report
+  → atomically allocate per-program submission sequence + enqueue one AI run
   → receive report id
   → request short-lived signed upload URL
   → PUT file directly to private storage
-  → redirect to report detail
+  → redirect to report detail with AI review Processing/Ready state
 ```
 
 Report được tạo trước attachment. Vì vậy attachment upload error là **partial success**: report đã `submitted`, không được submit lại toàn bộ payload và tạo duplicate report.
@@ -76,9 +81,59 @@ Server không tạo report `draft` trong flow hiện tại. `POST /api/programs/
 status = submitted
 submittedAt = now
 contentHash = SHA-256 of canonical report payload
+submissionRevision = immutable monotonic revision
+programSubmissionSequence = monotonic sequence allocated under the program queue lock
 ```
 
-Sau thành công, client xóa local draft, invalidate reports query, cache report response và dùng `router.replace(/reports/:id)`.
+Trong cùng database transaction, server insert đúng một durable AI run theo unique key
+`(reportId, submissionRevision, contentHash)`. Sau thành công, client xóa local draft, invalidate
+reports query, cache report response và dùng `router.replace(/reports/:id)`. Mở/reload report detail
+chỉ đọc trạng thái/result đã persist, không enqueue thêm run.
+
+### Per-program AI queue và simultaneous duplicate safety
+
+Queue là durable PostgreSQL queue/outbox, không phải in-memory queue của một API replica:
+
+1. Submit/resubmit revalidate program và payload, lock queue identity của đúng `programId`, cấp
+   `programSubmissionSequence`, persist report revision và enqueue AI run trong một transaction.
+2. Worker chỉ chạy tối đa một AI job tại một thời điểm cho mỗi program; các program khác được xử lý
+   song song.
+3. Worker claim theo FIFO `programSubmissionSequence`. Report sequence `N` chỉ so duplicate với các
+   submission cùng program có sequence `< N`; không bao giờ so với report đến sau.
+4. Vì sequence `N` hoàn tất/terminal trước khi `N+1` chạy, hai report giống nhau submit đồng thời vẫn
+   có thứ tự canonical: report sau được so với report trước và có thể nhận `possible_duplicate`.
+5. Unique enqueue key, row/advisory lock và compare-and-set status bảo đảm retry/double click/multiple
+   replicas không tạo hai run hoặc chạy song song trong cùng program.
+6. Job lỗi transient retry bounded với backoff/jitter. Sau max attempts, job thành `failed` để queue
+   tiếp tục; report sau vẫn có thể so với raw canonical snapshot của report trước. AI failure không
+   rollback report và không chặn human review.
+
+Duplicate detection dùng hai AI pass và một BE retrieval pass. AI pass 1 phân tích report hiện tại
+để tạo semantic fingerprint độc lập với scope/impact mà researcher tự chọn:
+
+```ts
+type ReportFingerprint = {
+  affectedComponents: string[];
+  functions: string[];
+  attackVector: string;
+  vulnerabilityClasses: string[];
+  prerequisites: string[];
+  securityImpacts: string[];
+  normalizedSummary: string;
+};
+```
+
+BE persist fingerprint đã validate, rồi tìm candidate trong các prior sequence của cùng program bằng
+union các tín hiệu: exact `contentHash`, function/contract/endpoint identifiers, normalized
+full-text/trigram similarity, affected component, vulnerability class và attack vector. Scope/impact
+do researcher chọn chỉ là ranking signal, không phải hard filter; report chọn sai metadata vẫn có thể
+match nhờ nội dung thực tế. BE không cần hiểu semantic meaning của `withdrawFunds`; AI fingerprint
+đã chuẩn hóa phần đó trước.
+
+Configured AI provider pass 2 nhận current fingerprint/report và bounded top candidates để trả `none | possible | likely`,
+confidence và matching reasons. Không gửi report khác program hoặc future sequence. Researcher chỉ
+thấy safe assessment; candidate report ID/title/content chỉ hiện cho owner/reviewer đang có quyền và
+phải re-authorize lúc đọc.
 
 ## 3. Data contract
 
@@ -98,15 +153,15 @@ Migration/backend validation chưa nằm trong phạm vi thiết kế Figma, nh�
 
 ### Report fields — target
 
-| Field | Bắt buộc | Validation / UI rule |
-| --- | --- | --- |
-| Affected scope | Có | UUID của đúng một in-scope item thuộc program |
-| Selected impacts | Có | Tối thiểu một `programImpactId`; mỗi impact phải thuộc cùng program, đang enabled và khớp `assetType` của affected scope |
-| Custom impacts | Có điều kiện | Chỉ cho nhập khi program bật `allowCustomImpact`; mỗi giá trị phải trim, không rỗng và được đánh dấu là researcher-proposed |
-| Title | Có | Trimmed, 1–300 ký tự |
-| Description | Có | Trimmed, 1–50,000 ký tự |
-| Reproduction steps / PoC | Theo policy | Trimmed, 1–50,000 ký tự khi program yêu cầu PoC; optional khi policy cho phép |
-| Proposed severity | Có | `critical`, `high`, `medium`, `low`, `informational` |
+| Field                    | Bắt buộc     | Validation / UI rule                                                                                                        |
+| ------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Affected scope           | Có           | UUID của đúng một in-scope item thuộc program                                                                               |
+| Selected impacts         | Có           | Tối thiểu một `programImpactId`; mỗi impact phải thuộc cùng program, đang enabled và khớp `assetType` của affected scope    |
+| Custom impacts           | Có điều kiện | Chỉ cho nhập khi program bật `allowCustomImpact`; mỗi giá trị phải trim, không rỗng và được đánh dấu là researcher-proposed |
+| Title                    | Có           | Trimmed, 1–300 ký tự                                                                                                        |
+| Description              | Có           | Trimmed, 1–50,000 ký tự                                                                                                     |
+| Reproduction steps / PoC | Theo policy  | Trimmed, 1–50,000 ký tự khi program yêu cầu PoC; optional khi policy cho phép                                               |
+| Proposed severity        | Có           | `critical`, `high`, `medium`, `low`, `informational`                                                                        |
 
 `program_impacts` target tối thiểu cần có:
 
@@ -163,13 +218,13 @@ UI dùng structured fields. Không gộp vulnerability description và reproduct
 
 ### Attachment MVP
 
-| Rule | Giá trị |
-| --- | --- |
-| Số file trong UI hiện tại | 0 hoặc 1 |
-| Maximum size | 10 MB |
-| Allowed | TXT, Markdown, JSON, PDF, PNG, JPEG, WebP |
-| Storage | Private bucket |
-| Upload | Short-lived signed URL sau khi report đã được tạo |
+| Rule                      | Giá trị                                           |
+| ------------------------- | ------------------------------------------------- |
+| Số file trong UI hiện tại | 0 hoặc 1                                          |
+| Maximum size              | 10 MB                                             |
+| Allowed                   | TXT, Markdown, JSON, PDF, PNG, JPEG, WebP         |
+| Storage                   | Private bucket                                    |
+| Upload                    | Short-lived signed URL sau khi report đã được tạo |
 
 Không đưa report content hoặc file content vào analytics, client logs, toast debug hoặc URL.
 
@@ -177,13 +232,13 @@ Không đưa report content hoặc file content vào analytics, client logs, toa
 
 Severity trong submit form là đề xuất riêng của researcher, không phải kết luận cuối cùng. UI tính `impactSuggestedSeverity` bằng severity cao nhất trong các program impact đã chọn; custom impact không tự tạo severity chuẩn.
 
-| Severity | Guidance ngắn cho UI |
-| --- | --- |
-| Critical | Direct loss, permanent freeze hoặc complete protocol compromise |
-| High | Major asset/security impact với điều kiện khai thác thực tế |
-| Medium | Limited impact, constrained exploit hoặc significant malfunction |
-| Low | Minor security impact hoặc issue khó khai thác |
-| Informational | Best practice hoặc observation không có direct security impact |
+| Severity      | Guidance ngắn cho UI                                             |
+| ------------- | ---------------------------------------------------------------- |
+| Critical      | Direct loss, permanent freeze hoặc complete protocol compromise  |
+| High          | Major asset/security impact với điều kiện khai thác thực tế      |
+| Medium        | Limited impact, constrained exploit hoặc significant malfunction |
+| Low           | Minor security impact hoặc issue khó khai thác                   |
+| Informational | Best practice hoặc observation không có direct security impact   |
 
 Copy bắt buộc:
 
@@ -255,7 +310,9 @@ quyết định `validated`, `rejected` hoặc `duplicate` đầu tiên.
 9. API/network error trước khi tạo report giữ toàn bộ local draft để retry cùng payload.
 10. Attachment error sau khi tạo report không gửi lại report; chuyển sang recovery state gắn với report ID đã có.
 11. Không dùng wallet trong submit flow. Researcher chỉ cần wallet khi nhận payout theo flow riêng.
-12. Không hiển thị AI suggestion trong composer. AI triage chỉ diễn ra sau submit và không phải quyết định cuối cùng.
+12. Không hiển thị AI suggestion trong composer. AI review được enqueue tự động sau submit/resubmit;
+    report detail hiển thị `Processing`, `Ready` hoặc `Unavailable`, nhưng AI không phải quyết định
+    cuối cùng và không chặn human review.
 13. Không có KYC step, KYC callout hoặc KYC-derived validation.
 14. Asset type điều khiển danh sách impact hợp lệ; đổi asset có thể làm invalid selected impacts và phải được xử lý rõ ràng.
 15. Proposed severity là field độc lập với selected impacts; mismatch chỉ tạo warning + explicit confirmation, không âm thầm overwrite.
@@ -318,9 +375,13 @@ flowchart LR
   D -->|Required content valid| E[SR-04 Review]
   D -->|Invalid report or attachment| DV[SR-03V Main report validation]
   E -->|Submit private report| F[SR-05 Submitting]
-  F -->|Report created, no file| G[SR-07 Submitted]
+  F -->|Report + AI run committed, no file| G[SR-07 Submitted + AI processing]
   F -->|Report created, file selected| U[SR-06 Uploading attachment]
   U -->|Upload success| G
+  G -->|AI completed for current revision| AR[SR-15 AI review ready]
+  G -->|AI failed/quota unavailable| AU[SR-16 AI review unavailable]
+  AR -->|Possible/likely duplicate| DR[Human reviewer verifies duplicate]
+  AR -->|No candidate| HR[Human review continues]
   F -->|API/network failure before create| H[SR-08 Submit error]
   H -->|Retry same payload| F
   U -->|Upload failed after create| I[SR-09 Attachment recovery]
@@ -336,27 +397,29 @@ flowchart LR
 
 ## 7. Screen inventory
 
-| ID | Screen | Route/state | Mục đích |
-| --- | --- | --- | --- |
-| PG-DETAIL | Program entry | `/programs/:slug` | Đọc scope/reward và mở composer |
-| SR-00 | Loading program | Composer loading | Chờ program và eligible scopes |
-| SR-01 | Assets & Impact | Step 1 | Chọn affected in-scope asset và 1+ program impacts phù hợp asset type |
-| SR-01V | Assets & Impact validation | Client state | Thiếu/invalid asset, impact hoặc custom impact không được phép |
-| SR-02 | Severity | Step 2 | Chọn proposed severity độc lập với impact catalog |
-| SR-02V | Severity validation | Client state | Thiếu severity hoặc mismatch chưa được xác nhận |
-| SR-03 | Main Report | Step 3 | Nhập title, vulnerability details, PoC/reproduction và optional attachment |
-| SR-03V | Main Report validation | Client state | Content, PoC policy hoặc attachment không hợp lệ |
-| SR-04 | Review | Step 4 | Kiểm tra disclosure trước submit |
-| SR-05 | Submitting report | Mutation pending | Tạo report trên server |
-| SR-06 | Uploading attachment | Upload pending | Upload file qua signed URL |
-| SR-07 | Submitted | `/reports/:id` | Xác nhận report đã gửi |
-| SR-08 | Submit error | Mutation error | Retry cùng payload, giữ local draft |
-| SR-09 | Attachment recovery | Partial success | Retry file-only hoặc tiếp tục không file |
-| SR-10 | Discard local draft | Confirmation dialog | Bảo vệ dữ liệu chưa submit |
-| SR-11 | Program closed | Server/state conflict | Program không còn nhận report |
-| SR-12 | Wrong role | Safe forbidden | Bảo vệ researcher-only route |
-| SR-13 | Session expired | Auth recovery | Sign in lại với safe returnTo |
-| SR-14 | Missing program | Invalid query | Yêu cầu chọn program trước |
+| ID        | Screen                     | Route/state                          | Mục đích                                                                   |
+| --------- | -------------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| PG-DETAIL | Program entry              | `/programs/:slug`                    | Đọc scope/reward và mở composer                                            |
+| SR-00     | Loading program            | Composer loading                     | Chờ program và eligible scopes                                             |
+| SR-01     | Assets & Impact            | Step 1                               | Chọn affected in-scope asset và 1+ program impacts phù hợp asset type      |
+| SR-01V    | Assets & Impact validation | Client state                         | Thiếu/invalid asset, impact hoặc custom impact không được phép             |
+| SR-02     | Severity                   | Step 2                               | Chọn proposed severity độc lập với impact catalog                          |
+| SR-02V    | Severity validation        | Client state                         | Thiếu severity hoặc mismatch chưa được xác nhận                            |
+| SR-03     | Main Report                | Step 3                               | Nhập title, vulnerability details, PoC/reproduction và optional attachment |
+| SR-03V    | Main Report validation     | Client state                         | Content, PoC policy hoặc attachment không hợp lệ                           |
+| SR-04     | Review                     | Step 4                               | Kiểm tra disclosure trước submit                                           |
+| SR-05     | Submitting report          | Mutation pending                     | Tạo report trên server                                                     |
+| SR-06     | Uploading attachment       | Upload pending                       | Upload file qua signed URL                                                 |
+| SR-07     | Submitted                  | `/reports/:id`                       | Xác nhận report đã gửi                                                     |
+| SR-08     | Submit error               | Mutation error                       | Retry cùng payload, giữ local draft                                        |
+| SR-09     | Attachment recovery        | Partial success                      | Retry file-only hoặc tiếp tục không file                                   |
+| SR-10     | Discard local draft        | Confirmation dialog                  | Bảo vệ dữ liệu chưa submit                                                 |
+| SR-11     | Program closed             | Server/state conflict                | Program không còn nhận report                                              |
+| SR-12     | Wrong role                 | Safe forbidden                       | Bảo vệ researcher-only route                                               |
+| SR-13     | Session expired            | Auth recovery                        | Sign in lại với safe returnTo                                              |
+| SR-14     | Missing program            | Invalid query                        | Yêu cầu chọn program trước                                                 |
+| SR-15     | AI review ready            | Component state trong `/reports/:id` | Structured advisory result đã persist cho current revision                 |
+| SR-16     | AI review unavailable      | Component state trong `/reports/:id` | Gemini/quota/schema failure; human review vẫn tiếp tục                     |
 
 ## 8. Chi tiết màn hình
 
@@ -533,7 +596,8 @@ Expected result…
 Actual result…
 ```
 
-   - Counter: `0 / 50,000`.
+- Counter: `0 / 50,000`.
+
 4. `Secret Gist URL (optional)`
    - Chỉ chấp nhận HTTPS URL hợp lệ.
    - Copy nhắc Gist phải private/secret và không thay thế PoC khi program yêu cầu runnable proof.
@@ -646,10 +710,12 @@ We’re creating the report securely. Keep this tab open.
 Progress list:
 
 - `Creating report` — active.
+- `Queueing AI review` — upcoming; hoàn tất atomically cùng report create, không phải model completion.
 - `Uploading attachment` — upcoming hoặc skipped nếu không có file.
 - `Opening report` — upcoming.
 
-Không dùng copy `AI is validating your report`. AI không quyết định submit success.
+Không dùng copy `AI is validating your report`. Có thể dùng `Queueing AI review`, nhưng phải giữ label
+`AI suggestion`: AI không quyết định submit success hoặc report validity.
 
 ### SR-06 — Uploading attachment
 
@@ -692,10 +758,28 @@ Header:
 Timeline:
 
 - Submitted — complete/current.
-- Triage — next.
+- AI review — `Processing | Ready | Unavailable`; là advisory sub-state, không tự đổi report status.
 - Review decision.
 - Reward approval.
 - Payment.
+
+AI review card ngay trong report detail:
+
+- `Processing`: `AI review is queued for this program. You can leave this page and return later.`
+- `Ready`: summary, completeness, suggested severity, scope assessment, missing information,
+  confidence và duplicate assessment `none | possible | likely`.
+- `Unavailable`: `AI review is temporarily unavailable. Your report was submitted and human review
+can continue.`
+- Researcher không bao giờ thấy candidate report ID, title, author hoặc private excerpt của researcher
+  khác. Với `possible | likely`, chỉ hiển thị `A prior report may describe the same issue. The program
+reviewer will make the final decision.`
+- Result chỉ là current khi `submissionRevision` và `contentHash` khớp report detail. Sau resubmit,
+  prior result chuyển `superseded` và UI quay về `Processing` cho run mới.
+- Detail dùng polling bounded hoặc realtime subscription để refresh server state; reload không tạo run.
+
+`Ready` là kết quả đã persist trong database, không render trực tiếp provider response. Nếu schema
+invalid, provenance mismatch hoặc result chưa persist thì UI dùng `Unavailable/Processing`, không
+fallback sang raw JSON.
 
 Primary action:
 
@@ -847,6 +931,15 @@ Primary: `Browse programs`.
 16. Program hoặc selected impact trở thành non-active trước submit → state phù hợp, giữ local draft và yêu cầu refresh selection.
 17. Anonymous CTA → login/onboarding → valid researcher returnTo; owner/reviewer deep link → safe forbidden.
 18. Mobile-web happy path 390px.
+19. Hai researcher submit cùng bug vào một program đồng thời → server cấp sequence `N`/`N+1` →
+    per-program worker xử lý FIFO → report `N+1` có duplicate assessment đối chiếu report `N`.
+20. Hai report submit đồng thời vào hai program khác nhau → hai queue có thể xử lý song song.
+21. Double-click/retry cùng revision/hash → một report mutation/idempotency result và đúng một AI run.
+22. Gemini `429`/timeout → bounded retry → `Unavailable` nếu terminal; report và human review không bị chặn.
+23. Resubmit revision mới → prior AI result superseded → enqueue đúng một run mới → UI không hiển thị
+    result cũ như current.
+24. Researcher nhận `possible_duplicate` → chỉ thấy safe advisory copy; owner/reviewer có quyền mới
+    thấy candidate để quyết định thủ công.
 
 Không tạo KYC, Wallet Address hoặc disclosure-consent screen trong bất kỳ prototype scenario nào.
 
@@ -865,23 +958,24 @@ Không tạo KYC, Wallet Address hoặc disclosure-consent screen trong bất k�
 
 Ưu tiên instance và semantic Variables trong `BBE Design System` của file hiện tại.
 
-| Figma pattern | shadcn/Tailwind mapping |
-| --- | --- |
-| Primary/secondary/ghost action | `Button` variants |
-| Composer sections | `Card`, `CardHeader`, `CardContent`, `CardFooter` |
-| Title | `Input` |
-| Vulnerability description / PoC | `Textarea` |
-| Affected asset | searchable `Select` hoặc `RadioGroup` cards |
-| Program impacts | `Checkbox` list trong scrollable `Card` |
-| Proposed severity | segmented `RadioGroup` |
-| Custom impact | repeatable `Input` + icon-only remove `Button` |
-| Report/program status | `Badge` |
-| Step progress | Semantic list + progress indicator |
-| Privacy/guidance | `Alert` / callout |
-| Attachment | Styled file input / dropzone |
-| Discard confirmation | `AlertDialog` |
-| Review summary | Definition list + `Separator` |
-| Loading | Disabled Button + spinner/progress |
+| Figma pattern                   | shadcn/Tailwind mapping                                            |
+| ------------------------------- | ------------------------------------------------------------------ |
+| Primary/secondary/ghost action  | `Button` variants                                                  |
+| Composer sections               | `Card`, `CardHeader`, `CardContent`, `CardFooter`                  |
+| Title                           | `Input`                                                            |
+| Vulnerability description / PoC | `Textarea`                                                         |
+| Affected asset                  | searchable `Select` hoặc `RadioGroup` cards                        |
+| Program impacts                 | `Checkbox` list trong scrollable `Card`                            |
+| Proposed severity               | segmented `RadioGroup`                                             |
+| Custom impact                   | repeatable `Input` + icon-only remove `Button`                     |
+| Report/program status           | `Badge`                                                            |
+| Step progress                   | Semantic list + progress indicator                                 |
+| Privacy/guidance                | `Alert` / callout                                                  |
+| Attachment                      | Styled file input / dropzone                                       |
+| Discard confirmation            | `AlertDialog`                                                      |
+| Review summary                  | Definition list + `Separator`                                      |
+| Loading                         | Disabled Button + spinner/progress                                 |
+| AI review status/result         | `Card`, `Badge`, progress skeleton, read-only details dialog/sheet |
 
 Layout rules:
 
@@ -932,6 +1026,21 @@ Figma annotation tại SR-04, SR-05, SR-06 và SR-09 phải ghi rõ:
 - Authorization luôn được kiểm tra ở API; hidden UI không phải security boundary.
 - Content hash có thể được dùng cho integrity/on-chain reference, nhưng raw report content không lên blockchain.
 - AI chỉ hỗ trợ triage sau submit và không tự validate hoặc payout.
+- AI run/result chỉ được persist server-side; không log raw prompt/provider payload và không gửi
+  private attachment, signed URL, Secret Gist hoặc report thuộc program khác tới provider.
+- Gemini API key chỉ tồn tại ở API/worker. Model pin bằng exact stable model ID
+  `gemini-3.5-flash`, không dùng alias `gemini-flash-latest`; output dùng JSON Schema/structured
+  output rồi vẫn phải parse bằng application Zod schema trước khi persist.
+- Gemini free tier chỉ được bật cho demo/synthetic/non-confidential reports. Theo Gemini API Terms,
+  unpaid service có thể dùng input/output để cải thiện sản phẩm và không được nhận sensitive hoặc
+  confidential information. Report thật/private chỉ được gửi khi project Gemini có active billing
+  hoặc provider khác đáp ứng data-processing/privacy requirement.
+- Provider mode là fail-closed: `gemini_free_demo` reject non-demo report; `gemini_paid` yêu cầu
+  billing/privacy acknowledgement; `disabled` vẫn cho submit và human review bình thường.
+- Tham chiếu: [Gemini model IDs](https://ai.google.dev/gemini-api/docs/models),
+  [pricing/free tier](https://ai.google.dev/gemini-api/docs/pricing),
+  [structured outputs](https://ai.google.dev/gemini-api/docs/structured-output),
+  [Gemini API Terms](https://ai.google.dev/gemini-api/terms).
 
 ## 14. Acceptance criteria
 
@@ -950,6 +1059,17 @@ Figma annotation tại SR-04, SR-05, SR-06 và SR-09 phải ghi rõ:
 - Attachment giới hạn 1 file, đúng allowed types và 10 MB trong MVP.
 - Attachment error sau create được xử lý như partial success, không tạo duplicate report.
 - Success chuyển tới `/reports/:id`, hiển thị Submitted và next steps thực tế.
+- Successful submit/resubmit atomically cấp per-program sequence và enqueue đúng một AI run cho
+  current revision/content hash; queue durable, FIFO và concurrency `1` trong cùng program nhưng cho
+  phép các program khác chạy song song.
+- Hai submission đồng thời cùng program có canonical ordering; report sau chỉ duplicate-check với
+  prior sequence và không thể bỏ qua report trước do multi-replica race.
+- Structured AI result được validate rồi persist; report detail hiển thị Processing/Ready/Unavailable
+  và tự refresh nhưng reload/navigation không enqueue run mới.
+- Duplicate output chỉ là suggestion; researcher không thấy candidate metadata và human reviewer mới
+  có quyền mark duplicate.
+- Gemini dùng exact stable `gemini-3.5-flash`; free tier chỉ cho demo/synthetic data do privacy terms,
+  quota/timeout/schema failure không làm mất report hoặc chặn human review.
 - Không có KYC; không yêu cầu wallet trong submit flow; không đặt AI làm gate; không hứa chắc reward.
 - Report private mặc định; chỉ explicit owner decision sau program end mới cho phép tạo Known Issue/public disclosure.
 - Có discard confirmation, program-closed, wrong-role, session-expired và missing-program states.

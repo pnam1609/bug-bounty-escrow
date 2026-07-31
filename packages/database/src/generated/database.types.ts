@@ -9,49 +9,205 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      ai_program_queues: {
+        Row: {
+          created_at: string
+          last_submission_sequence: number
+          program_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          last_submission_sequence?: number
+          program_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          last_submission_sequence?: number
+          program_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_program_queues_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: true
+            referencedRelation: "programs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_triage_results: {
         Row: {
           confidence: number | null
           created_at: string
           error_code: string | null
           error_message: string | null
+          generated_at: string | null
           id: string
           model: string
+          persisted_at: string | null
           provider: string
           report_id: string
           result: Json | null
           schema_version: number
+          source_content_hash: string | null
+          source_submission_revision: number | null
+          run_id: string | null
+          superseded_at: string | null
         }
         Insert: {
           confidence?: number | null
           created_at?: string
           error_code?: string | null
           error_message?: string | null
+          generated_at?: string | null
           id?: string
           model: string
+          persisted_at?: string | null
           provider: string
           report_id: string
           result?: Json | null
           schema_version: number
+          source_content_hash?: string | null
+          source_submission_revision?: number | null
+          run_id?: string | null
+          superseded_at?: string | null
         }
         Update: {
           confidence?: number | null
           created_at?: string
           error_code?: string | null
           error_message?: string | null
+          generated_at?: string | null
           id?: string
           model?: string
+          persisted_at?: string | null
           provider?: string
           report_id?: string
           result?: Json | null
           schema_version?: number
+          source_content_hash?: string | null
+          source_submission_revision?: number | null
+          run_id?: string | null
+          superseded_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_triage_results_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "ai_triage_runs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ai_triage_results_report_id_fkey"
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_triage_runs: {
+        Row: {
+          attempt_count: number
+          available_at: string
+          candidate_retrieval_version: number | null
+          comparison_schema_version: number | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          fingerprint: Json | null
+          fingerprint_schema_version: number | null
+          generated_at: string | null
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          model: string | null
+          next_attempt_at: string | null
+          persisted_at: string | null
+          program_id: string
+          program_submission_sequence: number
+          provider: string | null
+          report_id: string
+          revision_id: string
+          source_content_hash: string
+          started_at: string | null
+          status: string
+          submission_revision: number
+        }
+        Insert: {
+          attempt_count?: number
+          available_at?: string
+          candidate_retrieval_version?: number | null
+          comparison_schema_version?: number | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          fingerprint?: Json | null
+          fingerprint_schema_version?: number | null
+          generated_at?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          model?: string | null
+          next_attempt_at?: string | null
+          persisted_at?: string | null
+          program_id: string
+          program_submission_sequence: number
+          provider?: string | null
+          report_id: string
+          revision_id: string
+          source_content_hash: string
+          started_at?: string | null
+          status?: string
+          submission_revision: number
+        }
+        Update: {
+          attempt_count?: number
+          available_at?: string
+          candidate_retrieval_version?: number | null
+          comparison_schema_version?: number | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          fingerprint?: Json | null
+          fingerprint_schema_version?: number | null
+          generated_at?: string | null
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          model?: string | null
+          next_attempt_at?: string | null
+          persisted_at?: string | null
+          program_id?: string
+          program_submission_sequence?: number
+          provider?: string | null
+          report_id?: string
+          revision_id?: string
+          source_content_hash?: string
+          started_at?: string | null
+          status?: string
+          submission_revision?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_triage_runs_report_program_fkey"
+            columns: ["report_id", "program_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id", "program_id"]
+          },
+          {
+            foreignKeyName: "ai_triage_runs_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: true
+            referencedRelation: "report_revisions"
             referencedColumns: ["id"]
           },
         ]
@@ -1790,6 +1946,47 @@ export type Database = {
           },
         ]
       }
+      report_revisions: {
+        Row: {
+          content_hash: string
+          created_at: string
+          id: string
+          program_id: string
+          program_submission_sequence: number
+          report_id: string
+          revision: number
+          snapshot: Json
+        }
+        Insert: {
+          content_hash: string
+          created_at?: string
+          id?: string
+          program_id: string
+          program_submission_sequence: number
+          report_id: string
+          revision: number
+          snapshot: Json
+        }
+        Update: {
+          content_hash?: string
+          created_at?: string
+          id?: string
+          program_id?: string
+          program_submission_sequence?: number
+          report_id?: string
+          revision?: number
+          snapshot?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_revisions_report_program_fkey"
+            columns: ["report_id", "program_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id", "program_id"]
+          },
+        ]
+      }
       reports: {
         Row: {
           affected_scope_id: string
@@ -3246,6 +3443,86 @@ export type Database = {
           target_program_id: string
         }
         Returns: string
+      }
+      claim_ai_triage_run: {
+        Args: { lease_seconds?: number; worker_id: string }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          candidate_retrieval_version: number | null
+          comparison_schema_version: number | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          fingerprint: Json | null
+          fingerprint_schema_version: number | null
+          generated_at: string | null
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          model: string | null
+          next_attempt_at: string | null
+          persisted_at: string | null
+          program_id: string
+          program_submission_sequence: number
+          provider: string | null
+          report_id: string
+          revision_id: string
+          source_content_hash: string
+          started_at: string | null
+          status: string
+          submission_revision: number
+        }[]
+      }
+      claim_ai_triage_run_for_program: {
+        Args: { lease_seconds?: number; target_program_id: string; worker_id: string }
+        Returns: {
+          attempt_count: number
+          available_at: string
+          candidate_retrieval_version: number | null
+          comparison_schema_version: number | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          fingerprint: Json | null
+          fingerprint_schema_version: number | null
+          generated_at: string | null
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          model: string | null
+          next_attempt_at: string | null
+          persisted_at: string | null
+          program_id: string
+          program_submission_sequence: number
+          provider: string | null
+          report_id: string
+          revision_id: string
+          source_content_hash: string
+          started_at: string | null
+          status: string
+          submission_revision: number
+        }[]
+      }
+      enqueue_report_ai_run_atomic: {
+        Args: { generated_content_hash: string; target_program_id: string; target_report_id: string }
+        Returns: string
+      }
+      list_ai_duplicate_candidates: {
+        Args: { max_candidates?: number; target_run_id: string }
+        Returns: {
+          content_hash: string
+          fingerprint: Json | null
+          match_score: number
+          match_signals: Json
+          program_id: string
+          program_submission_sequence: number
+          report_id: string
+          snapshot: Json
+          submission_revision: number
+        }[]
       }
       update_profile_display_name_atomic: {
         Args: { actor_id: string; new_display_name: string }

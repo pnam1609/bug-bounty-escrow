@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type {
   ApproveRewardRequest,
@@ -26,6 +27,7 @@ import type {
 
 import { reportContentHash } from './report-content-hash.js';
 import { ReportRepository } from './report.repository.js';
+import { SupabaseAiReviewQueueRepository } from './ai-review.repository.js';
 
 export type ReviewAction =
   'approve' | 'confirm-payment' | 'duplicate' | 'information' | 'pay' | 'reject' | 'validate';
@@ -41,7 +43,12 @@ export type ReviewInput =
 
 @Injectable()
 export class ReportService {
-  public constructor(@Inject(ReportRepository) private readonly repository: ReportRepository) {}
+  public constructor(
+    @Inject(ReportRepository) private readonly repository: ReportRepository,
+    @Optional()
+    @Inject(SupabaseAiReviewQueueRepository)
+    private readonly aiReviewRepository?: SupabaseAiReviewQueueRepository,
+  ) {}
 
   public async list(
     principal: RequestPrincipal,
@@ -84,7 +91,9 @@ export class ReportService {
       throw new NotFoundException();
     }
 
-    return report;
+    if (this.aiReviewRepository === undefined) return report;
+    const aiReview = await this.aiReviewRepository.getReview(report.id, principal);
+    return aiReview === undefined ? report : { ...report, aiReview };
   }
 
   public async submit(

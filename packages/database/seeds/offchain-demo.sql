@@ -12,8 +12,14 @@
 
 begin;
 
+-- Local reset only: report revisions are immutable during application operation, but this
+-- deterministic demo reset is allowed to remove its own synthetic rows.
+alter table public.report_revisions disable trigger report_revisions_prevent_update_delete;
+
 delete from public.notifications where recipient_id::text like '30000000-%';
 delete from public.ai_triage_results where report_id::text like '33000000-%';
+delete from public.ai_triage_runs where report_id::text like '33000000-%';
+delete from public.report_revisions where report_id::text like '33000000-%';
 delete from public.report_attachments where report_id::text like '33000000-%';
 delete from public.report_disclosures where report_id::text like '33000000-%';
 delete from public.escrow_transactions where program_id::text like '31000000-%';
@@ -22,6 +28,7 @@ delete from public.report_reviews where id::text like '35000000-%';
 delete from public.report_comments where id::text like '34000000-%';
 delete from public.report_impacts where report_id::text like '33000000-%';
 delete from public.reports where id::text like '33000000-%';
+delete from public.ai_program_queues where program_id::text like '31000000-%';
 delete from public.program_reviewers where program_id::text like '31000000-%';
 delete from public.program_prohibited_activities where program_id::text like '31000000-%';
 delete from public.program_resources where program_id::text like '31000000-%';
@@ -30,6 +37,8 @@ delete from public.program_impacts where program_id::text like '31000000-%';
 delete from public.program_reward_tiers where program_id::text like '31000000-%';
 delete from public.program_scopes where id::text like '32000000-%';
 delete from public.programs where id::text like '31000000-%';
+
+alter table public.report_revisions enable trigger report_revisions_prevent_update_delete;
 /*
  * Users are upserted, not deleted and recreated. `audit_logs.actor_id` references profiles with
  * ON DELETE RESTRICT and the table is append-only by trigger, so once anyone has touched the API

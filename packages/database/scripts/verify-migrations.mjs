@@ -54,6 +54,7 @@ const expectedMigrations = [
   '20260729000800_cp13_completion_gaps.sql',
   '20260729000900_cp14_recovery_integrity_hardening.sql',
   '20260729001000_cp14_recovery_rpc_boundary.sql',
+  '20260731000100_ai_revisions_queue.sql',
 ];
 
 const tableMigrations = new Map([
@@ -68,6 +69,7 @@ const tableMigrations = new Map([
   ['20260725000700_db_007_report_comments.sql', 'report_comments'],
   ['20260725000800_db_008_report_reviews.sql', 'report_reviews'],
   ['20260725000900_db_009_ai_triage_results.sql', 'ai_triage_results'],
+  ['20260731000100_ai_revisions_queue.sql', 'report_revisions'],
   ['20260725001000_db_010_escrow_contracts.sql', 'escrow_contracts'],
   ['20260725001100_db_011_escrow_transactions.sql', 'escrow_transactions'],
   ['20260725001200_db_012_notifications.sql', 'notifications'],

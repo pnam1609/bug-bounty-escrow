@@ -2105,4 +2105,73 @@ begin
 end;
 $rw04_researcher_payout_wallet$;
 
+-- AI-011/AI-008: durable same-program FIFO and prior-only candidate retrieval.  The fixture
+-- reports are synthetic demo rows with identical narratives in program 10 (reports 41 and 49).
+do $ai_queue_fifo$
+declare
+  first_run public.ai_triage_runs;
+  second_run public.ai_triage_runs;
+  claimed public.ai_triage_runs;
+  blocked_claim public.ai_triage_runs;
+  candidate_count integer;
+begin
+  perform public.enqueue_report_ai_run_atomic(
+    '33000000-0000-4000-8000-000000000041',
+    '31000000-0000-4000-8000-000000000010',
+    '0x' || repeat('1', 64)
+  );
+  perform public.enqueue_report_ai_run_atomic(
+    '33000000-0000-4000-8000-000000000049',
+    '31000000-0000-4000-8000-000000000010',
+    '0x' || repeat('2', 64)
+  );
+
+  select * into first_run
+  from public.ai_triage_runs
+  where report_id = '33000000-0000-4000-8000-000000000041';
+  select * into second_run
+  from public.ai_triage_runs
+  where report_id = '33000000-0000-4000-8000-000000000049';
+
+  if first_run.program_submission_sequence >= second_run.program_submission_sequence then
+    raise exception 'AI queue did not allocate monotonic program sequence';
+  end if;
+
+  select * into claimed from public.claim_ai_triage_run_for_program(
+    'workflow-test', '31000000-0000-4000-8000-000000000010', 300
+  );
+  if claimed.id is distinct from first_run.id or claimed.status <> 'running' then
+    raise exception 'AI queue did not claim the FIFO head (got %, expected %, second %)', claimed.id, first_run.id, second_run.id;
+  end if;
+
+  select * into blocked_claim from public.claim_ai_triage_run_for_program(
+    'workflow-test-2', '31000000-0000-4000-8000-000000000010', 300
+  );
+  if blocked_claim.id is not null and blocked_claim.id = second_run.id then
+    raise exception 'AI queue claimed a later job while its predecessor was running';
+  end if;
+
+  update public.ai_triage_runs
+  set status = 'completed', finished_at = now(), persisted_at = now()
+  where id = claimed.id and locked_by = claimed.locked_by;
+
+  select * into claimed from public.claim_ai_triage_run_for_program(
+    'workflow-test-2', '31000000-0000-4000-8000-000000000010', 300
+  );
+  if claimed.id is distinct from second_run.id or claimed.status <> 'running' then
+    raise exception 'AI queue did not release the next FIFO job after terminal completion (got %, expected %, blocked %, first %)',
+      claimed.id, second_run.id, blocked_claim.id, first_run.id;
+  end if;
+
+  select count(*) into candidate_count
+  from public.list_ai_duplicate_candidates(second_run.id, 10)
+  where report_id = first_run.report_id
+    and program_submission_sequence < second_run.program_submission_sequence;
+
+  if candidate_count <> 1 then
+    raise exception 'AI candidate retrieval did not return the prior same-program report';
+  end if;
+end;
+$ai_queue_fifo$;
+
 rollback;
