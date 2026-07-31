@@ -9,7 +9,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { NeedsInformationAlert } from '@/components/reports/needs-information-alert';
 import { ReportContent } from '@/components/reports/report-content';
-import { ReportAiReviewCard } from '@/components/reports/report-ai-review-card';
+import {
+  ReportAiReviewCard,
+  ReportAiReviewStatusBadge,
+} from '@/components/reports/report-ai-review-card';
+import { ReviewEvidence } from '@/components/reports/review-evidence';
 import {
   InformationRequestCallout,
   REPORT_NOT_FOUND_DESCRIPTION,
@@ -84,9 +88,120 @@ const report: ReportDetail = reportDetailSchema.parse({
 });
 
 describe('SR-12 report detail', () => {
+  it('renders a non-clickable, transparent AI status badge outside the review box', () => {
+    const statuses = [
+      renderToStaticMarkup(
+        createElement(ReportAiReviewStatusBadge, { review: { status: 'processing' } }),
+      ),
+      renderToStaticMarkup(
+        createElement(ReportAiReviewStatusBadge, {
+          currentContentHash: '0xhash',
+          currentSubmissionRevision: 1,
+          review: {
+            status: 'ready',
+            sourceContentHash: '0xhash',
+            submissionRevision: 1,
+          },
+        }),
+      ),
+      renderToStaticMarkup(createElement(ReportAiReviewStatusBadge, { review: undefined })),
+      renderToStaticMarkup(
+        createElement(ReportAiReviewStatusBadge, {
+          currentContentHash: '0xnew',
+          currentSubmissionRevision: 2,
+          review: {
+            status: 'ready',
+            sourceContentHash: '0xold',
+            submissionRevision: 1,
+          },
+        }),
+      ),
+    ];
+
+    expect(statuses[0]).toContain('AI review · Processing');
+    expect(statuses[1]).toContain('AI review · Ready');
+    expect(statuses[2]).toContain('AI review · Unavailable');
+    expect(statuses[3]).toContain('AI review · Superseded');
+    for (const markup of statuses) {
+      expect(markup).toContain('bg-transparent');
+      expect(markup).toContain('rounded-full border');
+      expect(markup).not.toContain('<button');
+      expect(markup).not.toContain('<a ');
+      expect(markup).not.toMatch(/View AI review|Generate|Retry/);
+    }
+  });
+
+  it('renders private review evidence without hiding duplicate context or payment proof', () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReviewEvidence, {
+        report: {
+          latestInformationRequest: {
+            message: 'Please include the failing transaction.',
+            requestedAt: '2026-07-26T12:00:00.000Z',
+            authorRole: 'reviewer',
+          },
+          reviewEvents: [
+            {
+              id: '10000000-0000-4000-8000-000000000060',
+              actorRole: 'reviewer',
+              action: 'mark_duplicate',
+              fromStatus: 'triaged',
+              toStatus: 'duplicate',
+              reason: 'Same underlying issue.',
+              occurredAt: '2026-07-26T13:00:00.000Z',
+              duplicateTarget: {
+                reportId: '10000000-0000-4000-8000-000000000061',
+                sameProgram: true,
+                title: 'Original finding',
+                status: 'validated',
+              },
+            },
+            {
+              id: '10000000-0000-4000-8000-000000000062',
+              actorRole: 'researcher',
+              action: 'resubmit',
+              fromStatus: 'needs_information',
+              toStatus: 'submitted',
+              occurredAt: '2026-07-26T13:30:00.000Z',
+            },
+          ],
+          paidSettlementProof: {
+            transactionHash: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            chainId: '1234',
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            recipientAddressMasked: '0xbbbb…bbbb',
+            amount: '2500',
+            blockNumber: '42',
+            blockHash: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            rewardEventLogIndex: 1,
+            transferLogIndex: 2,
+            exactEventVerified: true,
+            canonicalTransferVerified: true,
+            accountingApplied: true,
+            verifiedAt: '2026-07-26T14:00:00.000Z',
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain('Review history');
+    expect(markup).toContain('Assigned reviewer');
+    expect(markup).toContain('Researcher');
+    expect(markup).toContain('Resubmit');
+    expect(markup).toContain('Original report in this program');
+    expect(markup).toContain('Original finding');
+    expect(markup).toContain('Reward payment verified');
+    expect(markup).toContain('Exact RewardPaid event verified');
+    expect(markup).toContain('Canonical USDC Transfer verified');
+    expect(markup).toContain('reviewer');
+    expect(markup).not.toContain('View AI review');
+  });
+
   it('keeps AI duplicate candidates private to authorized reviewers', () => {
     const review = {
       status: 'ready' as const,
+      submissionRevision: 1,
+      sourceContentHash: '0xhash',
       summary: 'The report describes an access-control issue.',
       duplicateAssessment: 'likely' as const,
       duplicateConfidence: 0.94,
@@ -102,10 +217,20 @@ describe('SR-12 report detail', () => {
     const candidateId = '10000000-0000-4000-8000-000000000099';
 
     const researcherMarkup = renderToStaticMarkup(
-      createElement(ReportAiReviewCard, { audience: 'researcher', review }),
+      createElement(ReportAiReviewCard, {
+        audience: 'researcher',
+        currentContentHash: '0xhash',
+        currentSubmissionRevision: 1,
+        review,
+      }),
     );
     const reviewerMarkup = renderToStaticMarkup(
-      createElement(ReportAiReviewCard, { audience: 'reviewer', review }),
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xhash',
+        currentSubmissionRevision: 1,
+        review,
+      }),
     );
 
     expect(researcherMarkup).toContain('A prior report may describe the same issue.');
@@ -129,6 +254,95 @@ describe('SR-12 report detail', () => {
     expect(processing).toContain('AI review is queued for this program');
     expect(unavailable).toContain('Unavailable');
     expect(unavailable).toContain('Human review and report actions are still available.');
+  });
+
+  it('uses transparent semantic outline badges for every persisted AI state', () => {
+    const states = (['processing', 'unavailable', 'superseded'] as const).map((status) =>
+      renderToStaticMarkup(
+        createElement(ReportAiReviewCard, { audience: 'reviewer', review: { status } }),
+      ),
+    );
+    expect(states[0]).toContain('Processing');
+    expect(states[1]).toContain('Unavailable');
+    expect(states[2]).toContain('Superseded');
+    for (const markup of states) {
+      expect(markup).toContain('bg-transparent');
+      expect(markup).toContain('rounded-full border');
+    }
+  });
+
+  it('marks stale results Superseded and fails closed for unauthorized or invalid results', () => {
+    const stale = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xnew',
+        currentSubmissionRevision: 2,
+        review: {
+          status: 'ready',
+          sourceContentHash: '0xold',
+          submissionRevision: 1,
+          summary: 'stale result',
+        },
+      }),
+    );
+    const unauthorized = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xnew',
+        currentSubmissionRevision: 2,
+        review: undefined,
+      }),
+    );
+    const invalid = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xnew',
+        currentSubmissionRevision: 2,
+        review: { status: 'corrupt' } as never,
+      }),
+    );
+    expect(stale).toContain('Superseded');
+    expect(stale).not.toContain('stale result');
+    expect(unauthorized).toContain('Unavailable');
+    expect(invalid).toContain('Unavailable');
+  });
+
+  it('accepts a hash-matched result when the API omits current revision metadata', () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xhash',
+        review: {
+          status: 'ready',
+          sourceContentHash: '0xhash',
+          submissionRevision: 7,
+          summary: 'current result',
+        },
+      }),
+    );
+    expect(markup).toContain('current result');
+    expect(markup).not.toContain('Unavailable');
+  });
+
+  it('keeps AI advisory and human decision controls separate', () => {
+    const markup = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xhash',
+        currentSubmissionRevision: 1,
+        review: {
+          status: 'ready',
+          sourceContentHash: '0xhash',
+          submissionRevision: 1,
+          suggestedSeverity: 'high',
+        },
+      }),
+    );
+    expect(markup).toContain('Advisory · High');
+    expect(markup).toContain('bg-transparent');
+    expect(markup).not.toMatch(
+      /Generate|Regenerate|Retry|View AI review|Validate|Request information|Reject|Duplicate|Approve reward|Payout/,
+    );
   });
 
   it('pins the submitted-success and private-content copy', () => {

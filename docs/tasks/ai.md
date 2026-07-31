@@ -1,6 +1,8 @@
 # AI triage tasks
 
-AI là optional. Report submission, manual review, reward approval và payout phải hoạt động khi toàn bộ AI feature bị tắt.
+AI là optional. Report submission và manual review phải hoạt động khi toàn bộ AI feature bị tắt.
+Reward settlement là durable owner-only flow; các route lịch sử `approve-reward`, `pay` và
+`confirm-payment` trả `410 Gone` và không được coi là AI hoặc reviewer mutation.
 
 | ID     | Outcome                                               | Depends on                     | Acceptance criteria                                                                                                                              |
 | ------ | ----------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -19,7 +21,11 @@ AI là optional. Report submission, manual review, reward approval và payout ph
 
 ## Guardrails
 
-- AI không được gọi `approve-reward` hoặc `pay`.
+- AI không được gọi `approve-reward`, `pay`, `confirm-payment` (đều là legacy `410`) hoặc bất kỳ
+  durable settlement-intent route nào.
+- AI không được tạo/cancel intent, reserve pool, ký `approveReward`, thực thi `payReward` hoặc
+  chuyển report qua `reward_approved`/`payment_pending`/`paid`; các thao tác settlement đều do
+  owner-only flow và server reconciliation quyết định.
 - AI output không tự chuyển report sang `validated`, `rejected` hoặc `duplicate`.
 - Không log prompt chứa vulnerability content.
 - Provider failure phải trả về recoverable state để reviewer tiếp tục thủ công.

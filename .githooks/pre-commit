@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+
+node "$(git rev-parse --show-toplevel)/scripts/pre-commit.mjs"

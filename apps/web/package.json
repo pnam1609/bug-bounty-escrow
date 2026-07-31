@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bug-bounty-escrow/blockchain": "workspace:*",
     "@bug-bounty-escrow/shared": "workspace:*",
     "@bug-bounty-escrow/ui": "workspace:*",
     "@circle-fin/adapter-viem-v2": "1.14.0",

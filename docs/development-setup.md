@@ -34,6 +34,19 @@ pnpm install --frozen-lockfile
 The frozen install verifies that package manifests and `pnpm-lock.yaml` agree. Do
 not switch to a non-frozen install merely to hide a mismatch.
 
+## Pre-commit checks
+
+Install the repository-managed Git hook once per clone:
+
+```sh
+pnpm hooks:install
+```
+
+The hook runs `pnpm lint` and every JavaScript/TypeScript workspace unit test
+before a commit. Foundry contract tests remain in the Docker quality stage used
+by CI; run them locally with `pnpm --filter @bug-bounty-escrow/contracts test`
+when `forge` is installed.
+
 ## Environment setup
 
 The committed templates are:

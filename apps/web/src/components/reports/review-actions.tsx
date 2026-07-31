@@ -11,6 +11,7 @@ import {
   validateReportRequestSchema,
   type ApproveRewardRequest,
   type ReportDetail,
+  type RewardSettlementIntent,
   type Severity,
 } from '@bug-bounty-escrow/shared';
 import {
@@ -49,6 +50,7 @@ import {
   describeReportError,
   SEVERITY_LABELS,
   SEVERITY_OPTIONS,
+  shortReportId,
   type ReportStatus,
 } from './report-format';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
@@ -113,6 +115,7 @@ interface ActionDialogProps {
   readonly title: string;
   readonly tone?: 'destructive' | 'primary';
   readonly trigger: ReactNode;
+  readonly confirmDisabled?: boolean;
   /** Copy for the red consequence panel. Present only when the transition cannot be undone. */
   readonly warning?: string;
 }
@@ -134,6 +137,7 @@ function ActionDialog({
   title,
   tone = 'primary',
   trigger,
+  confirmDisabled = false,
   warning,
 }: ActionDialogProps) {
   return (
@@ -176,7 +180,7 @@ function ActionDialog({
           <AlertDialogAction
             aria-busy={busy || undefined}
             className={busy ? 'relative [color:transparent]' : 'relative'}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={(event) => {
               event.preventDefault();
               onConfirm();
@@ -377,7 +381,30 @@ function RejectAction({ busy, submit }: ActionProps) {
 
 /* ── Mark duplicate ───────────────────────────────────────────────────────────────────────── */
 
-function MarkDuplicateAction({ busy, submit }: ActionProps) {
+interface MarkDuplicateActionProps extends ActionProps {
+  readonly currentProgramId: string;
+  readonly currentReportId: string;
+  readonly token: string | undefined;
+}
+
+/** Client-side guard for the destructive dialog; the API remains the authority on submit. */
+export function duplicateTargetIsSafe(
+  currentReportId: string,
+  currentProgramId: string,
+  target: Pick<ReportDetail, 'id' | 'programId'> | undefined,
+): boolean {
+  return (
+    target !== undefined && target.id !== currentReportId && target.programId === currentProgramId
+  );
+}
+
+function MarkDuplicateAction({
+  busy,
+  currentProgramId,
+  currentReportId,
+  submit,
+  token,
+}: MarkDuplicateActionProps) {
   const [originalId, setOriginalId] = useState('');
   const [reason, setReason] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -386,6 +413,24 @@ function MarkDuplicateAction({ busy, submit }: ActionProps) {
     setReason('');
     setFieldError(null);
   });
+  const candidateId = originalId.trim();
+  const candidateShapeValid = markDuplicateRequestSchema.safeParse({
+    originalReportId: candidateId,
+  }).success;
+  const targetQuery = useQuery({
+    queryKey: ['review-duplicate-target', currentReportId, candidateId],
+    queryFn: () =>
+      apiRequest(`/api/reports/${encodeURIComponent(candidateId)}`, reportResponseSchema, {
+        token,
+      }),
+    enabled:
+      form.open && candidateShapeValid && candidateId !== currentReportId && candidateId.length > 0,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const target = targetQuery.data?.data;
+  const targetIsSameProgram = duplicateTargetIsSafe(currentReportId, currentProgramId, target);
+  const targetReady = targetIsSameProgram;
 
   async function confirm() {
     setFieldError(null);
@@ -397,6 +442,15 @@ function MarkDuplicateAction({ busy, submit }: ActionProps) {
 
     if (!parsed.success) {
       setFieldError('Enter the id of the earlier report this one duplicates.');
+      return;
+    }
+
+    if (!targetReady) {
+      setFieldError(
+        targetQuery.isError || (target !== undefined && !targetIsSameProgram)
+          ? 'That original report is not available in this program.'
+          : 'Check the original report preview before confirming.',
+      );
       return;
     }
 
@@ -417,6 +471,7 @@ function MarkDuplicateAction({ busy, submit }: ActionProps) {
       title="Mark as a duplicate"
       tone="destructive"
       trigger={<Button variant="secondary">Mark duplicate</Button>}
+      confirmDisabled={!targetReady}
       warning="A duplicate is closed for good and earns no reward. Check the original first."
     >
       <Field
@@ -433,6 +488,26 @@ function MarkDuplicateAction({ busy, submit }: ActionProps) {
           value={originalId}
         />
       </Field>
+      {candidateId === '' || !candidateShapeValid ? null : targetQuery.isPending ? (
+        <p aria-live="polite" className="text-body-sm text-text-muted">
+          Checking that report is readable and belongs to this program…
+        </p>
+      ) : targetReady && target !== undefined ? (
+        <div className="flex flex-col gap-xs rounded-md border border-border bg-surface-raised p-md">
+          <p className="text-label-md text-text">Original report preview</p>
+          <p className="text-body-sm text-text">{target.title}</p>
+          <p className="text-label-sm text-text-muted">
+            <code aria-label={`Full original report ID ${target.id}`}>
+              {shortReportId(target.id)}…
+            </code>{' '}
+            · {target.status.replaceAll('_', ' ')} · same program confirmed
+          </p>
+        </div>
+      ) : (
+        <p className="text-body-sm text-error" role="alert">
+          That original report is not available in this program.
+        </p>
+      )}
       <Field counter={`${String(reason.length)} / 2,000`} label="Note (optional)">
         <Textarea
           maxLength={2000}
@@ -676,6 +751,59 @@ function ContinueRewardApprovalAction({
       />
     </>
   );
+}
+
+function SettlementPreflight({ intent }: { readonly intent: RewardSettlementIntent }) {
+  const maskedRecipient = `${intent.recipientAddress.slice(0, 6)}…${intent.recipientAddress.slice(-4)}`;
+  const calculation =
+    intent.calculationType === 'percentage'
+      ? `Percentage · ${intent.percentageBps === undefined ? 'server-derived' : `${intent.percentageBps} bps`}`
+      : readableCalculation(intent.calculationType);
+
+  return (
+    <Callout title="Reward settlement preflight" variant="info">
+      <div className="flex flex-col gap-md">
+        <p>
+          Server-derived values are locked to this durable intent. Review them before the owner
+          wallet signs; a payout is permissionless after approval.
+        </p>
+        <dl className="grid gap-sm text-body-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-label-sm text-text-muted">Reward</dt>
+            <dd className="text-text">{intent.amount} USDC</dd>
+          </div>
+          <div>
+            <dt className="text-label-sm text-text-muted">Calculation</dt>
+            <dd className="text-text">{calculation}</dd>
+          </div>
+          {intent.calculationBasisAmount === undefined ? null : (
+            <div>
+              <dt className="text-label-sm text-text-muted">Verified basis</dt>
+              <dd className="text-text">{intent.calculationBasisAmount} USDC</dd>
+            </div>
+          )}
+          {intent.maxRewardCap === undefined ? null : (
+            <div>
+              <dt className="text-label-sm text-text-muted">Cap</dt>
+              <dd className="text-text">{intent.maxRewardCap} USDC</dd>
+            </div>
+          )}
+          <div>
+            <dt className="text-label-sm text-text-muted">Researcher wallet</dt>
+            <dd className="font-mono text-text">{maskedRecipient}</dd>
+          </div>
+          <div>
+            <dt className="text-label-sm text-text-muted">Escrow</dt>
+            <dd className="font-mono text-text">{intent.escrowAddress}</dd>
+          </div>
+        </dl>
+      </div>
+    </Callout>
+  );
+}
+
+function readableCalculation(value: RewardSettlementIntent['calculationType']): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 /* ── Panel ────────────────────────────────────────────────────────────────────────────────── */
@@ -936,6 +1064,7 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
     resumeMutation.isPending ||
     cancelRewardMutation.isPending;
   const props: ActionProps = { busy, submit };
+  const reviewerWaitingForOwner = viewerRole === 'reviewer' && report.status === 'validated';
 
   return (
     <Card className="h-fit gap-xl" padding="lg">
@@ -947,7 +1076,15 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
         </CardDescription>
       </CardHeader>
 
-      {available.length === 0 ? (
+      {viewerRole === 'owner' && settlement.data !== undefined ? (
+        <SettlementPreflight intent={settlement.data.data} />
+      ) : null}
+
+      {reviewerWaitingForOwner ? (
+        <p className="text-body-sm text-text-muted" role="status">
+          Waiting for the program owner to approve the reward.
+        </p>
+      ) : available.length === 0 ? (
         <p className="text-body-sm text-text-muted">
           {WAITING_COPY[report.status] ?? 'There is nothing to decide at this stage.'}
         </p>
@@ -998,7 +1135,14 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
             <RequestInformationAction {...props} />
           ) : null}
           {available.includes('reject') ? <RejectAction {...props} /> : null}
-          {available.includes('mark-duplicate') ? <MarkDuplicateAction {...props} /> : null}
+          {available.includes('mark-duplicate') ? (
+            <MarkDuplicateAction
+              {...props}
+              currentProgramId={report.programId}
+              currentReportId={report.id}
+              token={token}
+            />
+          ) : null}
         </div>
       )}
 

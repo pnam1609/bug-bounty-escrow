@@ -295,9 +295,19 @@ Database RPC `researcher_rewards`:
 được gate `owner|reviewer` và tiếp tục kiểm tra owner/assignment theo program. Researcher đọc payout
 của mình qua `/api/rewards`, không probe transaction của report khác.
 
-Settlement mutation `approve-reward`, `pay`, `confirm-payment` vẫn chỉ cho `owner|reviewer`; database
-RPC kiểm tra lại quyền review. AI triage rows là dữ liệu hỗ trợ thụ động và không có trigger hoặc
-code path nào gọi settlement transition.
+### Reward settlement mutations — owner-only durable flow
+
+Các route legacy `POST /api/reports/:id/approve-reward`, `POST /api/reports/:id/pay` và
+`POST /api/reports/:id/confirm-payment` không còn là settlement API; chúng trả `410 Gone` với
+`error.code = reward_settlement_flow_required`. Reviewer vẫn có thể validate/reject/request
+information/mark duplicate theo review flow, nhưng không được reserve reward hoặc ký approval.
+
+Settlement dùng các route durable `POST /api/reports/:id/reward-settlement-intents` và các
+`current`, `approval-observations`, `reconcile`, `cancel` subroutes. Toàn bộ mutation này là
+`owner`-only: server kiểm tra program ownership, derive amount/recipient/content hash, reserve
+atomically/idempotently, rồi chỉ owner browser wallet mới ký `approveReward`. Sau owner approval,
+`payReward` execution có thể permissionless; việc thực thi không cấp thêm quyền reserve/sign cho
+reviewer hay relayer. AI triage rows chỉ là advisory/persisted evidence và không tự gọi settlement.
 
 ---
 

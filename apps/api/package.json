@@ -17,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@bug-bounty-escrow/blockchain": "workspace:*",
     "@bug-bounty-escrow/domain": "workspace:*",
     "@bug-bounty-escrow/ai": "workspace:*",
     "@bug-bounty-escrow/shared": "workspace:*",

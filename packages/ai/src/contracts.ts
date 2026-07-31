@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const AI_SCHEMA_VERSION = 1 as const;
+/** Provider-facing version identifier. DB columns intentionally keep their internal integer form. */
+export const AI_SCHEMA_VERSION = 'ai-review-v1' as const;
+export const AI_SCHEMA_VERSION_NUMBER = 1 as const;
 
 const boundedText = (max: number) => z.string().trim().min(1).max(max);
 const boundedList = z.array(boundedText(300)).max(32);
@@ -21,34 +23,70 @@ export const scopeAssessmentSchema = z.enum(['in_scope', 'out_of_scope', 'uncert
 export const duplicateAssessmentSchema = z.enum(['none', 'possible', 'likely']);
 export const severitySchema = z.enum(['critical', 'high', 'medium', 'low', 'informational']);
 
+const rationale = boundedText(1_000);
+const completenessCheckSchema = z
+  .object({
+    key: boundedText(120),
+    status: z.enum(['present', 'missing', 'unclear']),
+    reason: rationale,
+  })
+  .strict();
+
+export const completenessSchema = z
+  .object({
+    score: z.number().min(0).max(1),
+    checks: z.array(completenessCheckSchema).max(32),
+  })
+  .strict();
+
+export const suggestedSeveritySchema = z
+  .object({
+    level: severitySchema,
+    confidence: z.number().min(0).max(1),
+    rationale,
+  })
+  .strict();
+
+export const scopeSuggestionSchema = z
+  .object({
+    result: scopeAssessmentSchema,
+    confidence: z.number().min(0).max(1),
+    rationale,
+  })
+  .strict();
+
 export const reportTriageResultSchema = z
   .object({
-    schemaVersion: z.number().int().positive().default(AI_SCHEMA_VERSION),
+    schemaVersion: z.literal(AI_SCHEMA_VERSION).default(AI_SCHEMA_VERSION),
     summary: boundedText(4_000),
-    completenessScore: z.number().min(0).max(1),
-    suggestedSeverity: severitySchema,
-    scopeAssessment: scopeAssessmentSchema,
+    completeness: completenessSchema,
+    suggestedSeverity: suggestedSeveritySchema,
+    scopeAssessment: scopeSuggestionSchema,
     missingInformation: z.array(boundedText(500)).max(32),
-    confidence: z.number().min(0).max(1),
     fingerprint: reportFingerprintSchema,
   })
   .strict();
 
 export const duplicateCandidateResultSchema = z
   .object({
-    candidateReportId: z.string().uuid(),
+    candidateRef: boundedText(200),
     assessment: duplicateAssessmentSchema.exclude(['none']),
-    reason: boundedText(1_000),
     confidence: z.number().min(0).max(1),
+    reasons: z.array(rationale).max(8),
   })
   .strict();
 
 export const duplicateComparisonResultSchema = z
   .object({
-    schemaVersion: z.number().int().positive().default(AI_SCHEMA_VERSION),
-    duplicateAssessment: duplicateAssessmentSchema,
-    duplicateConfidence: z.number().min(0).max(1),
-    candidates: z.array(duplicateCandidateResultSchema).max(20),
+    schemaVersion: z.literal(AI_SCHEMA_VERSION).default(AI_SCHEMA_VERSION),
+    duplicateAssessment: z
+      .object({
+        assessment: duplicateAssessmentSchema,
+        confidence: z.number().min(0).max(1),
+        matchingReasons: z.array(rationale).max(16),
+        candidates: z.array(duplicateCandidateResultSchema).max(20),
+      })
+      .strict(),
   })
   .strict();
 
@@ -92,6 +130,9 @@ export const aiReviewStatusSchema = z.enum(['processing', 'ready', 'unavailable'
 export type ReportFingerprint = z.infer<typeof reportFingerprintSchema>;
 export type ScopeAssessment = z.infer<typeof scopeAssessmentSchema>;
 export type DuplicateAssessment = z.infer<typeof duplicateAssessmentSchema>;
+export type Completeness = z.infer<typeof completenessSchema>;
+export type SuggestedSeverity = z.infer<typeof suggestedSeveritySchema>;
+export type ScopeSuggestion = z.infer<typeof scopeSuggestionSchema>;
 export type ReportTriageResult = z.infer<typeof reportTriageResultSchema>;
 export type DuplicateCandidateResult = z.infer<typeof duplicateCandidateResultSchema>;
 export type DuplicateComparisonResult = z.infer<typeof duplicateComparisonResultSchema>;
@@ -101,6 +142,15 @@ export type AiReviewStatus = z.infer<typeof aiReviewStatusSchema>;
 
 export type AiProviderName = 'mock' | 'gemini' | 'deepseek';
 export type AiPrivacyMode = 'demo' | 'paid';
+
+/** Provider/model pairs accepted by the hosted adapters. Never pass a user-controlled alias. */
+export const APPROVED_AI_MODELS: Readonly<{
+  readonly [provider in AiProviderName]: readonly string[];
+}> = Object.freeze({
+  mock: Object.freeze(['mock-triage-v1']),
+  gemini: Object.freeze(['gemini-3.5-flash']),
+  deepseek: Object.freeze(['deepseek-v4-flash']),
+});
 
 export interface TriageProvider {
   readonly name: AiProviderName;
@@ -145,11 +195,16 @@ export class AiProviderError extends Error {
 }
 
 export function assertProviderConfig(config: AiProviderConfig): void {
-  if (config.provider === 'mock') return;
-  if (config.apiKey === undefined || config.apiKey.trim().length === 0) {
+  if (
+    config.provider !== 'mock' &&
+    (config.apiKey === undefined || config.apiKey.trim().length === 0)
+  ) {
     throw new AiProviderError('invalid_config', `${config.provider} API key is required`);
   }
   if (config.privacyMode === undefined) {
     throw new AiProviderError('invalid_config', 'AI privacy mode is required');
+  }
+  if (config.model !== undefined && !APPROVED_AI_MODELS[config.provider].includes(config.model)) {
+    throw new AiProviderError('invalid_config', 'AI model is not allowlisted for this provider');
   }
 }

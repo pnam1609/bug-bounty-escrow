@@ -50,7 +50,6 @@ contract BountyEscrow is ReentrancyGuard {
         address withdrawRecipient
     );
     event ExternalFundingSynced(address indexed actor, uint256 newlyObserved, uint256 totalFunded);
-    event RewardApproverUpdated(address indexed approver, bool authorized);
     event RewardApproved(
         bytes32 indexed reportKey,
         bytes32 indexed approvedContentHash,
@@ -74,16 +73,10 @@ contract BountyEscrow is ReentrancyGuard {
     uint256 public totalWithdrawn;
     uint256 public totalApprovedOutstanding;
 
-    mapping(address approver => bool authorized) public rewardApprovers;
     mapping(bytes32 reportKey => Reward reward) public rewards;
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert Unauthorized();
-        _;
-    }
-
-    modifier onlyApprover() {
-        if (!rewardApprovers[msg.sender]) revert Unauthorized();
         _;
     }
 
@@ -104,9 +97,6 @@ contract BountyEscrow is ReentrancyGuard {
         token = IERC20(token_);
         refundUnlockAt = refundUnlockAt_;
         withdrawRecipient = withdrawRecipient_;
-        rewardApprovers[owner_] = true;
-
-        emit RewardApproverUpdated(owner_, true);
         emit EscrowInitialized(programKey_, owner_, token_, refundUnlockAt_, withdrawRecipient_);
     }
 
@@ -134,18 +124,12 @@ contract BountyEscrow is ReentrancyGuard {
         }
     }
 
-    function setRewardApprover(address approver, bool authorized) external onlyOwner {
-        if (approver == address(0)) revert InvalidAddress();
-        rewardApprovers[approver] = authorized;
-        emit RewardApproverUpdated(approver, authorized);
-    }
-
     function approveReward(
         bytes32 reportKey,
         bytes32 approvedContentHash,
         address researcher,
         uint256 amount
-    ) external onlyApprover {
+    ) external onlyOwner {
         if (closed) revert EscrowAlreadyClosed();
         if (
             reportKey == bytes32(0) || approvedContentHash == bytes32(0) || researcher == address(0)

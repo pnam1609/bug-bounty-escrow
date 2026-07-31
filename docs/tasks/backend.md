@@ -52,8 +52,8 @@ Controllers chỉ xử lý HTTP concerns. Business logic nằm trong services/do
 | BE-RPT-007 | `POST /api/reports/:id/validate` | BE-PLT-009, BE-RPT-003, DB-008 | Severity cuối cùng bắt buộc và hợp lệ; transition/audit record atomic; unauthorized bị từ chối |
 | BE-RPT-008 | `POST /api/reports/:id/reject` | BE-PLT-009, BE-RPT-003, DB-008 | Rejection reason bắt buộc; transition atomic; report đã paid không thể reject |
 | BE-RPT-009 | `POST /api/reports/:id/mark-duplicate` | BE-PLT-009, BE-RPT-003, DB-008 | Original report ID hợp lệ, cùng program và có quyền; không self-reference/cycle |
-| BE-RPT-010 | `POST /api/reports/:id/approve-reward` | BE-PLT-009, BE-RPT-003, DB-008 | Chỉ validated report; amount nằm trong tier và remaining pool; approval không tự payout |
-| BE-RPT-011 | `POST /api/reports/:id/pay` | BE-PLT-009, BE-RPT-003, BE-RPT-010, BC-006 | Chỉ reward-approved report; idempotency key bắt buộc; tx/report state được persist nhất quán |
+| BE-RPT-010 | `POST /api/reports/:id/approve-reward` | BE-PLT-009, BE-RPT-003, DB-008 | **Legacy `410 Gone`** (`reward_settlement_flow_required`); không còn owner/reviewer mutation |
+| BE-RPT-011 | `POST /api/reports/:id/pay` | BE-PLT-009, BE-RPT-003, BE-RPT-010, BC-006 | **Legacy `410 Gone`**; không còn chuyển report state hoặc nhận client transaction evidence |
 
 ## Attachment APIs
 
@@ -69,6 +69,16 @@ Controllers chỉ xử lý HTTP concerns. Business logic nằm trong services/do
 | BE-CMT-001 | `GET /api/reports/:id/comments` | BE-PLT-009, BE-RPT-003, DB-007 | Chỉ user có quyền với report đọc được; pagination ổn định; deleted content được xử lý đúng contract |
 | BE-CMT-002 | `POST /api/reports/:id/comments` | BE-PLT-009, BE-RPT-003, DB-007 | Body được validate; author lấy từ token; comment được persist và notification không làm request ghi trùng |
 
+### Reward settlement (durable owner-only flow)
+
+`POST /api/reports/:id/approve-reward`, `/pay` và `/confirm-payment` chỉ là legacy contract
+surfaces và luôn trả `410 Gone` (`reward_settlement_flow_required`). Chúng không còn là
+owner/reviewer mutations. Settlement phải dùng `POST /api/reports/:id/reward-settlement-intents`
+và các subroutes `current`, `approval-observations`, `reconcile`, `cancel`; controller gate
+toàn bộ write bằng `@Roles('owner')`. Owner browser wallet ký `approveReward` một lần trên
+intent bất biến; `payReward` execution có thể permissionless, nhưng AI, reviewer và relayer
+không được tạo intent, reserve pool hoặc ký approval.
+
 ## Transaction APIs
 
 | ID | Endpoint | Depends on | Acceptance criteria |
@@ -82,4 +92,4 @@ Controllers chỉ xử lý HTTP concerns. Business logic nằm trong services/do
 - Mỗi endpoint phải có ít nhất happy-path, validation, unauthenticated và unauthorized integration tests khi phù hợp.
 - State-changing endpoint phải test invalid transition và idempotent retry.
 - Task blockchain không được coi transaction là final trước số confirmation đã cấu hình.
-- AI output không bao giờ được gọi trực tiếp payout endpoint.
+- AI output không bao giờ được gọi trực tiếp legacy payout route hoặc durable settlement-intent endpoint.

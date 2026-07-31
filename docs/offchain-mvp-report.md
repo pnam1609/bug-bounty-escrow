@@ -157,7 +157,14 @@ fresh databases.
 | POST   | `/api/reports/:id/validate`                               | Permitted owner/reviewer                            |
 | POST   | `/api/reports/:id/reject`                                 | Permitted owner/reviewer                            |
 | POST   | `/api/reports/:id/mark-duplicate`                         | Permitted owner/reviewer                            |
-| POST   | `/api/reports/:id/approve-reward`                         | Permitted owner/reviewer; no payout                 |
+| POST   | `/api/reports/:id/approve-reward`                         | **Legacy `410 Gone`**; not an owner/reviewer mutation |
+| POST   | `/api/reports/:id/pay`                                    | **Legacy `410 Gone`**; not an owner/reviewer mutation |
+| POST   | `/api/reports/:id/confirm-payment`                        | **Legacy `410 Gone`**; not an owner/reviewer mutation |
+| POST   | `/api/reports/:id/reward-settlement-intents`              | Owner only; durable intent and atomic reservation    |
+| GET    | `/api/reports/:id/reward-settlement-intents/current`      | Owner only; current durable intent                   |
+| POST   | `/api/reports/:id/reward-settlement-intents/:intentId/approval-observations` | Owner only; persist wallet approval evidence |
+| POST   | `/api/reports/:id/reward-settlement-intents/:intentId/reconcile` | Owner only; reconcile evidence/relay          |
+| POST   | `/api/reports/:id/reward-settlement-intents/:intentId/cancel` | Owner only; cancel before submission             |
 
 Sensitive state-changing endpoints use verified-user, route-scoped fixed-window
 limits and return `429` with `Retry-After`. Spoofed forwarding headers do not
@@ -180,7 +187,7 @@ change the key. Health remains unaffected.
 | `/reports`                  | Researcher submission dashboard                                 |
 | `/reports/[id]`             | Private detail/edit/download/comment workflow                   |
 | `/review`                   | Owner/reviewer inbox                                            |
-| `/review/[id]`              | Confirmed manual transitions and reward approval without payout |
+| `/review/[id]`              | Confirmed manual review transitions; settlement intent is owner-only |
 
 All pages have loading/error/unauthorized handling; collection pages include empty
 states. Signed URLs are requested only at action time and are never cached.
@@ -287,6 +294,12 @@ check when an authorized project is available.
 
 No smart-contract, blockchain settlement, AI-provider, payout, or production
 deployment work was added.
+
+The three report settlement routes retained by the off-chain API are historical compatibility
+surfaces only: `POST /api/reports/:id/approve-reward`, `/pay`, and `/confirm-payment` return
+`410 Gone` with `reward_settlement_flow_required`. They must not be presented as current
+owner/reviewer mutations. Current settlement uses the owner-only durable intent routes above;
+AI triage is advisory and never creates, approves, pays, or confirms settlement.
 
 ## Assumptions and known limitations
 

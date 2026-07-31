@@ -337,7 +337,11 @@ Mỗi asset type có in-scope asset phải có ít nhất 1 reward tier. Tier l�
 
 Đơn vị hiển thị là `USDC`. Network `Arc` và payout token `USDC` là platform-fixed trong MVP, owner không chọn trong form.
 
-Với tier `percentage`, reviewer phải cung cấp verified `calculationBasisAmount` khi approve reward. Backend tính amount từ basis + percentage, áp dụng cap và lưu snapshot của basis, percentage, cap và computed amount trong review/payment metadata; percentage không chỉ là guidance text.
+Với tier `percentage`, reviewer có thể cung cấp verified `calculationBasisAmount` trong review để
+backend tính amount. Backend áp dụng cap và lưu snapshot của basis, percentage, cap và computed
+amount trong review/payment metadata; percentage không chỉ là guidance text. Reviewer không reserve
+hoặc ký reward: chỉ program owner mới tạo settlement intent và ký `approveReward` sau khi xem quyết
+định review.
 
 ### Program rules and policies
 
@@ -502,8 +506,9 @@ Signer/custody được tách rõ:
   role-gate payout, phải ghi nhận liveness risk là owner có thể trì hoãn settlement.
 - NestJS không giữ owner private key. Circle credentials chỉ cấp quyền cho deployment wallet, không
   cho phép backend giả danh owner/admin.
-- Reviewer trong database không tự động có on-chain role. Cấp `PAYOUT_ROLE` cho một wallet khác là
-  hành động security-sensitive, cần flow riêng và audit event.
+- Reviewer trong database không có on-chain approval/signing role. `PAYOUT_ROLE`/delegated
+  approver không thuộc MVP và không được dùng để cấp cho reviewer quyền reserve hoặc ký reward;
+  mọi thay đổi quyền on-chain trong tương lai phải có flow riêng và audit event.
 - Nếu funding dùng Circle Wallets SCA thay vì browser EOA, phải dùng Unified Balance delegate
   workflow; SCA deposit dùng `allowanceStrategy: "approve"`. Đây không phải default owner UX.
 
@@ -634,7 +639,7 @@ Contract chỉ giữ dữ liệu cần để enforce escrow invariant. Không mi
 | `programKey` | immutable `bytes32` | Domain-separated hash của canonical program UUID; bind contract với program |
 | `token` | immutable `IERC20` | Khóa escrow vào canonical Arc USDC ERC-20 |
 | Admin/owner role | `DEFAULT_ADMIN_ROLE` | Quản lý role; production nên hỗ trợ chuyển sang multisig |
-| Reward approver role | `PAYOUT_ROLE` | Chỉ wallet được cấp quyền mới tạo immutable reward approval; execution có thể permissionless |
+| Reward approval authority | Locked program owner EOA | Chỉ owner mới tạo settlement intent/reserve và ký immutable reward approval; execution có thể permissionless |
 | `refundUnlockAt` | `uint64` hoặc `uint256` | Server-derived bằng chính xác `program.deadline`; client không được nhập/override; thiếu deadline thì deploy fail closed |
 | `withdrawRecipient` | immutable `address` | Đích nhận phần dư đã khóa khi deploy; mặc định owner hoặc treasury đã review |
 | `closed` | `bool` | Lifecycle on-chain tối thiểu; không mirror mọi status của app |
@@ -660,8 +665,8 @@ domain-separated key. `chainId` và `programKey` ngăn cùng UUID tạo key trù
 network/program khác. Uniqueness của deployment được enforce bởi unique database constraint +
 Circle idempotency key; không dựa vào browser hoặc contract address do client gửi.
 
-`approvedContentHash` là hash của canonical report snapshot mà human reviewer đã approve, không
-phải raw report content. Hash được commit ở reward-approval time thay vì lúc submit để giảm việc
+`approvedContentHash` là hash của canonical report snapshot mà program owner đã approve sau khi
+xem human review, không phải raw report content. Hash được commit ở reward-approval time thay vì lúc submit để giảm việc
 lộ timing/metadata của mọi private submission. Nếu report trải qua `needs_information`, hash phải
 đại diện cho version cuối được review.
 
@@ -723,7 +728,7 @@ riêng, có event và không được áp dụng sau payout.
    Chỉ emit/increment khi `newlyObserved > 0`; gọi lại không được double-count. Backend gọi sync
    sau khi destination transfer final và serialize một reconciliation per escrow.
 5. Reward chỉ được approve khi:
-   - caller có `PAYOUT_ROLE`;
+   - caller là locked program owner EOA (không phải reviewer/delegated approver);
    - report chưa từng được approve/paid;
    - researcher khác zero address;
    - amount lớn hơn 0;

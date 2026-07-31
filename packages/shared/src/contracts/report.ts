@@ -340,6 +340,51 @@ export const reportInformationRequestSchema = z
   .object({
     message: z.string(),
     requestedAt: isoDateTimeSchema,
+    authorRole: z.enum(['owner', 'reviewer']).optional(),
+  })
+  .strict();
+
+/** Ordered, private human/system state transitions. Actor identity is intentionally omitted. */
+export const reportReviewEventSchema = z
+  .object({
+    id: uuidSchema,
+    // `researcher` is only emitted on the program-side timeline for a resubmit event. The
+    // researcher projection omits the internal event stream entirely, so this role never leaks
+    // reviewer identity or private reasons back to the researcher.
+    actorRole: z.enum(['owner', 'reviewer', 'researcher', 'system']),
+    action: z.string().min(1).max(80),
+    fromStatus: reportStatusSchema,
+    toStatus: reportStatusSchema,
+    reason: z.string().optional(),
+    occurredAt: isoDateTimeSchema,
+    duplicateTarget: z
+      .object({
+        reportId: uuidSchema,
+        sameProgram: z.literal(true),
+        title: z.string().max(300).optional(),
+        status: reportStatusSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+/** Proof rendered only for program-side readers after exact backend Arc verification. */
+export const reportPaidSettlementProofSchema = z
+  .object({
+    transactionHash: transactionHashSchema,
+    chainId: z.string().regex(/^\d+$/),
+    tokenAddress: evmAddressSchema,
+    recipientAddressMasked: z.string().min(1).max(32),
+    amount: monetaryAmountSchema,
+    blockNumber: z.string().regex(/^\d+$/),
+    blockHash: transactionHashSchema,
+    rewardEventLogIndex: z.number().int().nonnegative(),
+    transferLogIndex: z.number().int().nonnegative(),
+    exactEventVerified: z.literal(true),
+    canonicalTransferVerified: z.literal(true),
+    accountingApplied: z.literal(true),
+    verifiedAt: isoDateTimeSchema,
   })
   .strict();
 
@@ -349,7 +394,7 @@ export const reportInformationRequestSchema = z
  * as unavailable rather than inventing a result. Fingerprints and duplicate candidates are only
  * present in an owner/reviewer projection after server-side authorization.
  */
-export const aiReviewStatusSchema = z.enum(['processing', 'ready', 'unavailable']);
+export const aiReviewStatusSchema = z.enum(['processing', 'ready', 'unavailable', 'superseded']);
 export const aiDuplicateAssessmentSchema = z.enum(['none', 'possible', 'likely']);
 
 export const aiReportFingerprintSchema = z
@@ -378,7 +423,7 @@ export const reportAiReviewSchema = z
     status: aiReviewStatusSchema,
     provider: z.string().optional(),
     model: z.string().optional(),
-    schemaVersion: z.number().int().positive().optional(),
+    schemaVersion: z.literal('ai-review-v1').optional(),
     submissionRevision: z.number().int().positive().optional(),
     submissionSequence: z.number().int().positive().optional(),
     sourceContentHash: z.string().optional(),
@@ -427,7 +472,10 @@ export const reportDetailSchema = reportSummarySchema
     attachments: z.array(reportAttachmentSchema),
     capabilities: reportCapabilitiesSchema,
     latestInformationRequest: reportInformationRequestSchema.optional(),
+    reviewEvents: z.array(reportReviewEventSchema).optional(),
+    paidSettlementProof: reportPaidSettlementProofSchema.optional(),
     contentHash: z.string(),
+    submissionRevision: z.number().int().positive().optional(),
     createdAt: isoDateTimeSchema,
     aiReview: reportAiReviewSchema.optional(),
   })
@@ -512,6 +560,8 @@ export type AiDuplicateAssessment = z.output<typeof aiDuplicateAssessmentSchema>
 export type AiReportFingerprint = z.output<typeof aiReportFingerprintSchema>;
 export type AiDuplicateCandidate = z.output<typeof aiDuplicateCandidateSchema>;
 export type ReportAiReview = z.output<typeof reportAiReviewSchema>;
+export type ReportReviewEvent = z.output<typeof reportReviewEventSchema>;
+export type ReportPaidSettlementProof = z.output<typeof reportPaidSettlementProofSchema>;
 export type ReportSummary = z.output<typeof reportSummarySchema>;
 export type ReportDetail = z.output<typeof reportDetailSchema>;
 export type ReportResponse = z.output<typeof reportResponseSchema>;

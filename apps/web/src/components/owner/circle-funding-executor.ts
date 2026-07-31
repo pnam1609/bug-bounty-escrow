@@ -7,6 +7,7 @@ import {
   EthereumSepolia,
 } from '@circle-fin/app-kit/chains';
 import { encodeFunctionData, stringToHex, type EIP1193Provider } from 'viem';
+import { ERC20_READ_ABI, ESCROW_OWNER_ABI } from '@bug-bounty-escrow/blockchain';
 
 import {
   FUNDING_NETWORK_IDS,
@@ -33,51 +34,6 @@ const CHAIN_BY_ID = {
   Arbitrum_Sepolia: ArbitrumSepolia,
   Base_Sepolia: BaseSepolia,
 } as const;
-const ESCROW_OWNER_ABI = [
-  {
-    type: 'function',
-    name: 'approveReward',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'reportKey', type: 'bytes32' },
-      { name: 'approvedContentHash', type: 'bytes32' },
-      { name: 'researcher', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'close',
-    stateMutability: 'nonpayable',
-    inputs: [],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'withdrawRemaining',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'expectedAmount', type: 'uint256' }],
-    outputs: [{ name: 'amount', type: 'uint256' }],
-  },
-] as const;
-const ERC20_READ_ABI = [
-  {
-    type: 'function',
-    name: 'balanceOf',
-    stateMutability: 'view',
-    inputs: [{ name: 'account', type: 'address' }],
-    outputs: [{ name: 'balance', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'decimals',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: 'decimals', type: 'uint8' }],
-  },
-] as const;
-
 export interface DiscoveredEvmWallet {
   readonly id: string;
   readonly name: string;

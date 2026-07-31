@@ -13,9 +13,17 @@ Nguồn sự thật theo thứ tự ưu tiên:
 > đã đổi theo.
 >
 > **Trạng thái: bước 1–12 của mục 7 đã được triển khai.** Migration được viết lại tại chỗ (dự án
-> chưa có dữ liệu production). Mục 3–6 giữ nguyên như bản review gốc để làm hồ sơ quyết định;
+> chưa có dữ liệu production). Mục 3–6 giữ nguyên như bản review gốc để làm hồ sơ quyết định,
+> ngoại trừ bảng settlement route đã reconcile ở DOC-RR-02;
 > cột "Trạng thái" ở mục 1 và mục 8 phản ánh những gì đã sửa. Còn lại: escrow on-chain thật
 > (milestone 2, bước 13) và AI triage (milestone 3, bước 14).
+>
+> **DOC-RR-02 (settlement route reconciliation).** Các route report cũ
+> `approve-reward`, `pay` và `confirm-payment` chỉ còn để giữ contract history và trả `410 Gone`
+> (`reward_settlement_flow_required`); chúng không phải mutation hiện tại của owner/reviewer.
+> Settlement dùng durable owner-only `POST /api/reports/:id/reward-settlement-intents` cùng
+> các subroute `current`, `approval-observations`, `reconcile` và `cancel` (xem
+> [api-contracts.md](api-contracts.md#reward-settlement-mutations--owner-only-durable-flow)).
 
 ---
 
@@ -28,7 +36,7 @@ Nguồn sự thật theo thứ tự ưu tiên:
 | Public program list | Thiếu filter/sort/`totalPaid` | Đủ filter/sort; `totalPaid` có visibility server-side |
 | Report submit | `reports.impact` free text | `report_impacts` ↔ `program_impacts` có snapshot |
 | Manual review | Error mapping hỏng mọi UI error state | 22023/42501/P0002/28000 map đúng + mã máy đọc |
-| Escrow / payout / publish | Chưa có | Có off-chain: deploy/fund/publish/status/pay/confirm |
+| Escrow / payout / publish | Chưa có | Có off-chain lifecycle; report settlement routes cũ `pay`/`confirm` là legacy `410`, flow hiện tại dùng durable owner-only intents |
 | Disclosure / Known issues | Chưa có | `report_disclosures` + public read endpoint |
 | Notifications API | Bảng có, API không | `GET /api/me/notifications` + mark read |
 | Reviewer assignment | Bảng có, không gán được | API assign/remove + RLS write policy |
@@ -39,7 +47,8 @@ Nguồn sự thật theo thứ tự ưu tiên:
 2. ✅ `approve_report_reward_atomic` **không trừ `remaining_pool`** → over-commit reward pool.
 3. ✅ `update_program_atomic` **xóa rồi insert lại `program_scopes`** → owner không bao giờ sửa được scope sau khi có report đầu tiên (FK restrict).
 4. ✅ Public program list **hard-code `status = 'active'`** ở cả API lẫn RLS → không thể hiển thị ended programs như bounty-table flow yêu cầu.
-5. ✅ Không có đường nào để **fund escrow** → `approve-reward` luôn fail vì `remaining_pool = 0`.
+5. ✅ (Lịch sử) Không có đường nào để **fund escrow** → route legacy `approve-reward` luôn fail vì
+   `remaining_pool = 0`; route này hiện đã trả `410 Gone`.
 
 Ngoài ra phát hiện thêm trong lúc sửa: `ESCROW_TRANSACTION_TYPES` và
 `ESCROW_TRANSACTION_STATUSES` trong `packages/domain` không khớp CHECK constraint của
@@ -583,8 +592,13 @@ Server-created: `status='draft'`, `totalPool=0`, `reservedPool=0`, `paidPool=0`,
 | POST | `/api/reports/:id/validate` | ✅ | |
 | POST | `/api/reports/:id/reject` | ✅ | |
 | POST | `/api/reports/:id/mark-duplicate` | ✅ | |
-| POST | `/api/reports/:id/approve-reward` | ⚠️ | D-2 reserve pool + tier lookup theo asset type |
-| POST | `/api/reports/:id/pay` | ❌ | `reward_approved` → `payment_pending` → `paid` |
+| POST | `/api/reports/:id/approve-reward` | **410 legacy** | Giữ để tương thích contract history; không còn owner/reviewer mutation. Dùng owner-only reward-settlement intent |
+| POST | `/api/reports/:id/pay` | **410 legacy** | Không còn chuyển state; dùng durable intent `reconcile`/permissionless `payReward` execution |
+| POST | `/api/reports/:id/confirm-payment` | **410 legacy** | Không còn chuyển state; settlement evidence đi qua durable intent `reconcile` |
+| POST | `/api/reports/:id/reward-settlement-intents` | ✅ owner-only | Tạo intent, derive amount/recipient/hash và reserve atomically |
+| POST | `/api/reports/:id/reward-settlement-intents/:intentId/approval-observations` | ✅ owner-only | Lưu owner wallet `approveReward` submission/evidence |
+| POST | `/api/reports/:id/reward-settlement-intents/:intentId/reconcile` | ✅ owner-only | Reconcile Arc evidence và payout relay; `payReward` execution không cấp quyền reviewer |
+| POST | `/api/reports/:id/reward-settlement-intents/:intentId/cancel` | ✅ owner-only | Cancel an intent before submission and release reservation |
 | POST | `/api/reports/:id/triage` | ❌ | AI (milestone 3) |
 | POST | `/api/reports/:id/disclosure` | ❌ | Owner quyết định disclosure sau khi program end |
 
@@ -726,9 +740,14 @@ nên dữ liệu cũ và type tương lai vẫn deserialize được. CHECK tron
 > không chỉ là guidance text."
 > — create-program §3
 
-`approve_report_reward_atomic` nhận thêm `calculation_basis_amount`:
+Đoạn trên là target/historical contract của review flow cũ. Trong settlement contract hiện tại,
+reviewer vẫn chỉ validate; owner-only durable intent mới derive amount/recipient/content hash và
+reserve atomically. Không dùng `approve_report_reward_atomic` hoặc route `approve-reward` như một
+mutation reviewer hiện tại (route HTTP cũ trả `410 Gone`).
 
-| Calculation type | Reviewer gửi | Server làm |
+Historical RPC contract: `approve_report_reward_atomic` nhận thêm `calculation_basis_amount`:
+
+| Calculation type | Historical reviewer input | Server làm |
 | --- | --- | --- |
 | `range` / `flat` | `amount` | Bounds-check theo tier |
 | `percentage` | `calculationBasisAmount` | `min(basis × bps / 10000, cap)`; `amount` bị bỏ qua |

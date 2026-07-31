@@ -1,5 +1,8 @@
+import { z } from 'zod';
+
 import {
   AiProviderError,
+  AI_SCHEMA_VERSION,
   assertProviderConfig,
   duplicateComparisonResultSchema,
   reportFingerprintSchema,
@@ -17,6 +20,7 @@ import { buildDuplicatePrompt, buildFingerprintPrompt, redactSensitiveText } fro
 
 const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash';
+const MAX_OUTPUT_RETRIES = 3;
 
 function unique(values: readonly string[], limit = 12): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, limit);
@@ -65,7 +69,9 @@ function inferImpacts(text: string): string[] {
   return impacts.length > 0 ? impacts : ['unspecified'];
 }
 
-function severityForInput(input: TriageReportInput): ReportTriageResult['suggestedSeverity'] {
+function severityForInput(
+  input: TriageReportInput,
+): ReportTriageResult['suggestedSeverity']['level'] {
   const normalized =
     `${input.title} ${input.description} ${input.reproductionSteps ?? ''}`.toLowerCase();
   if (/loss of funds|drain|remote code|arbitrary code/.test(normalized)) return 'critical';
@@ -113,6 +119,36 @@ function candidateFingerprint(candidate: TriageCandidateInput): ReportFingerprin
   return candidate.fingerprint ?? fingerprintFor(candidate);
 }
 
+function isInvalidProviderOutput(error: unknown): boolean {
+  return (
+    (error instanceof AiProviderError && error.code === 'invalid_response') ||
+    error instanceof z.ZodError
+  );
+}
+
+/**
+ * Provider output is untrusted. A transient malformed response gets a bounded retry before the
+ * worker records an unavailable result; deterministic validation failures never loop forever.
+ */
+async function parseProviderOutput<T>(
+  request: () => Promise<unknown>,
+  parse: (value: unknown) => T,
+  maxRetries: number,
+): Promise<T> {
+  let lastError: unknown;
+  const configuredRetries = Number.isFinite(maxRetries) ? Math.floor(maxRetries) : 0;
+  const retries = Math.min(MAX_OUTPUT_RETRIES, Math.max(0, configuredRetries));
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return parse(await request());
+    } catch (error: unknown) {
+      lastError = error;
+      if (!isInvalidProviderOutput(error) || attempt >= retries) throw error;
+    }
+  }
+  throw lastError;
+}
+
 export class MockTriageProvider implements TriageProvider {
   public readonly name = 'mock' as const;
   public readonly model = 'mock-triage-v1';
@@ -125,13 +161,37 @@ export class MockTriageProvider implements TriageProvider {
       missingInformation.push('a more detailed impact description');
     const completenessScore = Math.max(0, 1 - missingInformation.length * 0.25);
     return reportTriageResultSchema.parse({
-      schemaVersion: 1,
+      schemaVersion: AI_SCHEMA_VERSION,
       summary: fingerprint.normalizedSummary,
-      completenessScore,
-      suggestedSeverity: severityForInput(input),
-      scopeAssessment: 'uncertain',
+      completeness: {
+        score: completenessScore,
+        checks: [
+          {
+            key: 'reproduction_steps',
+            status: input.reproductionSteps === undefined ? 'missing' : 'present',
+            reason:
+              input.reproductionSteps === undefined
+                ? 'Reproduction steps were not provided.'
+                : 'Reproduction steps are present.',
+          },
+          {
+            key: 'title_and_affected_component',
+            status: input.title.trim() && input.affectedScope.name.trim() ? 'present' : 'missing',
+            reason: 'Title and affected component were evaluated from the submitted snapshot.',
+          },
+        ],
+      },
+      suggestedSeverity: {
+        level: severityForInput(input),
+        confidence: 0.65,
+        rationale: 'Advisory severity inferred from the reported impact and reproduction text.',
+      },
+      scopeAssessment: {
+        result: 'uncertain',
+        confidence: 0.5,
+        rationale: 'Program scope policy requires human review; AI does not decide scope.',
+      },
       missingInformation,
-      confidence: 0.65,
       fingerprint,
     });
   }
@@ -155,18 +215,22 @@ export class MockTriageProvider implements TriageProvider {
       .sort((left, right) => right.score - left.score)
       .slice(0, 20)
       .map(({ candidate, score }) => ({
-        candidateReportId: candidate.reportId,
+        candidateRef: candidate.reportId,
         assessment: score >= 0.65 ? ('likely' as const) : ('possible' as const),
-        reason:
-          'Semantic fingerprint overlap in affected component, vulnerability class, impact, or function.',
         confidence: Math.min(1, Math.max(0, score)),
+        reasons: [
+          'Semantic fingerprint overlap in affected component, vulnerability class, impact, or function.',
+        ],
       }));
     const top = results[0];
     return duplicateComparisonResultSchema.parse({
-      schemaVersion: 1,
-      duplicateAssessment: top?.assessment ?? 'none',
-      duplicateConfidence: top?.confidence ?? 0,
-      candidates: results,
+      schemaVersion: AI_SCHEMA_VERSION,
+      duplicateAssessment: {
+        assessment: top?.assessment ?? 'none',
+        confidence: top?.confidence ?? 0,
+        matchingReasons: top?.reasons ?? [],
+        candidates: results,
+      },
     });
   }
 }
@@ -197,16 +261,22 @@ abstract class HttpTriageProvider implements TriageProvider {
   protected abstract request(prompt: string, schema: unknown): Promise<unknown>;
 
   public async fingerprint(input: TriageReportInput): Promise<ReportTriageResult> {
-    const result = await this.request(buildFingerprintPrompt(input), 'triage');
-    return reportTriageResultSchema.parse(result);
+    return parseProviderOutput(
+      () => this.request(buildFingerprintPrompt(input), 'triage'),
+      (result) => reportTriageResultSchema.parse(result),
+      this.config.maxRetries,
+    );
   }
 
   public async compareDuplicate(
     current: TriageReportInput & { fingerprint: ReportFingerprint },
     candidates: readonly TriageCandidateInput[],
   ): Promise<DuplicateComparisonResult> {
-    const result = await this.request(buildDuplicatePrompt(current, candidates), 'duplicate');
-    return duplicateComparisonResultSchema.parse(result);
+    return parseProviderOutput(
+      () => this.request(buildDuplicatePrompt(current, candidates), 'duplicate'),
+      (result) => duplicateComparisonResultSchema.parse(result),
+      this.config.maxRetries,
+    );
   }
 }
 

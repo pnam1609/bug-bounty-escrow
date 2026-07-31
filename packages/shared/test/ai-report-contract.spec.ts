@@ -14,7 +14,7 @@ describe('persisted report AI contract', () => {
       status: 'ready',
       provider: 'mock',
       model: 'fixture-v1',
-      schemaVersion: 1,
+      schemaVersion: 'ai-review-v1',
       submissionRevision: 2,
       submissionSequence: 11,
       sourceContentHash: '0xabc',

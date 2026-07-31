@@ -8,8 +8,9 @@ import {
   CardHeader,
   CardTitle,
   Callout,
+  SeverityBadge,
 } from '@bug-bounty-escrow/ui';
-import { ChevronDown, Clock3, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 
 import { formatTimestamp, SEVERITY_LABELS } from './report-format';
@@ -20,6 +21,9 @@ export interface ReportAiReviewCardProps {
   /** The server projection is intentionally optional during an API rollout. */
   readonly review: ReportAiReview | undefined;
   readonly audience: AiReviewAudience;
+  /** Current immutable report projection used to fail closed on stale AI results. */
+  readonly currentContentHash?: string;
+  readonly currentSubmissionRevision?: number;
 }
 
 const STATUS_COPY: Readonly<
@@ -38,23 +42,113 @@ const STATUS_COPY: Readonly<
     description:
       'AI review is temporarily unavailable. Your report was submitted and human review can continue.',
   },
+  superseded: {
+    label: 'Superseded',
+    description: 'This advisory belongs to an older report revision and is not shown.',
+  },
+});
+
+const STATUS_MARKER_CLASSES: Readonly<Record<ReportAiReview['status'], string>> = Object.freeze({
+  processing: 'border-low bg-transparent text-low',
+  ready: 'border-escrow bg-transparent text-escrow',
+  unavailable: 'border-medium bg-transparent text-medium',
+  superseded: 'border-border bg-transparent text-text-muted',
 });
 
 function StatusMarker({ status }: { readonly status: ReportAiReview['status'] }) {
-  const styles = {
-    processing: 'border-low bg-surface-raised text-low',
-    ready: 'border-escrow bg-surface-raised text-escrow',
-    unavailable: 'border-medium bg-surface-raised text-medium',
-  } as const;
-  const Icon = status === 'processing' ? Clock3 : status === 'ready' ? ShieldCheck : TriangleAlert;
-
   return (
     <span
-      className={`inline-flex items-center gap-xs rounded-full border px-md py-xs text-label-sm ${styles[status]}`}
+      className={`inline-flex items-center gap-xs rounded-full border px-md py-xs text-label-sm ${STATUS_MARKER_CLASSES[status]}`}
     >
-      <Icon aria-hidden="true" className="size-sm" />
+      <span aria-hidden="true" className="size-sm shrink-0 rounded-full bg-current" />
       {STATUS_COPY[status].label}
     </span>
+  );
+}
+
+export function resolveAiReviewStatus(
+  review: ReportAiReview | undefined,
+  currentContentHash: string | undefined,
+  currentSubmissionRevision: number | undefined,
+): ReportAiReview['status'] {
+  const safeReview = isKnownReview(review) ? review : undefined;
+  if (
+    safeReview !== undefined &&
+    isSupersededReview(safeReview, currentContentHash, currentSubmissionRevision)
+  ) {
+    return 'superseded';
+  }
+  if (
+    safeReview !== undefined &&
+    (safeReview.status === 'processing' ||
+      safeReview.status === 'superseded' ||
+      hasCurrentRevision(safeReview, currentContentHash, currentSubmissionRevision))
+  ) {
+    return safeReview.status;
+  }
+  return 'unavailable';
+}
+
+export function ReportAiReviewStatusBadge({
+  currentContentHash,
+  currentSubmissionRevision,
+  review,
+}: Pick<ReportAiReviewCardProps, 'review' | 'currentContentHash' | 'currentSubmissionRevision'>) {
+  const status = resolveAiReviewStatus(review, currentContentHash, currentSubmissionRevision);
+  return (
+    <span
+      aria-label={`AI review · ${STATUS_COPY[status].label}`}
+      className={`inline-flex items-center gap-xs rounded-full border bg-transparent px-md py-xs text-label-sm ${STATUS_MARKER_CLASSES[status]}`}
+    >
+      <span aria-hidden="true" className="size-sm shrink-0 rounded-full bg-current" />
+      {`AI review · ${STATUS_COPY[status].label}`}
+    </span>
+  );
+}
+
+function hasCurrentRevision(
+  review: ReportAiReview,
+  currentContentHash: string | undefined,
+  currentSubmissionRevision: number | undefined,
+): boolean {
+  // The API projection is already revision-safe. The detail endpoint exposes the current hash;
+  // when a current revision is also present, enforce both tuple members client-side.
+  if (currentContentHash === undefined && currentSubmissionRevision === undefined) {
+    return review.status === 'ready';
+  }
+  if (currentContentHash === undefined) return false;
+  return (
+    review.status === 'ready' &&
+    review.sourceContentHash !== undefined &&
+    review.sourceContentHash === currentContentHash &&
+    review.submissionRevision !== undefined &&
+    (currentSubmissionRevision === undefined ||
+      review.submissionRevision === currentSubmissionRevision)
+  );
+}
+
+function isSupersededReview(
+  review: ReportAiReview,
+  currentContentHash: string | undefined,
+  currentSubmissionRevision: number | undefined,
+): boolean {
+  if (review.status !== 'ready' || currentContentHash === undefined) return false;
+  return (
+    (review.sourceContentHash !== undefined && review.sourceContentHash !== currentContentHash) ||
+    (currentSubmissionRevision !== undefined &&
+      review.submissionRevision !== undefined &&
+      review.submissionRevision !== currentSubmissionRevision)
+  );
+}
+
+function isKnownReview(value: unknown): value is ReportAiReview {
+  if (typeof value !== 'object' || value === null) return false;
+  const status = (value as { status?: unknown }).status;
+  return (
+    status === 'processing' ||
+    status === 'ready' ||
+    status === 'unavailable' ||
+    status === 'superseded'
   );
 }
 
@@ -128,9 +222,11 @@ function ReadyDetails({
         {review.suggestedSeverity === undefined ? null : (
           <div>
             <p className="text-label-sm text-text-muted">Suggested severity</p>
-            <p className="mt-xs text-body-sm text-text">
-              {SEVERITY_LABELS[review.suggestedSeverity]}
-            </p>
+            <SeverityBadge
+              className="mt-xs bg-transparent"
+              label={`Advisory · ${SEVERITY_LABELS[review.suggestedSeverity]}`}
+              severity={review.suggestedSeverity}
+            />
           </div>
         )}
         {review.scopeAssessment === undefined ? null : (
@@ -229,8 +325,23 @@ function ReadyDetails({
   );
 }
 
-export function ReportAiReviewCard({ review, audience }: ReportAiReviewCardProps) {
-  const effectiveReview: ReportAiReview = review ?? { status: 'unavailable' };
+export function ReportAiReviewCard({
+  review,
+  audience,
+  currentContentHash,
+  currentSubmissionRevision,
+}: ReportAiReviewCardProps) {
+  const status = resolveAiReviewStatus(review, currentContentHash, currentSubmissionRevision);
+  const safeReview = isKnownReview(review) ? review : undefined;
+  const effectiveReview: ReportAiReview =
+    status === 'superseded'
+      ? { ...(safeReview ?? { status: 'unavailable' }), status: 'superseded' }
+      : safeReview !== undefined &&
+          (safeReview.status === 'processing' ||
+            safeReview.status === 'superseded' ||
+            hasCurrentRevision(safeReview, currentContentHash, currentSubmissionRevision))
+        ? safeReview
+        : { status: 'unavailable' };
   const copy = STATUS_COPY[effectiveReview.status];
 
   return (
@@ -255,7 +366,7 @@ export function ReportAiReviewCard({ review, audience }: ReportAiReviewCardProps
         </p>
       ) : null}
 
-      {effectiveReview.status === 'unavailable' ? (
+      {effectiveReview.status === 'unavailable' || effectiveReview.status === 'superseded' ? (
         <p className="text-body-sm text-text-muted">
           Human review and report actions are still available.
         </p>

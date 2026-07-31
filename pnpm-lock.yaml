@@ -44,6 +44,9 @@ importers:
       '@bug-bounty-escrow/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@bug-bounty-escrow/blockchain':
+        specifier: workspace:*
+        version: link:../../packages/blockchain
       '@bug-bounty-escrow/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -114,6 +117,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@bug-bounty-escrow/blockchain':
+        specifier: workspace:*
+        version: link:../../packages/blockchain
       '@bug-bounty-escrow/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -268,6 +274,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@bug-bounty-escrow/blockchain':
+        specifier: workspace:*
+        version: link:../blockchain
       '@bug-bounty-escrow/domain':
         specifier: workspace:*
         version: link:../domain

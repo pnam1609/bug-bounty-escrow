@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { CommentThread } from './comment-thread';
 import { ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
-import { ReportAiReviewCard } from './report-ai-review-card';
+import { ReportAiReviewCard, ReportAiReviewStatusBadge } from './report-ai-review-card';
 import {
   describeTime,
   formatUsdc,
@@ -27,6 +27,7 @@ import {
 } from './report-format';
 import { ReportDetailSkeleton, ReportStateBlock } from './report-states';
 import { ReportTimeline } from './report-timeline';
+import { ReviewEvidence } from './review-evidence';
 import { ReviewActions } from './review-actions';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
@@ -129,6 +130,13 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
         <div className="flex flex-col gap-md lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-md">
             <StatusBadge status={report.status} />
+            <ReportAiReviewStatusBadge
+              currentContentHash={report.contentHash}
+              review={report.aiReview}
+              {...(report.submissionRevision === undefined
+                ? {}
+                : { currentSubmissionRevision: report.submissionRevision })}
+            />
             <SeverityBadge
               label={
                 report.finalSeverity === undefined
@@ -165,7 +173,15 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
       <div className="grid gap-xl lg:grid-cols-[minmax(0,1fr)_338px] lg:items-start">
         <div className="flex min-w-0 flex-col gap-xl">
           <ReportContent report={report} token={token} />
-          <ReportAiReviewCard audience="reviewer" review={report.aiReview} />
+          <ReviewEvidence report={report} />
+          <ReportAiReviewCard
+            audience="reviewer"
+            currentContentHash={report.contentHash}
+            review={report.aiReview}
+            {...(report.submissionRevision === undefined
+              ? {}
+              : { currentSubmissionRevision: report.submissionRevision })}
+          />
           <CommentThread
             principalId={principalId}
             reportId={report.id}

@@ -2113,7 +2113,12 @@ declare
   second_run public.ai_triage_runs;
   claimed public.ai_triage_runs;
   blocked_claim public.ai_triage_runs;
+  parallel_run public.ai_triage_runs;
+  parallel_claim public.ai_triage_runs;
+  parallel_program uuid;
   candidate_count integer;
+  cross_program_count integer;
+  trigram_signal boolean;
 begin
   perform public.enqueue_report_ai_run_atomic(
     '33000000-0000-4000-8000-000000000041',
@@ -2151,6 +2156,41 @@ begin
     raise exception 'AI queue claimed a later job while its predecessor was running';
   end if;
 
+  -- A different program may make progress while program 10's FIFO head is running.  This is a
+  -- deterministic multi-program parallelism check; all changes are rolled back with this suite.
+  update public.reports
+  set status = 'submitted', content_hash = '0x' || repeat('3', 64)
+  where id = '33000000-0000-4000-8000-000000000001';
+  select program_id into parallel_program
+  from public.reports
+  where id = '33000000-0000-4000-8000-000000000001';
+  -- Clear any earlier synthetic queue rows in this fixture's other program so the assertion
+  -- below proves that the newly enqueued run, rather than an unrelated head, can proceed.
+  update public.ai_triage_runs
+  set status = 'completed', locked_by = null, locked_at = null, finished_at = now()
+  where program_id = parallel_program and status not in ('completed', 'failed');
+  perform public.enqueue_report_ai_run_atomic(
+    '33000000-0000-4000-8000-000000000001', parallel_program, '0x' || repeat('3', 64)
+  );
+  select * into parallel_run
+  from public.ai_triage_runs
+  where report_id = '33000000-0000-4000-8000-000000000001'
+    and source_content_hash = '0x' || repeat('3', 64)
+  order by created_at desc
+  limit 1;
+  select * into parallel_claim from public.claim_ai_triage_run_for_program(
+    'workflow-parallel', parallel_program, 300
+  );
+  if parallel_claim.id is distinct from parallel_run.id
+    or parallel_claim.program_id = second_run.program_id
+  then
+    raise exception 'AI queue did not allow a different program to run in parallel (got %, expected %) ',
+      parallel_claim.id, parallel_run.id;
+  end if;
+  update public.ai_triage_runs
+  set status = 'completed', finished_at = now(), persisted_at = now()
+  where id = parallel_claim.id and locked_by = parallel_claim.locked_by;
+
   update public.ai_triage_runs
   set status = 'completed', finished_at = now(), persisted_at = now()
   where id = claimed.id and locked_by = claimed.locked_by;
@@ -2171,7 +2211,110 @@ begin
   if candidate_count <> 1 then
     raise exception 'AI candidate retrieval did not return the prior same-program report';
   end if;
+
+  select count(*) into cross_program_count
+  from public.list_ai_duplicate_candidates(second_run.id, 10)
+  where program_id <> second_run.program_id;
+  if cross_program_count <> 0 then
+    raise exception 'AI candidate retrieval leaked a cross-program candidate';
+  end if;
+
+  select (match_signals ->> 'trigramMatch')::boolean into trigram_signal
+  from public.list_ai_duplicate_candidates(second_run.id, 10)
+  where report_id = first_run.report_id;
+  if trigram_signal is not true then
+    raise exception 'AI candidate retrieval did not record the trigram union signal';
+  end if;
 end;
 $ai_queue_fifo$;
+
+-- RR-08/AC-14/16: a replay of the same current report hash returns the existing run, while a
+-- genuinely newer revision records superseded_at on the prior completed result.  This uses the
+-- synthetic report 41 from the FIFO fixture and leaves the whole verification transaction rolled
+-- back below.
+do $ai_queue_replay_and_supersession$
+declare
+  target_report uuid := '33000000-0000-4000-8000-000000000041';
+  target_program uuid := '31000000-0000-4000-8000-000000000010';
+  prior_run public.ai_triage_runs;
+  current_hash text;
+  first_new_run uuid;
+  replayed_run uuid;
+  revisions_before integer;
+  runs_before integer;
+  revisions_after integer;
+  runs_after integer;
+begin
+  select * into prior_run
+  from public.ai_triage_runs
+  where report_id = target_report
+  order by submission_revision desc
+  limit 1;
+
+  select content_hash into current_hash
+  from public.reports
+  where id = target_report and program_id = target_program;
+
+  if current_hash is null or prior_run.id is null then
+    raise exception 'AI replay fixture is missing its submitted report or prior run';
+  end if;
+
+  insert into public.ai_triage_results (
+    report_id, run_id, provider, model, schema_version,
+    source_submission_revision, source_content_hash,
+    generated_at, persisted_at, result, confidence
+  )
+  values (
+    target_report, prior_run.id, 'mock', 'mock-triage-v1', 1,
+    prior_run.submission_revision, prior_run.source_content_hash,
+    now(), now(), '{"summary":"synthetic persisted result"}'::jsonb, 0.5
+  );
+
+  select count(*) into revisions_before
+  from public.report_revisions where report_id = target_report;
+  select count(*) into runs_before
+  from public.ai_triage_runs where report_id = target_report;
+
+  select public.enqueue_report_ai_run_atomic(target_report, target_program, current_hash)
+    into first_new_run;
+
+  if not exists (
+    select 1
+    from public.ai_triage_results prior_result
+    where prior_result.run_id = prior_run.id
+      and prior_result.superseded_at is not null
+  ) then
+    raise exception 'Prior completed AI result was not marked superseded';
+  end if;
+
+  select count(*) into revisions_after
+  from public.report_revisions where report_id = target_report;
+  select count(*) into runs_after
+  from public.ai_triage_runs where report_id = target_report;
+
+  if revisions_after <> revisions_before + 1 or runs_after <> runs_before + 1 then
+    raise exception 'New AI revision/run was not allocated exactly once (revisions %, runs %)',
+      revisions_after, runs_after;
+  end if;
+
+  select public.enqueue_report_ai_run_atomic(target_report, target_program, current_hash)
+    into replayed_run;
+
+  if replayed_run is distinct from first_new_run then
+    raise exception 'AI enqueue replay returned a different run (first %, replay %)',
+      first_new_run, replayed_run;
+  end if;
+
+  select count(*) into revisions_after
+  from public.report_revisions where report_id = target_report;
+  select count(*) into runs_after
+  from public.ai_triage_runs where report_id = target_report;
+
+  if revisions_after <> revisions_before + 1 or runs_after <> runs_before + 1 then
+    raise exception 'AI enqueue replay allocated a duplicate revision/run (revisions %, runs %)',
+      revisions_after, runs_after;
+  end if;
+end;
+$ai_queue_replay_and_supersession$;
 
 rollback;

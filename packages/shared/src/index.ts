@@ -51,11 +51,6 @@ export type {
 export { API_ERROR_CODES, isApiErrorCode } from './contracts/errors.js';
 export type { ApiErrorCode } from './contracts/errors.js';
 export {
-  ARC_TESTNET_CHAIN_ID,
-  ARC_TESTNET_USDC_ADDRESS,
-  FUNDING_NETWORK_CONFIG,
-  FUNDING_NETWORK_IDS,
-  GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
   attachSourceDepositRequestSchema,
   circleGatewayDepositFinalizedWebhookSchema,
   createEscrowWalletChallengeRequestSchema,
@@ -111,6 +106,14 @@ export {
   withdrawalIntentSchema,
   withdrawalIntentStatusSchema,
 } from './contracts/escrow.js';
+export {
+  ARC_TESTNET_CHAIN_ID,
+  ARC_TESTNET_USDC_ADDRESS,
+  FUNDING_NETWORK_CONFIG,
+  FUNDING_NETWORK_IDS,
+  GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+  isFundingNetworkId,
+} from '@bug-bounty-escrow/blockchain';
 export type {
   AttachSourceDepositRequest,
   CircleGatewayDepositFinalizedWebhook,
@@ -281,6 +284,8 @@ export {
   reportImpactSchema,
   reportImpactSourceSchema,
   reportInformationRequestSchema,
+  reportReviewEventSchema,
+  reportPaidSettlementProofSchema,
   reportListQuerySchema,
   reportListResponseSchema,
   reportProgramFilterOptionSchema,
@@ -332,6 +337,8 @@ export type {
   RejectReportRequest,
   ReportComment,
   ReportAiReview,
+  ReportReviewEvent,
+  ReportPaidSettlementProof,
   ReportDetail,
   ReportImpact,
   ReportListQuery,

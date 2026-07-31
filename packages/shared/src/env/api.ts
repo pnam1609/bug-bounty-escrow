@@ -19,6 +19,8 @@ const secretValueSchema = z
   .min(1)
   .refine((value) => value.trim().length > 0, 'Expected a non-empty value');
 
+const aiModelSchema = z.enum(['mock-triage-v1', 'gemini-3.5-flash', 'deepseek-v4-flash']);
+
 const positiveIntegerStringSchema = z
   .string()
   .regex(/^[1-9]\d*$/, 'Expected a canonical positive integer')
@@ -96,7 +98,7 @@ export const apiEnvironmentSchema = z
     AI_PROVIDER: z.enum(['mock', 'gemini', 'deepseek', 'disabled']).default('mock'),
     GEMINI_API_KEY: secretValueSchema.optional(),
     DEEPSEEK_API_KEY: secretValueSchema.optional(),
-    AI_MODEL: secretValueSchema.optional(),
+    AI_MODEL: aiModelSchema.optional(),
     AI_API_BASE_URL: httpUrlSchema.optional(),
     AI_PRIVACY_MODE: z.enum(['demo', 'paid']).default('demo'),
     AI_REQUEST_TIMEOUT_MS: durationMillisecondsSchema.default(15_000),

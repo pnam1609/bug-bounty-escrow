@@ -1,41 +1,30 @@
 import { z } from 'zod';
 
 import {
+  ARC_TESTNET_CHAIN_ID,
+  ARC_TESTNET_USDC_ADDRESS,
+  FUNDING_NETWORK_CONFIG,
+  FUNDING_NETWORK_IDS,
+  GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+  type FundingNetworkId,
+} from '@bug-bounty-escrow/blockchain';
+
+export {
+  ARC_TESTNET_CHAIN_ID,
+  ARC_TESTNET_USDC_ADDRESS,
+  FUNDING_NETWORK_CONFIG,
+  FUNDING_NETWORK_IDS,
+  GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+} from '@bug-bounty-escrow/blockchain';
+export type { FundingNetworkId } from '@bug-bounty-escrow/blockchain';
+
+import {
   evmAddressSchema,
   isoDateTimeSchema,
   monetaryAmountSchema,
   transactionHashSchema,
   uuidSchema,
 } from '../schemas/primitives.js';
-
-export const ARC_TESTNET_CHAIN_ID = 5_042_002;
-export const ARC_TESTNET_USDC_ADDRESS = '0x3600000000000000000000000000000000000000';
-export const FUNDING_NETWORK_IDS = Object.freeze([
-  'Arc_Testnet',
-  'Ethereum_Sepolia',
-  'Arbitrum_Sepolia',
-  'Base_Sepolia',
-] as const);
-
-export const FUNDING_NETWORK_CONFIG = Object.freeze({
-  Arc_Testnet: { chainId: 5_042_002, gatewayDomain: 26, tokenAddress: ARC_TESTNET_USDC_ADDRESS },
-  Ethereum_Sepolia: {
-    chainId: 11_155_111,
-    gatewayDomain: 0,
-    tokenAddress: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
-  },
-  Arbitrum_Sepolia: {
-    chainId: 421_614,
-    gatewayDomain: 3,
-    tokenAddress: '0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d',
-  },
-  Base_Sepolia: {
-    chainId: 84_532,
-    gatewayDomain: 6,
-    tokenAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  },
-} as const);
-export const GATEWAY_WALLET_EVM_TESTNET_ADDRESS = '0x0077777d7EBA4688BDeF3E311b846F25870A19B9';
 
 export const fundingNetworkIdSchema = z.enum(FUNDING_NETWORK_IDS);
 export const fundingRouteModeSchema = z.enum(['send', 'bridge', 'unified_balance']);
@@ -1136,7 +1125,6 @@ export const observeWithdrawalRequestSchema = z
     }
   });
 
-export type FundingNetworkId = z.output<typeof fundingNetworkIdSchema>;
 export type FundingRouteMode = z.output<typeof fundingRouteModeSchema>;
 export type FundingSource = z.output<typeof fundingSourceSchema>;
 export type FundingFeeComponentType = z.output<typeof fundingFeeComponentTypeSchema>;

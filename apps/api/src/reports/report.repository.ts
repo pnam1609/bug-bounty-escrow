@@ -10,6 +10,7 @@ import type {
   PublicDisclosure,
   RejectReportRequest,
   ReportDetail,
+  ReportPaidSettlementProof,
   ReportImpact,
   ReportListQuery,
   ReportProgramFilterOption,
@@ -70,9 +71,44 @@ interface ReportRow {
     upload_status: 'pending' | 'uploaded' | 'failed';
   }>;
   readonly report_reviews?: Array<{
+    id?: string;
+    reviewer_id?: string;
     action: string;
+    from_status?: ReportSummary['status'];
+    to_status?: ReportSummary['status'];
     reason: string | null;
+    metadata?: Record<string, unknown> | null;
     created_at: string;
+    reviewer?: { role: 'owner' | 'reviewer' | 'researcher' } | null;
+  }>;
+  readonly escrow_transactions?: Array<{
+    transaction_hash: string;
+    chain_id: number | string;
+    token_address: string;
+    amount: string | number;
+    block_number: number | string | null;
+    block_hash: string | null;
+    confirmations: number;
+    log_index: number | null;
+    status: 'pending' | 'confirmed' | 'reverted' | 'timeout';
+    transaction_type: string;
+    confirmed_at: string | null;
+  }>;
+  readonly reward_settlement_intents?: Array<{
+    status: string;
+    amount: string | number;
+    recipient_address: string;
+    escrow_contracts?: { chain_id: number | string; token_address: string } | null;
+    reward_settlement_operations?: Array<{
+      operation_type: 'approval' | 'payout';
+      status: string;
+      transaction_hash: string | null;
+      event_log_index: number | null;
+      transfer_log_index: number | null;
+      block_number: string | null;
+      block_hash: string | null;
+      updated_at: string;
+    }>;
   }>;
 }
 
@@ -85,6 +121,12 @@ interface ReportProgramFilterOptionRow {
 
 type ReportReviewRow = NonNullable<ReportRow['report_reviews']>[number];
 type InformationRequestReviewRow = ReportReviewRow & { readonly reason: string };
+type ReportReviewActorRole = 'owner' | 'reviewer' | 'researcher' | 'system';
+type DuplicateTargetRow = {
+  readonly id: string;
+  readonly title: string;
+  readonly status: ReportSummary['status'];
+};
 
 const REPORT_SUMMARY_PROJECTION = [
   'id',
@@ -114,11 +156,36 @@ const REPORT_DETAIL_PROJECTION = [
   'affected_scope:program_scopes!reports_affected_scope_id_fkey(id,asset_type,asset_name,asset_url,contract_address)',
   'report_impacts(id,program_impact_id,source,custom_title,impact_title_snapshot,impact_severity_snapshot,asset_type_snapshot)',
   'report_attachments(id,original_filename,mime_type,size_bytes,created_at,upload_status)',
-  'report_reviews(action,reason,created_at)',
+  'report_reviews(id,reviewer_id,action,from_status,to_status,reason,metadata,created_at,reviewer:profiles!report_reviews_reviewer_id_fkey(role))',
+  'escrow_transactions(transaction_hash,chain_id,token_address,amount,block_number,block_hash,confirmations,log_index,status,transaction_type,confirmed_at)',
+  'reward_settlement_intents(status,amount,recipient_address,escrow_contracts(chain_id,token_address),reward_settlement_operations(operation_type,status,transaction_hash,event_log_index,transfer_log_index,block_number,block_hash,updated_at))',
 ].join(',');
 
 function money(value: string | number): string {
   return typeof value === 'string' ? value : value.toFixed(6);
+}
+
+function maskAddress(address: string): string {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function mapReviewActorRole(review: ReportReviewRow): ReportReviewActorRole {
+  // Resubmits are written by the researcher into report_reviews for chronology. Do not collapse
+  // that profile role into "reviewer"; the program-side timeline needs a safe, non-identity label.
+  if (review.action === 'resubmit') {
+    return review.reviewer?.role === 'researcher' ? 'researcher' : 'system';
+  }
+
+  if (
+    review.reviewer?.role === 'owner' ||
+    review.reviewer?.role === 'reviewer'
+  ) {
+    return review.reviewer.role;
+  }
+
+  // A missing relation should not make the event disappear from the ordered timeline. `system`
+  // is the safe fallback for malformed/legacy rows and carries no internal actor identity.
+  return 'system';
 }
 
 function mapSummary(row: ReportRow): ReportSummary {
@@ -142,7 +209,11 @@ function mapSummary(row: ReportRow): ReportSummary {
   };
 }
 
-function mapDetail(row: ReportRow, principal: RequestPrincipal): ReportDetail {
+function mapDetail(
+  row: ReportRow,
+  principal: RequestPrincipal,
+  duplicateTargets: ReadonlyMap<string, DuplicateTargetRow> = new Map(),
+): ReportDetail {
   if (row.affected_scope === null) {
     throw new Error('Report affected scope relation is missing');
   }
@@ -165,6 +236,91 @@ function mapDetail(row: ReportRow, principal: RequestPrincipal): ReportDetail {
     principal.userId === row.researcher_id &&
     row.programs?.status === 'active' &&
     (row.status === 'draft' || row.status === 'needs_information');
+  const isProgramSide = principal.role === 'owner' || principal.role === 'reviewer';
+  const reviewEvents = isProgramSide
+    ? (row.report_reviews ?? [])
+        .filter(
+          (review) =>
+            review.id !== undefined &&
+            review.from_status !== undefined &&
+            review.to_status !== undefined,
+        )
+        .sort(
+          (left, right) =>
+            left.created_at.localeCompare(right.created_at) ||
+            (left.id ?? '').localeCompare(right.id ?? ''),
+        )
+        .map((review) => {
+          const metadata = review.metadata ?? {};
+          const originalReportId = metadata['originalReportId'];
+          const target =
+            review.action === 'mark_duplicate' && typeof originalReportId === 'string'
+              ? duplicateTargets.get(originalReportId)
+              : undefined;
+          const duplicateTarget =
+            target === undefined
+              ? undefined
+              : {
+                  reportId: target.id,
+                  sameProgram: true as const,
+                  title: target.title,
+                  status: target.status,
+                };
+          return {
+            id: review.id as string,
+            actorRole: mapReviewActorRole(review),
+            action: review.action,
+            fromStatus: review.from_status as ReportSummary['status'],
+            toStatus: review.to_status as ReportSummary['status'],
+            ...(review.reason === null ? {} : { reason: review.reason }),
+            occurredAt: review.created_at,
+            ...(duplicateTarget === undefined ? {} : { duplicateTarget }),
+          };
+        })
+    : undefined;
+  const paidIntent = isProgramSide
+    ? (row.reward_settlement_intents ?? []).find((intent) => intent.status === 'paid')
+    : undefined;
+  const paidOperation = paidIntent?.reward_settlement_operations
+    ?.filter(
+      (
+        operation,
+      ): operation is typeof operation & {
+        transaction_hash: string;
+        block_number: string;
+        block_hash: string;
+        event_log_index: number;
+        transfer_log_index: number;
+      } =>
+        operation.operation_type === 'payout' &&
+        operation.status === 'confirmed' &&
+        operation.transaction_hash !== null &&
+        operation.block_number !== null &&
+        operation.block_hash !== null &&
+        operation.event_log_index !== null &&
+        operation.transfer_log_index !== null,
+    )
+    .sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0];
+  const paidSettlementProof: ReportPaidSettlementProof | undefined =
+    paidOperation === undefined ||
+    paidIntent?.escrow_contracts === null ||
+    paidIntent?.escrow_contracts === undefined
+      ? undefined
+      : {
+          transactionHash: paidOperation.transaction_hash,
+          chainId: String(paidIntent.escrow_contracts.chain_id),
+          tokenAddress: paidIntent.escrow_contracts.token_address,
+          recipientAddressMasked: maskAddress(paidIntent.recipient_address),
+          amount: money(paidIntent.amount),
+          blockNumber: paidOperation.block_number,
+          blockHash: paidOperation.block_hash,
+          rewardEventLogIndex: paidOperation.event_log_index,
+          transferLogIndex: paidOperation.transfer_log_index,
+          exactEventVerified: true,
+          canonicalTransferVerified: true,
+          accountingApplied: true,
+          verifiedAt: paidOperation.updated_at,
+        };
   return {
     ...mapSummary(row),
     description: row.description,
@@ -211,8 +367,14 @@ function mapDetail(row: ReportRow, principal: RequestPrincipal): ReportDetail {
           latestInformationRequest: {
             message: latestInformationRequest.reason,
             requestedAt: latestInformationRequest.created_at,
+            ...(latestInformationRequest.reviewer?.role === 'owner' ||
+            latestInformationRequest.reviewer?.role === 'reviewer'
+              ? { authorRole: latestInformationRequest.reviewer.role }
+              : {}),
           },
         }),
+    ...(reviewEvents === undefined || reviewEvents.length === 0 ? {} : { reviewEvents }),
+    ...(paidSettlementProof === undefined ? {} : { paidSettlementProof }),
     contentHash: row.content_hash,
     createdAt: row.created_at,
   };
@@ -315,7 +477,15 @@ export class ReportRepository {
       return null;
     }
 
-    return mapDetail(row, principal);
+    const duplicateIds = (row.report_reviews ?? [])
+      .map((review) => review.metadata?.['originalReportId'])
+      .filter((value): value is string => typeof value === 'string');
+    const duplicateTargets =
+      principal.role === 'owner' || principal.role === 'reviewer'
+        ? await this.findSameProgramDuplicateTargets(row.program_id, duplicateIds)
+        : new Map<string, DuplicateTargetRow>();
+
+    return mapDetail(row, principal, duplicateTargets);
   }
 
   public async submit(
@@ -693,5 +863,22 @@ export class ReportRepository {
     const ids = await this.findReviewableProgramIds(principal);
 
     return ids.includes(row.program_id);
+  }
+
+  private async findSameProgramDuplicateTargets(
+    programId: string,
+    ids: readonly string[],
+  ): Promise<Map<string, DuplicateTargetRow>> {
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length === 0) return new Map();
+
+    const { data, error } = await this.client
+      .from('reports')
+      .select('id,title,status')
+      .eq('program_id', programId)
+      .in('id', uniqueIds);
+    if (error !== null) throw normalizeDatabaseError(error);
+
+    return new Map(((data ?? []) as DuplicateTargetRow[]).map((target) => [target.id, target]));
   }
 }

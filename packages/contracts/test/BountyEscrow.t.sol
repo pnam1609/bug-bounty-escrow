@@ -105,21 +105,20 @@ contract BountyEscrowTest {
         escrow.payReward(REPORT);
     }
 
-    function testApproverAuthorizationAndInsufficientReservation() public {
+    function testOwnerOnlyAuthorizationAndInsufficientReservation() public {
         usdc.mint(address(escrow), 10_000000);
         escrow.syncExternalFunding();
 
+        address delegatedApprover = address(0xABCD);
         vm.expectRevert(BountyEscrow.Unauthorized.selector);
+        vm.prank(delegatedApprover);
         escrow.approveReward(REPORT, CONTENT, RESEARCHER, 1_000000);
 
         vm.prank(OWNER);
         vm.expectRevert(BountyEscrow.InsufficientAvailableBalance.selector);
         escrow.approveReward(REPORT, CONTENT, RESEARCHER, 11_000000);
 
-        address approver = address(0xABCD);
         vm.prank(OWNER);
-        escrow.setRewardApprover(approver, true);
-        vm.prank(approver);
         escrow.approveReward(REPORT, CONTENT, RESEARCHER, 10_000000);
         assert(escrow.availableBalance() == 0);
     }

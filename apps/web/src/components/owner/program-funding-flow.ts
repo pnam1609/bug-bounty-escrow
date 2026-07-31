@@ -1,11 +1,11 @@
-export const FUNDING_NETWORK_IDS = Object.freeze([
-  'Arc_Testnet',
-  'Ethereum_Sepolia',
-  'Arbitrum_Sepolia',
-  'Base_Sepolia',
-] as const);
+import {
+  FUNDING_NETWORK_CONFIG,
+  FUNDING_NETWORK_IDS,
+  type FundingNetworkId,
+} from '@bug-bounty-escrow/blockchain';
 
-export type FundingNetworkId = (typeof FUNDING_NETWORK_IDS)[number];
+export { FUNDING_NETWORK_IDS } from '@bug-bounty-escrow/blockchain';
+export type { FundingNetworkId } from '@bug-bounty-escrow/blockchain';
 export type FundingRouteMode = 'send' | 'bridge' | 'unified_balance';
 
 export interface FundingNetwork {
@@ -19,25 +19,25 @@ export const FUNDING_NETWORKS: Readonly<Record<FundingNetworkId, FundingNetwork>
   Arc_Testnet: {
     id: 'Arc_Testnet',
     label: 'Arc Testnet',
-    chainId: 5_042_002,
+    chainId: FUNDING_NETWORK_CONFIG.Arc_Testnet.chainId,
     gasToken: 'USDC',
   },
   Ethereum_Sepolia: {
     id: 'Ethereum_Sepolia',
     label: 'Ethereum Sepolia',
-    chainId: 11_155_111,
+    chainId: FUNDING_NETWORK_CONFIG.Ethereum_Sepolia.chainId,
     gasToken: 'testnet ETH',
   },
   Arbitrum_Sepolia: {
     id: 'Arbitrum_Sepolia',
     label: 'Arbitrum Sepolia',
-    chainId: 421_614,
+    chainId: FUNDING_NETWORK_CONFIG.Arbitrum_Sepolia.chainId,
     gasToken: 'testnet ETH',
   },
   Base_Sepolia: {
     id: 'Base_Sepolia',
     label: 'Base Sepolia',
-    chainId: 84_532,
+    chainId: FUNDING_NETWORK_CONFIG.Base_Sepolia.chainId,
     gasToken: 'testnet ETH',
   },
 });

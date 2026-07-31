@@ -18,7 +18,7 @@ khi backend chưa cung cấp dữ liệu tương ứng.
 
 - Account menu hiển thị `Rewards · Future` ở trạng thái disabled.
 - Chưa có route Reward có thể truy cập trong MVP.
-- Reward đã approve và `paidAt` hiện được xem trong report detail.
+- Reward do owner approve qua durable settlement intent và `paidAt` hiện được xem trong report detail.
 - Page Figma là future-facing product preview, không phải dashboard đang hoạt động.
 - Các CTA trong implementation tương lai quay về `/reports` và `/programs`.
 
@@ -32,7 +32,7 @@ Route khuyến nghị:
 
 Feature hoàn chỉnh sẽ cho researcher:
 
-- Xem reward đã được human reviewer/owner approve.
+- Xem reward sau khi human reviewer hoàn tất review và owner approve durable settlement intent.
 - Theo dõi settlement từ `reward_approved` tới `payment_pending` và `paid`.
 - Xem transaction evidence do backend xác nhận.
 - Cấu hình hoặc xác nhận payout wallet chỉ khi reward flow thực sự cần.
@@ -57,7 +57,7 @@ Researcher submits report
         ↓
 Human reviewer validates report
         ↓
-Owner/reviewer approves reward
+Owner creates and signs reward settlement intent
         ↓
 Escrow payment starts
         ↓
@@ -84,7 +84,8 @@ Các trạng thái `rejected` và `duplicate` đóng report mà không đi vào 
 
 - AI chỉ hỗ trợ triage; AI không validate report, chọn reward hoặc release USDC.
 - `validated` là quyết định review của con người.
-- `reward_approved` nghĩa là reward đã được approve và reserve từ program pool; chưa có nghĩa tiền
+- `reward_approved` nghĩa là owner đã approve durable settlement intent và reward được reserve từ
+  program pool; reviewer chỉ validate, chưa bao giờ ký/reserve; trạng thái này chưa có nghĩa tiền
   đã được gửi.
 - `payment_pending` nghĩa transaction đã được ghi nhận và đang chờ xác nhận.
 - `paid` chỉ được hiển thị sau khi backend xác nhận settlement evidence.
@@ -325,7 +326,7 @@ Human decision first. On-chain settlement second.
 Steps:
 
 1. Human reviewer validates.
-2. Owner approves reward.
+2. Owner creates and signs the durable reward settlement intent.
 3. Payment confirms on-chain.
 4. Researcher sees Paid.
 
@@ -564,7 +565,8 @@ quyền xem.
 
 ### Backend settlement actions
 
-Các action này chỉ dành cho owner/reviewer:
+Các route report cũ dưới đây chỉ còn để giữ contract history và luôn trả `410 Gone`
+(`reward_settlement_flow_required`); chúng không phải action hiện tại của owner/reviewer:
 
 ```text
 POST /api/reports/:id/approve-reward
@@ -572,7 +574,19 @@ POST /api/reports/:id/pay
 POST /api/reports/:id/confirm-payment
 ```
 
-Researcher Reward UI là read-only đối với ba transition trên.
+Settlement hiện tại dùng durable owner-only routes:
+
+```text
+POST /api/reports/:id/reward-settlement-intents
+GET  /api/reports/:id/reward-settlement-intents/current
+POST /api/reports/:id/reward-settlement-intents/:intentId/approval-observations
+POST /api/reports/:id/reward-settlement-intents/:intentId/reconcile
+POST /api/reports/:id/reward-settlement-intents/:intentId/cancel
+```
+
+Chỉ owner được tạo/cancel intent, reserve pool hoặc gửi approval observation. Sau owner
+approval, `payReward` execution có thể permissionless; server vẫn reconcile evidence trước khi
+hiển thị `paid`. Researcher Reward UI là read-only đối với mọi transition trên.
 
 ### Gap trước khi làm Reward center thật
 
@@ -670,7 +684,7 @@ No reward activity yet
 Body:
 
 ```text
-Validated reports will appear here after an authorized reviewer approves a reward.
+Validated reports will appear here after the program owner approves a durable reward settlement intent.
 ```
 
 Actions:
@@ -737,8 +751,8 @@ Không dựng cached amount thành current truth nếu request refresh thất b�
 5. Signed attachment URLs không xuất hiện trong Reward center.
 6. Transaction evidence không chứng minh report content được public.
 7. Không dùng wallet address để suy ra role.
-8. Không cho AI output trigger settlement transition.
-9. Không gọi owner/reviewer settlement endpoints từ researcher UI.
+8. Không cho AI output trigger settlement transition hoặc durable settlement-intent mutation.
+9. Không gọi legacy `410` routes hoặc owner-only settlement-intent endpoints từ researcher UI.
 10. Không hiển thị private total paid của program nếu visibility policy không cho phép.
 
 ## 18. Figma component mapping
@@ -807,7 +821,7 @@ Không dựng icon bằng rotated line primitives. Dùng Lucide component hoặc
 - [ ] Mobile frame dài đủ để không clip content.
 - [ ] Font, color, icon và component reuse đúng BBE Design System.
 - [ ] Future implementation có loading, empty, error, auth và wrong-role states.
-- [ ] Researcher UI không gọi owner/reviewer settlement actions.
+- [ ] Researcher UI không gọi owner-only settlement actions (legacy `410` routes cũng không được gọi).
 - [ ] API tương lai không lộ private report content hoặc reward của researcher khác.
 
 ## 21. Known limitations

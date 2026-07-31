@@ -379,7 +379,20 @@ select
     when 'duplicate' then 'Synthetic review reason'
     else null
   end,
-  '{"demo":true}'::jsonb
+  case
+    when status = 'duplicate' then jsonb_build_object(
+      'originalReportId', (
+        select original.report_id
+        from demo_reports original
+        where original.program_id = demo_reports.program_id
+          and original.report_id <> demo_reports.report_id
+          and original.status <> 'duplicate'
+        order by original.series
+        limit 1
+      )
+    )
+    else jsonb_build_object('demo', true)
+  end
 from demo_reports
 where status <> 'submitted';
 

@@ -9,10 +9,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import {
-  ARC_TESTNET_USDC_ADDRESS,
   ARC_TESTNET_CHAIN_ID,
+  ARC_TESTNET_USDC_ADDRESS,
   FUNDING_NETWORK_CONFIG,
   GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+} from '@bug-bounty-escrow/blockchain';
+import {
   formatUsdcBaseUnits,
   type AttachSourceDepositRequest,
   type AttachFundingRecoveryTelemetryRequest,

@@ -1,6 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  AI_SCHEMA_VERSION,
+  AI_SCHEMA_VERSION_NUMBER,
   type AiReviewJob,
   type AiReviewQueueRepository,
   type DuplicateComparisonResult,
@@ -83,6 +85,10 @@ function snapshotValue(snapshot: Record<string, unknown>, key: string): unknown 
   return snapshot[key];
 }
 
+function publicAiSchemaVersion(value: number | null | undefined): string | undefined {
+  return value === AI_SCHEMA_VERSION_NUMBER ? AI_SCHEMA_VERSION : undefined;
+}
+
 @Injectable()
 export class SupabaseAiReviewQueueRepository
   implements AiReviewQueueRepository, AiReviewReadRepository
@@ -102,13 +108,57 @@ export class SupabaseAiReviewQueueRepository
     reportId: string,
     principal: RequestPrincipal,
   ): Promise<ReportAiReview | undefined> {
-    const { data: currentData, error: currentError } = await this.client
+    // This repository is also callable outside ReportService (for example from a worker-facing
+    // adapter).  Do not rely on the caller having performed report access checks: fail closed
+    // before reading revisions/results whenever the principal cannot access this report.
+    const { data: accessData, error: accessError } = await this.client
       .from('reports')
-      .select('content_hash')
+      .select('content_hash,researcher_id,program_id')
       .eq('id', reportId)
       .maybeSingle();
-    if (currentError !== null) throw normalizeDatabaseError(currentError);
-    const currentHash = (currentData as { content_hash?: unknown } | null)?.content_hash;
+    if (accessError !== null) throw normalizeDatabaseError(accessError);
+    const access = accessData as {
+      content_hash?: unknown;
+      researcher_id?: unknown;
+      program_id?: unknown;
+    } | null;
+    if (
+      access === null ||
+      typeof access.content_hash !== 'string' ||
+      typeof access.program_id !== 'string' ||
+      typeof access.researcher_id !== 'string'
+    ) {
+      return undefined;
+    }
+
+    let authorized = false;
+    if (principal.role === 'researcher') {
+      authorized = access.researcher_id === principal.userId;
+    } else if (principal.role === 'owner' || principal.role === 'reviewer') {
+      const { data: programData, error: programError } = await this.client
+        .from('programs')
+        .select('owner_id')
+        .eq('id', access.program_id)
+        .maybeSingle();
+      if (programError !== null) throw normalizeDatabaseError(programError);
+      const ownerId = (programData as { owner_id?: unknown } | null)?.owner_id;
+      if (principal.role === 'owner') {
+        authorized = ownerId === principal.userId;
+      } else if (ownerId !== principal.userId) {
+        const { data: reviewerData, error: reviewerError } = await this.client
+          .from('program_reviewers')
+          .select('reviewer_id')
+          .eq('program_id', access.program_id)
+          .eq('reviewer_id', principal.userId)
+          .maybeSingle();
+        if (reviewerError !== null) throw normalizeDatabaseError(reviewerError);
+        authorized =
+          (reviewerData as { reviewer_id?: unknown } | null)?.reviewer_id === principal.userId;
+      }
+    }
+    if (!authorized) return undefined;
+
+    const currentHash = access.content_hash;
     if (typeof currentHash !== 'string') return undefined;
     const { data: revisionData, error: revisionError } = await this.client
       .from('report_revisions')
@@ -142,14 +192,37 @@ export class SupabaseAiReviewQueueRepository
     if (runError !== null) throw normalizeDatabaseError(runError);
     const run = runData as unknown as QueueRow | null;
     if (run === null) return undefined;
+    if (
+      run.fingerprint_schema_version !== null &&
+      publicAiSchemaVersion(run.fingerprint_schema_version) === undefined
+    ) {
+      return reportAiReviewSchema.parse({
+        status: 'unavailable',
+        errorCode: 'unsupported_schema_version',
+      });
+    }
     // A report edit/resubmission changes content_hash; never display a result for an older
-    // immutable revision while the new run is still queued.
+    // immutable revision while the new run is still queued. Expose the explicit superseded
+    // state so the UI can show a safe badge without falling back to stale AI content.
     if (
       run.source_content_hash !== currentHash ||
       run.source_content_hash !== currentRevision.content_hash ||
       run.submission_revision !== currentRevision.revision
     ) {
-      return undefined;
+      return reportAiReviewSchema.parse({
+        status: 'superseded',
+        ...(run.provider === null ? {} : { provider: run.provider }),
+        ...(run.model === null ? {} : { model: run.model }),
+        ...(publicAiSchemaVersion(run.fingerprint_schema_version) === undefined
+          ? {}
+          : { schemaVersion: publicAiSchemaVersion(run.fingerprint_schema_version) }),
+        submissionRevision: run.submission_revision,
+        submissionSequence: run.program_submission_sequence,
+        sourceContentHash: run.source_content_hash,
+        ...(run.generated_at === null ? {} : { generatedAt: run.generated_at }),
+        ...(run.persisted_at === null ? {} : { persistedAt: run.persisted_at }),
+        errorCode: 'superseded',
+      });
     }
     const base = {
       status:
@@ -160,9 +233,9 @@ export class SupabaseAiReviewQueueRepository
             : ('unavailable' as const),
       ...(run.provider === null ? {} : { provider: run.provider }),
       ...(run.model === null ? {} : { model: run.model }),
-      ...(run.fingerprint_schema_version === null
+      ...(publicAiSchemaVersion(run.fingerprint_schema_version) === undefined
         ? {}
-        : { schemaVersion: run.fingerprint_schema_version }),
+        : { schemaVersion: publicAiSchemaVersion(run.fingerprint_schema_version) }),
       submissionRevision: run.submission_revision,
       submissionSequence: run.program_submission_sequence,
       sourceContentHash: run.source_content_hash,
@@ -193,13 +266,110 @@ export class SupabaseAiReviewQueueRepository
         errorCode: 'result_missing',
       });
     }
+    if (publicAiSchemaVersion(result.schema_version) === undefined) {
+      return reportAiReviewSchema.parse({
+        ...base,
+        status: 'unavailable',
+        errorCode: 'unsupported_schema_version',
+      });
+    }
     const raw = result.result as Record<string, unknown>;
+    const completeness = raw['completeness'];
+    const suggestedSeverity = raw['suggestedSeverity'];
+    const scopeAssessment = raw['scopeAssessment'];
+    const duplicateAssessment = raw['duplicateAssessment'];
+    const completenessScore =
+      typeof completeness === 'object' &&
+      completeness !== null &&
+      typeof (completeness as Record<string, unknown>)['score'] === 'number'
+        ? (completeness as Record<string, unknown>)['score']
+        : undefined;
+    const severityLevel =
+      typeof suggestedSeverity === 'object' &&
+      suggestedSeverity !== null &&
+      typeof (suggestedSeverity as Record<string, unknown>)['level'] === 'string'
+        ? (suggestedSeverity as Record<string, unknown>)['level']
+        : undefined;
+    const scopeResult =
+      typeof scopeAssessment === 'object' &&
+      scopeAssessment !== null &&
+      typeof (scopeAssessment as Record<string, unknown>)['result'] === 'string'
+        ? (scopeAssessment as Record<string, unknown>)['result']
+        : undefined;
+    const severityConfidence =
+      typeof suggestedSeverity === 'object' &&
+      suggestedSeverity !== null &&
+      typeof (suggestedSeverity as Record<string, unknown>)['confidence'] === 'number'
+        ? (suggestedSeverity as Record<string, unknown>)['confidence']
+        : undefined;
+    const duplicateObject =
+      typeof duplicateAssessment === 'object' && duplicateAssessment !== null
+        ? (duplicateAssessment as Record<string, unknown>)
+        : undefined;
+    const duplicateLevel =
+      typeof duplicateObject?.['assessment'] === 'string'
+        ? duplicateObject['assessment']
+        : undefined;
+    const duplicateConfidence =
+      typeof duplicateObject?.['confidence'] === 'number'
+        ? duplicateObject['confidence']
+        : undefined;
+    const duplicateCandidates = Array.isArray(duplicateObject?.['candidates'])
+      ? duplicateObject['candidates']
+          .map((candidate) => {
+            if (typeof candidate !== 'object' || candidate === null) return undefined;
+            const row = candidate as Record<string, unknown>;
+            const candidateRef = row['candidateRef'];
+            if (typeof candidateRef !== 'string' || !/^[0-9a-f-]{36}$/i.test(candidateRef)) {
+              return undefined;
+            }
+            const reasons = Array.isArray(row['reasons'])
+              ? row['reasons'].filter((reason): reason is string => typeof reason === 'string')
+              : [];
+            return {
+              candidateReportId: candidateRef,
+              assessment: row['assessment'],
+              reason: reasons[0] ?? 'AI matching signal',
+              confidence: row['confidence'],
+            };
+          })
+          .filter((candidate) => candidate !== undefined)
+      : undefined;
+    // Provider output is only a candidate suggestion. Re-authorize every referenced report at
+    // read time so deleted rows, cross-program IDs, or rows no longer visible to this principal
+    // cannot leak through a persisted AI result. Researchers never reach this branch.
+    let visibleDuplicateCandidates = duplicateCandidates;
+    if (principal.role !== 'researcher' && duplicateCandidates !== undefined) {
+      const candidateIds = duplicateCandidates
+        .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined)
+        .map((candidate) => candidate.candidateReportId);
+      if (candidateIds.length === 0) {
+        visibleDuplicateCandidates = [];
+      } else {
+        const { data: candidateRows, error: candidateError } = await this.client
+          .from('reports')
+          .select('id,program_id')
+          .in('id', candidateIds)
+          .eq('program_id', access.program_id);
+        if (candidateError !== null) throw normalizeDatabaseError(candidateError);
+        const visibleIds = new Set(
+          ((candidateRows ?? []) as Array<{ id?: unknown; program_id?: unknown }>).flatMap((row) =>
+            row.id === undefined || row.program_id !== access.program_id ? [] : [row.id],
+          ),
+        );
+        visibleDuplicateCandidates = duplicateCandidates.filter(
+          (candidate) => candidate !== undefined && visibleIds.has(candidate.candidateReportId),
+        );
+      }
+    }
     const review = {
       ...base,
       status: 'ready' as const,
       provider: result.provider,
       model: result.model,
-      schemaVersion: result.schema_version,
+      ...(publicAiSchemaVersion(result.schema_version) === undefined
+        ? {}
+        : { schemaVersion: publicAiSchemaVersion(result.schema_version) }),
       ...(result.source_submission_revision === null
         ? {}
         : { submissionRevision: result.source_submission_revision }),
@@ -209,28 +379,18 @@ export class SupabaseAiReviewQueueRepository
       ...(result.generated_at === null ? {} : { generatedAt: result.generated_at }),
       ...(result.persisted_at === null ? {} : { persistedAt: result.persisted_at }),
       ...(typeof raw['summary'] === 'string' ? { summary: raw['summary'] } : {}),
-      ...(typeof raw['completenessScore'] === 'number'
-        ? { completenessScore: raw['completenessScore'] }
-        : {}),
-      ...(typeof raw['suggestedSeverity'] === 'string'
-        ? { suggestedSeverity: raw['suggestedSeverity'] }
-        : {}),
-      ...(typeof raw['scopeAssessment'] === 'string'
-        ? { scopeAssessment: raw['scopeAssessment'] }
-        : {}),
+      ...(completenessScore === undefined ? {} : { completenessScore }),
+      ...(severityLevel === undefined ? {} : { suggestedSeverity: severityLevel }),
+      ...(scopeResult === undefined ? {} : { scopeAssessment: scopeResult }),
       ...(Array.isArray(raw['missingInformation'])
         ? { missingInformation: raw['missingInformation'] }
         : {}),
-      ...(typeof raw['confidence'] === 'number' ? { confidence: raw['confidence'] } : {}),
-      ...(typeof raw['duplicateAssessment'] === 'string'
-        ? { duplicateAssessment: raw['duplicateAssessment'] }
-        : {}),
-      ...(typeof raw['duplicateConfidence'] === 'number'
-        ? { duplicateConfidence: raw['duplicateConfidence'] }
-        : {}),
-      ...(principal.role === 'researcher' || !Array.isArray(raw['duplicateCandidates'])
+      ...(severityConfidence === undefined ? {} : { confidence: severityConfidence }),
+      ...(duplicateLevel === undefined ? {} : { duplicateAssessment: duplicateLevel }),
+      ...(duplicateConfidence === undefined ? {} : { duplicateConfidence }),
+      ...(principal.role === 'researcher' || visibleDuplicateCandidates === undefined
         ? {}
-        : { duplicateCandidates: raw['duplicateCandidates'] }),
+        : { duplicateCandidates: visibleDuplicateCandidates }),
     };
     const parsed = reportAiReviewSchema.safeParse(review);
     return parsed.success
@@ -301,7 +461,7 @@ export class SupabaseAiReviewQueueRepository
       .from('ai_triage_runs')
       .update({
         fingerprint: result.fingerprint,
-        fingerprint_schema_version: result.schemaVersion,
+        fingerprint_schema_version: AI_SCHEMA_VERSION_NUMBER,
         provider: this.providerName,
         model: this.providerModel,
         generated_at: new Date().toISOString(),
@@ -325,7 +485,7 @@ export class SupabaseAiReviewQueueRepository
       run_id: job.id,
       provider: this.providerName,
       model: this.providerModel,
-      schema_version: result.schemaVersion,
+      schema_version: AI_SCHEMA_VERSION_NUMBER,
       source_submission_revision: job.submissionRevision,
       source_content_hash: job.contentHash,
       generated_at: now,
@@ -333,16 +493,19 @@ export class SupabaseAiReviewQueueRepository
       result: {
         ...result,
         duplicateAssessment: comparison.duplicateAssessment,
-        duplicateConfidence: comparison.duplicateConfidence,
-        duplicateCandidates: comparison.candidates,
       },
-      confidence: result.confidence,
+      confidence: result.suggestedSeverity.confidence,
     });
-    if (insertError !== null) throw normalizeDatabaseError(insertError);
+    // The unique run_id index is partial (legacy rows may have no run_id), so an ON CONFLICT
+    // upsert cannot reliably infer it on every Postgres version. A duplicate is the expected
+    // recovery path after a worker crash between result insert and terminal run update.
+    if (insertError !== null && (insertError as { code?: unknown }).code !== '23505') {
+      throw normalizeDatabaseError(insertError);
+    }
 
     await this.finish(job, {
       status: 'completed',
-      comparison_schema_version: comparison.schemaVersion,
+      comparison_schema_version: AI_SCHEMA_VERSION_NUMBER,
       candidate_retrieval_version: 1,
       finished_at: now,
       persisted_at: now,
@@ -378,7 +541,19 @@ export class SupabaseAiReviewQueueRepository
     if (job.lockToken !== undefined) update = update.eq('locked_by', job.lockToken);
     const { data, error } = await update.select('id').maybeSingle();
     if (error !== null) throw normalizeDatabaseError(error);
-    if (data === null) throw new Error('ai_run_lease_lost');
+    if (data !== null) return;
+
+    // A retry can arrive after another worker completed the terminal transition. Treat the
+    // desired terminal state as idempotent success; any other state still indicates a lost lease.
+    const { data: terminalData, error: terminalError } = await this.client
+      .from('ai_triage_runs')
+      .select('status')
+      .eq('id', job.id)
+      .maybeSingle();
+    if (terminalError !== null) throw normalizeDatabaseError(terminalError);
+    const terminalStatus = (terminalData as { status?: unknown } | null)?.status;
+    if (terminalStatus === patch['status']) return;
+    throw new Error('ai_run_lease_lost');
   }
 
   private async readReportInput(revisionId: string) {

@@ -79,6 +79,7 @@ export const API_ERROR_CODES = Object.freeze([
   // Attachments
   'attachment_not_accessible',
   'attachment_already_uploaded',
+  'attachment_object_missing',
 ] as const);
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

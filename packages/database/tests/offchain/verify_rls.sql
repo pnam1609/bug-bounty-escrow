@@ -202,6 +202,84 @@ values
     'api'
   );
 
+insert into public.report_reviews (
+  id, report_id, reviewer_id, action, from_status, to_status, reason, metadata
+)
+values (
+  '20000000-0000-4000-8000-000000000400',
+  '20000000-0000-4000-8000-000000000300',
+  '20000000-0000-4000-8000-000000000005',
+  'request_information', 'submitted', 'needs_information',
+  'Internal review note', '{}'::jsonb
+);
+
+insert into public.report_attachments (
+  id, report_id, uploader_id, storage_bucket, storage_path, original_filename,
+  mime_type, size_bytes, upload_status, uploaded_at
+)
+values
+  (
+    '20000000-0000-4000-8000-000000000410',
+    '20000000-0000-4000-8000-000000000300',
+    '20000000-0000-4000-8000-000000000003',
+    'report-attachments',
+    'reports/20000000-0000-4000-8000-000000000300/20000000-0000-4000-8000-000000000410/pending.txt',
+    'pending.txt', 'text/plain', 10, 'pending', null
+  ),
+  (
+    '20000000-0000-4000-8000-000000000411',
+    '20000000-0000-4000-8000-000000000300',
+    '20000000-0000-4000-8000-000000000003',
+    'report-attachments',
+    'reports/20000000-0000-4000-8000-000000000300/20000000-0000-4000-8000-000000000411/proof.txt',
+    'proof.txt', 'text/plain', 10, 'uploaded', now()
+  ),
+  (
+    '20000000-0000-4000-8000-000000000412',
+    '20000000-0000-4000-8000-000000000300',
+    '20000000-0000-4000-8000-000000000003',
+    'report-attachments',
+    'reports/20000000-0000-4000-8000-000000000300/20000000-0000-4000-8000-000000000412/missing.txt',
+    'missing.txt', 'text/plain', 10, 'pending', null
+  );
+
+insert into storage.objects (bucket_id, name)
+values
+  (
+    'report-attachments',
+    'reports/20000000-0000-4000-8000-000000000300/20000000-0000-4000-8000-000000000410/pending.txt'
+  ),
+  (
+    'report-attachments',
+    'reports/20000000-0000-4000-8000-000000000300/20000000-0000-4000-8000-000000000411/proof.txt'
+  );
+
+do $attachment_completion_guard$
+begin
+  begin
+    perform public.complete_report_attachment_atomic(
+      '20000000-0000-4000-8000-000000000003',
+      '20000000-0000-4000-8000-000000000300',
+      '20000000-0000-4000-8000-000000000412'
+    );
+    raise exception 'Attachment completion accepted a missing Storage object';
+  exception
+    when others then
+      if sqlstate <> '22023' or sqlerrm <> 'attachment_object_missing' then
+        raise;
+      end if;
+  end;
+
+  if (
+    select upload_status
+    from public.report_attachments
+    where id = '20000000-0000-4000-8000-000000000412'
+  ) <> 'pending' then
+    raise exception 'Missing-object completion changed attachment status';
+  end if;
+end;
+$attachment_completion_guard$;
+
 do $bucket_safety$
 begin
   if not exists (
@@ -283,6 +361,18 @@ begin
     where report_id = '20000000-0000-4000-8000-000000000301'
   ) then
     raise exception 'Researcher can read impact rows of another researcher''s report';
+  end if;
+
+  if exists (select 1 from public.report_reviews) then
+    raise exception 'Researcher can read internal review rows';
+  end if;
+
+  if (select count(*) from public.report_attachments) <> 1 then
+    raise exception 'Researcher can read pending attachment rows';
+  end if;
+
+  if (select count(*) from storage.objects) <> 1 then
+    raise exception 'Researcher can read pending attachment objects';
   end if;
 
   begin
@@ -389,6 +479,18 @@ begin
   if (select count(*) from public.report_impacts) <> 2 then
     raise exception 'Program owner cannot read the impact rows of program reports';
   end if;
+
+  if (select count(*) from public.report_reviews) <> 1 then
+    raise exception 'Program owner cannot read internal review rows';
+  end if;
+
+  if (select count(*) from public.report_attachments) <> 1 then
+    raise exception 'Program owner can read pending attachment rows';
+  end if;
+
+  if (select count(*) from storage.objects) <> 1 then
+    raise exception 'Program owner can read pending attachment objects';
+  end if;
 end;
 $owner_matrix$;
 
@@ -407,6 +509,18 @@ begin
     where id = '20000000-0000-4000-8000-000000000102'
   ) then
     raise exception 'Reviewer can read an unassigned private program';
+  end if;
+
+  if (select count(*) from public.report_reviews) <> 1 then
+    raise exception 'Assigned reviewer cannot read internal review rows';
+  end if;
+
+  if (select count(*) from public.report_attachments) <> 1 then
+    raise exception 'Assigned reviewer can read pending attachment rows';
+  end if;
+
+  if (select count(*) from storage.objects) <> 1 then
+    raise exception 'Assigned reviewer can read pending attachment objects';
   end if;
 end;
 $reviewer_matrix$;

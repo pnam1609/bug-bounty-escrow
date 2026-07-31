@@ -147,15 +147,19 @@ export class AiReviewWorker {
       // Provider output is untrusted. Only candidate ids that came from the authorized, prior
       // sequence retrieval are allowed to reach persistence or the owner/reviewer projection.
       const allowedIds = new Set(candidates.map((candidate) => candidate.reportId));
-      const safeCandidates = comparison.candidates.filter((candidate) =>
-        allowedIds.has(candidate.candidateReportId),
+      const safeCandidates = comparison.duplicateAssessment.candidates.filter((candidate) =>
+        allowedIds.has(candidate.candidateRef),
       );
       const safeTop = safeCandidates[0];
       const safeComparison = duplicateComparisonResultSchema.parse({
         ...comparison,
-        duplicateAssessment: safeTop?.assessment ?? 'none',
-        duplicateConfidence: safeTop?.confidence ?? 0,
-        candidates: safeCandidates,
+        duplicateAssessment: {
+          ...comparison.duplicateAssessment,
+          assessment: safeTop?.assessment ?? 'none',
+          confidence: safeTop?.confidence ?? 0,
+          matchingReasons: safeTop?.reasons ?? [],
+          candidates: safeCandidates,
+        },
       });
       await this.queue.persistReady(job, pass1, safeComparison);
       return { processed: true, status: 'ready', reportId: job.reportId };

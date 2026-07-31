@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   approveRewardRequestSchema,
+  API_ERROR_CODES,
   attachmentUploadRequestSchema,
   createProgramRequestSchema,
   createReportRequestSchema,
@@ -9,6 +10,7 @@ import {
   programSlugParamsSchema,
   reportDetailSchema,
   updateProfileRequestSchema,
+  isApiErrorCode,
 } from '../src/index.js';
 
 /** Minimal payload that satisfies every Create Program rule; tests break one rule at a time. */
@@ -64,6 +66,11 @@ function validCreateProgram() {
 }
 
 describe('off-chain shared contracts', () => {
+  it('keeps attachment object loss as a stable API error code', () => {
+    expect(API_ERROR_CODES).toContain('attachment_object_missing');
+    expect(isApiErrorCode('attachment_object_missing')).toBe(true);
+  });
+
   it('accepts canonical program slugs and rejects the legacy id parameter shape', () => {
     expect(programSlugParamsSchema.parse({ slug: 'aegis-protocol' })).toEqual({
       slug: 'aegis-protocol',

@@ -100,17 +100,20 @@ describe('durable AI worker orchestration', () => {
       model: 'test',
       fingerprint: vi.fn(async () => new MockTriageProvider().fingerprint(report)),
       compareDuplicate: vi.fn(async () => ({
-        schemaVersion: 1,
-        duplicateAssessment: 'likely' as const,
-        duplicateConfidence: 0.99,
-        candidates: [
-          {
-            candidateReportId: '10000000-0000-4000-8000-000000000099',
-            assessment: 'likely' as const,
-            reason: 'hallucinated',
-            confidence: 0.99,
-          },
-        ],
+        schemaVersion: 'ai-review-v1',
+        duplicateAssessment: {
+          assessment: 'likely' as const,
+          confidence: 0.99,
+          matchingReasons: ['hallucinated'],
+          candidates: [
+            {
+              candidateRef: '10000000-0000-4000-8000-000000000099',
+              assessment: 'likely' as const,
+              reasons: ['hallucinated'],
+              confidence: 0.99,
+            },
+          ],
+        },
       })),
     };
     const worker = new AiReviewWorker(repository, provider, { privacyMode: 'demo' });
@@ -119,7 +122,9 @@ describe('durable AI worker orchestration', () => {
     expect(repository.persistReady).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ duplicateAssessment: 'none', candidates: [] }),
+      expect.objectContaining({
+        duplicateAssessment: expect.objectContaining({ assessment: 'none', candidates: [] }),
+      }),
     );
   });
 
