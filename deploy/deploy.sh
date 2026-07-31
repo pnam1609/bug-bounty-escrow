@@ -8,6 +8,8 @@ ENV_FILE="${ENV_FILE:-${APP_DIR}/.env.production}"
 STATE_FILE="${STATE_FILE:-${APP_DIR}/.deployment.env}"
 PULL_IMAGES="${PULL_IMAGES:-true}"
 VERIFY_CIRCLE_PHASE2="${VERIFY_CIRCLE_PHASE2:-false}"
+deployment_stage='initialization'
+rollback_active=false
 
 : "${IMAGE_NAMESPACE:?IMAGE_NAMESPACE is required, for example bbe-local}"
 : "${IMAGE_TAG:?IMAGE_TAG is required, normally the Git commit SHA}"
@@ -17,6 +19,11 @@ export WEB_IMAGE="${IMAGE_NAMESPACE}/bug-bounty-escrow-web"
 export MIGRATIONS_IMAGE="${IMAGE_NAMESPACE}/bug-bounty-escrow-migrations"
 export IMAGE_TAG
 export ENV_FILE
+
+mark_stage() {
+  deployment_stage="$1"
+  printf 'Deployment stage: %s\n' "${deployment_stage}"
+}
 
 if [[ ! -f "${COMPOSE_FILE}" ]]; then
   printf 'Compose file not found: %s\n' "${COMPOSE_FILE}" >&2
@@ -54,11 +61,14 @@ compose() {
 rollback() {
   local exit_code=$?
 
-  if [[ -n "${previous_tag}" && "${previous_tag}" != "${IMAGE_TAG}" ]]; then
+  printf '::error title=Deployment failed::stage=%s exit_code=%s\n' \
+    "${deployment_stage}" "${exit_code}" >&2
+
+  if [[ "${rollback_active}" == 'true' && -n "${previous_tag}" && "${previous_tag}" != "${IMAGE_TAG}" ]]; then
     printf 'Deployment failed; restoring application images tagged %s\n' "${previous_tag}" >&2
     export IMAGE_TAG="${previous_tag}"
     compose up --detach --remove-orphans --wait api web || true
-  elif [[ -z "${previous_tag}" ]]; then
+  elif [[ "${rollback_active}" == 'true' && -z "${previous_tag}" ]]; then
     printf 'Deployment failed with no previous image tag; stopping failed application containers\n' >&2
     compose stop api web || true
   fi
@@ -66,8 +76,12 @@ rollback() {
   exit "${exit_code}"
 }
 
+trap rollback ERR
+
+mark_stage compose_config
 compose config --quiet
 
+mark_stage image_inspect
 if [[ "${PULL_IMAGES}" == 'true' ]]; then
   compose pull api web migrate
 elif [[ "${PULL_IMAGES}" == 'false' ]]; then
@@ -81,17 +95,21 @@ else
   exit 1
 fi
 
+mark_stage api_validation
 printf 'Validating the new API image and production configuration\n'
 compose run --rm --no-deps api node dist/config/validate-production.js
 
+mark_stage migrations
 printf 'Applying database migrations for %s\n' "${IMAGE_TAG}"
 compose run --rm migrate
 
+rollback_active=true
+mark_stage application_start
 printf 'Starting application images for %s\n' "${IMAGE_TAG}"
-trap rollback ERR
 compose up --detach --remove-orphans --wait api web
 
 if [[ "${VERIFY_CIRCLE_PHASE2}" == 'true' ]]; then
+  mark_stage circle_verify
   printf 'Verifying Circle phase-2 runtime and signed receipt\n'
   APP_DIR="${APP_DIR}" \
   COMPOSE_FILE="${COMPOSE_FILE}" \
@@ -99,6 +117,7 @@ if [[ "${VERIFY_CIRCLE_PHASE2}" == 'true' ]]; then
     "${APP_DIR}/verify-circle-phase2.sh"
 fi
 
+mark_stage state
 state_tmp="${STATE_FILE}.tmp"
 printf 'IMAGE_NAMESPACE=%s\nIMAGE_TAG=%s\n' "${IMAGE_NAMESPACE}" "${IMAGE_TAG}" >"${state_tmp}"
 mv "${state_tmp}" "${STATE_FILE}"

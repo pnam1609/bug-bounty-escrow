@@ -208,6 +208,28 @@ class RenderUpdatedEnvironmentTests(unittest.TestCase):
         self.assertLess(verify_index, state_index)
         self.assertLess(state_index, clear_trap_index)
 
+    def test_deploy_marks_nonsecret_failure_stage_without_logging_values(self) -> None:
+        deploy_script = Path(__file__).with_name("deploy.sh").read_text(
+            encoding="utf-8"
+        )
+
+        for stage in (
+            "compose_config",
+            "image_inspect",
+            "api_validation",
+            "migrations",
+            "application_start",
+            "circle_verify",
+            "state",
+        ):
+            self.assertIn(f"mark_stage {stage}", deploy_script)
+        self.assertIn(
+            "::error title=Deployment failed::stage=%s exit_code=%s",
+            deploy_script,
+        )
+        self.assertIn("rollback_active=false", deploy_script)
+        self.assertIn("rollback_active=true", deploy_script)
+
 
 if __name__ == "__main__":
     unittest.main()
