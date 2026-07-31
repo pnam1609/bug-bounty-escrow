@@ -19,7 +19,11 @@ const secretValueSchema = z
   .min(1)
   .refine((value) => value.trim().length > 0, 'Expected a non-empty value');
 
-const aiModelSchema = z.enum(['mock-triage-v1', 'gemini-3.5-flash', 'deepseek-v4-flash']);
+// Hosted providers must use an exact, reviewed model identifier.  The mock adapter ignores the
+// model field, so it may receive a legacy value that was persisted before the provider/model
+// allowlist was introduced; keep that deployment-compatible while retaining a nonblank string.
+const aiModelSchema = z.string().trim().min(1);
+const knownAiModels = ['mock-triage-v1', 'gemini-3.5-flash', 'deepseek-v4-flash'] as const;
 
 const positiveIntegerStringSchema = z
   .string()
@@ -122,6 +126,21 @@ export const apiEnvironmentSchema = z
         path: ['DEEPSEEK_API_KEY'],
         message: 'DEEPSEEK_API_KEY is required when AI_PROVIDER is deepseek',
       });
+    }
+    if (environment.AI_MODEL !== undefined && environment.AI_PROVIDER !== 'mock') {
+      const allowedModels: readonly string[] =
+        environment.AI_PROVIDER === 'gemini'
+          ? ['gemini-3.5-flash']
+          : environment.AI_PROVIDER === 'deepseek'
+            ? ['deepseek-v4-flash']
+            : knownAiModels;
+      if (!allowedModels.includes(environment.AI_MODEL)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['AI_MODEL'],
+          message: `AI_MODEL is not allowlisted for provider ${environment.AI_PROVIDER}`,
+        });
+      }
     }
     if (environment.AI_MAX_RETRIES > 5) {
       context.addIssue({

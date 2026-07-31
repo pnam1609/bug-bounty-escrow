@@ -60,6 +60,32 @@ describe('API configuration', () => {
     });
   });
 
+  it('allows a legacy model value when the mock provider ignores AI_MODEL', () => {
+    const mock = parseApiEnvironment({
+      ...config,
+      CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+      AI_PROVIDER: 'mock',
+      AI_MODEL: 'legacy-mock-model',
+    });
+
+    expect(mock.AI_MODEL).toBe('legacy-mock-model');
+  });
+
+  it.each([
+    ['gemini', 'deepseek-v4-flash', 'GEMINI_API_KEY'],
+    ['deepseek', 'gemini-3.5-flash', 'DEEPSEEK_API_KEY'],
+  ] as const)('rejects a cross-provider AI model for %s', (provider, model, apiKeyField) => {
+    expect(() =>
+      parseApiEnvironment({
+        ...config,
+        CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: '',
+        AI_PROVIDER: provider,
+        [apiKeyField]: 'provider-test-key',
+        AI_MODEL: model,
+      }),
+    ).toThrow(expect.objectContaining({ message: expect.stringContaining('AI_MODEL') }));
+  });
+
   it.each(['missing', ''])('rejects DeepSeek without a nonblank API key (%s)', (key) => {
     expect(() =>
       parseApiEnvironment({
