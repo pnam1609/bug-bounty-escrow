@@ -4,9 +4,11 @@
 create index if not exists report_reviews_report_created_idx
   on public.report_reviews (report_id, created_at, id);
 
--- Duplicate metadata is only a reference to another report. The transition RPC already proves
--- same-program membership while holding both report rows; this constraint prevents malformed
--- metadata from becoming a trusted read-model input.
+-- Duplicate metadata is normally only a reference to another report. The transition RPC already
+-- proves same-program membership while holding both report rows; this constraint prevents
+-- malformed metadata from becoming a trusted read-model input. Older deterministic demo seeds
+-- intentionally used {"demo": true} before duplicate references were modelled, so keep that
+-- explicit legacy marker valid instead of making a production migration fail on existing demo data.
 alter table public.report_reviews
   drop constraint if exists report_reviews_duplicate_metadata_check;
 alter table public.report_reviews
@@ -14,10 +16,15 @@ alter table public.report_reviews
     action is distinct from 'mark_duplicate'
     or (
       metadata is not null
-      and coalesce(metadata ? 'originalReportId', false)
-      and coalesce(
-        (metadata->>'originalReportId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-        false
+      and (
+        metadata @> '{"demo": true}'::jsonb
+        or (
+          coalesce(metadata ? 'originalReportId', false)
+          and coalesce(
+            (metadata->>'originalReportId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+            false
+          )
+        )
       )
     )
   );
