@@ -4,7 +4,7 @@ Read this before adding or changing anything in `packages/ui`.
 
 ## Source of truth
 
-Figma file `PXhIUlWSb44xjonYNxviCN`, page **BBE Design System** (node `2:3`).
+Figma file `Zdx9FTCAedUZ5R3phehFAp`, page **BBE Design System** (node `2:3`).
 
 | Section | Node |
 | --- | --- |

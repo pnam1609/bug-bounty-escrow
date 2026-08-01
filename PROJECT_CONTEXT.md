@@ -1,8 +1,8 @@
 # Bug Bounty Escrow — Project Context
 
 > **Nguồn sự thật.** Requirement chi tiết nằm trong [`docs/flow/`](docs/flow/). Khi tài liệu này
-> mâu thuẫn với flow doc, flow doc thắng. Gap analysis và target contract đã được đối chiếu trong
-> [`docs/database-api-review.md`](docs/database-api-review.md).
+> mâu thuẫn với flow doc, flow doc thắng. Shared Zod contracts, OpenAPI và database migrations là
+> bằng chứng implementation hiện hành; không duy trì một bản contract Markdown song song.
 
 ## 1. Ý tưởng sản phẩm
 
@@ -250,7 +250,7 @@ Frontend: Next.js 15
 Backend: NestJS
 API style: REST
 UI: shadcn/ui + Tailwind v4 (Radix primitives, Lucide icons, Inter)
-Design system: BBE Design System — Figma PXhIUlWSb44xjonYNxviCN
+Design system: BBE Design System — Figma Zdx9FTCAedUZ5R3phehFAp
 Forms: React Hook Form + Zod
 Server state: TanStack Query
 Database: Supabase PostgreSQL
@@ -278,7 +278,7 @@ Frontend gọi NestJS qua REST API. NestJS xác thực Supabase access token b�
 
 ## 5b. Design system
 
-Nguồn sự thật là Figma `PXhIUlWSb44xjonYNxviCN`:
+Nguồn sự thật là Figma `Zdx9FTCAedUZ5R3phehFAp`:
 
 | Page                        | Nội dung                                                              |
 | --------------------------- | --------------------------------------------------------------------- |
@@ -444,25 +444,7 @@ bug-bounty-escrow/
 │       └── test/
 │
 ├── docs/
-│   ├── flow/                      # requirement chi tiết, ưu tiên cao nhất
-│   ├── database-api-review.md     # gap analysis DB/API so với flow
-│   ├── architecture.md
-│   ├── database.md
-│   ├── smart-contract.md
-│   ├── state-machines.md
-│   ├── api-contracts.md
-│   ├── ai-agent-rules.md
-│   └── tasks/
-│       ├── README.md
-│       ├── foundation.md
-│       ├── database-auth.md
-│       ├── backend.md
-│       ├── frontend.md
-│       ├── smart-contracts.md
-│       ├── blockchain-integration.md
-│       ├── ai.md
-│       ├── quality-demo.md
-│       └── operations.md
+│   └── flow/                      # requirement chi tiết, ưu tiên cao nhất
 │
 ├── .github/
 │   └── workflows/
@@ -1233,21 +1215,13 @@ Needs-information reports
 
 ## 13. Task breakdown cho AI agents
 
-Task breakdown chi tiết được tách theo từng mảng tại [`docs/tasks/README.md`](docs/tasks/README.md).
+Task status, dependencies và acceptance criteria nằm trong
+[BountyEscrow Delivery Backlog](https://app.notion.com/p/BountyEscrow-Delivery-Backlog-3a9800c6e76e8117a06bfb49143fee52)
+và [Tasks database](https://app.notion.com/p/06a0ee55892f4852bffd3b871ef4df8d). Luôn đọc task live
+theo exact ID trước khi implement; không suy ra status từ code hoặc tài liệu lịch sử.
 
-Mỗi task phải có một outcome nhỏ, dependency rõ ràng và acceptance criteria có thể kiểm tra độc lập. Không gom nhiều API endpoint, nhiều màn hình hoặc nhiều smart contract action vào cùng một task.
-
-| Mảng                                            | File                                                                           |
-| ----------------------------------------------- | ------------------------------------------------------------------------------ |
-| Foundation và shared packages                   | [`docs/tasks/foundation.md`](docs/tasks/foundation.md)                         |
-| Database, Supabase Auth, RLS và Storage         | [`docs/tasks/database-auth.md`](docs/tasks/database-auth.md)                   |
-| NestJS backend; một task cho từng API           | [`docs/tasks/backend.md`](docs/tasks/backend.md)                               |
-| Next.js frontend; một task cho từng page/action | [`docs/tasks/frontend.md`](docs/tasks/frontend.md)                             |
-| Solidity smart contracts                        | [`docs/tasks/smart-contracts.md`](docs/tasks/smart-contracts.md)               |
-| Web3/blockchain integration                     | [`docs/tasks/blockchain-integration.md`](docs/tasks/blockchain-integration.md) |
-| AI triage                                       | [`docs/tasks/ai.md`](docs/tasks/ai.md)                                         |
-| Test, security và demo                          | [`docs/tasks/quality-demo.md`](docs/tasks/quality-demo.md)                     |
-| CI/CD, deployment và observability              | [`docs/tasks/operations.md`](docs/tasks/operations.md)                         |
+Mỗi task phải có một outcome nhỏ, dependency rõ ràng và acceptance criteria có thể kiểm tra độc lập.
+Không gom nhiều API endpoint, nhiều màn hình hoặc nhiều smart contract action vào cùng một task.
 
 ---
 
@@ -1277,13 +1251,7 @@ A working escrow and payout flow is more important than advanced AI.
 
 ## 15. AI development rules
 
-Create:
-
-```text
-docs/ai-agent-rules.md
-```
-
-Rules:
+Các rule sau áp dụng cùng `AGENTS.md`:
 
 ```text
 1. Only modify files listed in the task.

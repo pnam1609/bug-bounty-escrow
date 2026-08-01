@@ -22,12 +22,12 @@ Account settings không phải nơi đổi role, payout wallet, password hoặc 
 ### Figma
 
 - File: `Bug Bounty Escrow — Dark Desktop Preview`.
-- File key: `PXhIUlWSb44xjonYNxviCN`.
+- File key: `Zdx9FTCAedUZ5R3phehFAp`.
 - Design System page: `BBE Design System` (`2:3`).
 - Account settings page: `account settings` (`282:1947`).
 - Section: `Account settings · Researcher` (`282:1948`).
 - Figma section:
-  [Account settings · Researcher](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=282-1948).
+  [Account settings · Researcher](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=282-1948).
 
 Các frame hiện có:
 

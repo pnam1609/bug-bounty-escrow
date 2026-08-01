@@ -99,17 +99,17 @@ API hiện chưa hỗ trợ:
 
 File:
 
-[Bug Bounty Escrow — Dark Desktop Preview](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview)
+[Bug Bounty Escrow — Dark Desktop Preview](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview)
 
 Page: `researcher`
 
 | ID | View | Figma node |
 | --- | --- | --- |
-| MR-01 | My Reports — All | [281:1876](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1876) |
-| MR-02 | My Reports — Needs information | [281:1900](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1900) |
-| MR-03 | My Reports — Empty | [281:1924](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1924) |
-| SR-15 | Submitted report detail | [272:1882](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=272-1882) |
-| RS-00 | Browse bounties | [116:4](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=116-4) |
+| MR-01 | My Reports — All | [281:1876](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1876) |
+| MR-02 | My Reports — Needs information | [281:1900](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1900) |
+| MR-03 | My Reports — Empty | [281:1924](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1924) |
+| SR-15 | Submitted report detail | [272:1882](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=272-1882) |
+| RS-00 | Browse bounties | [116:4](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=116-4) |
 
 Các giá trị tên program, report, reward, timestamp và metrics trong Figma là sample data để review visual; không phải production constants.
 

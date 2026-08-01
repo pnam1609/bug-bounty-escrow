@@ -98,7 +98,7 @@ Các trạng thái `rejected` và `duplicate` đóng report mà không đi vào 
 
 Nguồn sự thật thị giác:
 
-- Figma file: `PXhIUlWSb44xjonYNxviCN`.
+- Figma file: `Zdx9FTCAedUZ5R3phehFAp`.
 - Page: `BBE Design System` (`2:3`).
 - Implementation conventions: `packages/ui/CONVENTIONS.md`.
 - Chỉ có dark theme.
@@ -114,7 +114,7 @@ Page hiện tại:
 
 | Thành phần | Tên / node                                       |
 | ---------- | ------------------------------------------------ |
-| Figma page | `Reward - future` (`284:4513`)                   |
+| Figma page | `Researcher` (`114:92`)                          |
 | Section    | `Researcher · Rewards future` (`284:4514`)       |
 | Desktop    | `RF-01 · Rewards future · Desktop` (`284:4515`)  |
 | Mobile web | `RF-M-01 · Rewards future · Mobile` (`284:4516`) |
@@ -122,11 +122,11 @@ Page hiện tại:
 Links:
 
 - Page:
-  `https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/?node-id=284-4513`
+  `https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/?node-id=114-92`
 - Desktop:
-  `https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/?node-id=284-4515`
+  `https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/?node-id=284-4515`
 - Mobile:
-  `https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/?node-id=284-4516`
+  `https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/?node-id=284-4516`
 
 Prototype starting points:
 

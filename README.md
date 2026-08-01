@@ -211,12 +211,9 @@ Supported AI configuration modes are `mock`, `gemini`, and `disabled`.
 - [Production deployment](deploy/README.md) — Docker, self-hosted GitHub Actions
   on a VPS, migrations, and reverse-proxy setup.
 - [User flows](docs/flow/) — detailed requirements for each product flow.
-- [API contracts](docs/api-contracts.md) — REST contracts and error conventions.
-- [Database ERD](docs/database-erd.md) — data model.
+- [OpenAPI](apps/api/openapi.json) — generated REST contract.
 - [Database package guide](packages/database/README.md) — migrations, RLS, and
   the demo lifecycle.
-- [Off-chain MVP report](docs/offchain-mvp-report.md) — scope and results of the
-  off-chain milestone.
 
 ## Security principles
 

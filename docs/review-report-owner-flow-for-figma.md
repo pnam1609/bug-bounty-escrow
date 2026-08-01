@@ -53,13 +53,12 @@ ký approval và khởi động reward settlement.
 
 ### 3.1 Product và task source
 
-| Nguồn                                             | Vai trò                                                                                     |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `PROJECT_CONTEXT.md`                              | Vai trò, report lifecycle, privacy, human/AI boundary và Arc settlement nguyên tắc          |
-| `docs/tasks/frontend.md`                          | Ticket family `FE-REV-001` đến `FE-REV-009` và frontend guardrails                          |
-| `docs/tasks/backend.md`                           | Contract `BE-RPT-001`, `BE-RPT-003`, `BE-RPT-006` đến `BE-RPT-011`, attachment/comment APIs |
-| Notion project `06a0ee55892f4852bffd3b871ef4df8d` | Status/dependency của ticket đang thực hiện; phải đọc live trước khi implement              |
-| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-08                                       |
+| Nguồn                                             | Vai trò                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `PROJECT_CONTEXT.md`                              | Role, lifecycle, privacy, human/AI boundary và Arc settlement                  |
+| Shared Zod contracts + `apps/api/openapi.json`    | Contract implementation hiện hành; flow doc thắng khi có target contract mới   |
+| Notion project `06a0ee55892f4852bffd3b871ef4df8d` | Status, dependency và acceptance criteria live của ticket                      |
+| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-08                          |
 
 Notion là nguồn sự thật cho **trạng thái công việc**, không tự thay thế acceptance criteria trong
 tài liệu này. Trước khi bắt đầu implementation, agent phải map RR screens vào ticket FE-REV tương
@@ -113,7 +112,7 @@ happy path. Reward phải đi qua durable reward-settlement intents.
 
 File:
 
-[Bug Bounty Escrow — Dark Desktop Preview](https://www.figma.com/design/PXhIUlWSb44xjonYNxviCN/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview)
+[Bug Bounty Escrow — Dark Desktop Preview](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview)
 
 | Nguồn                             | Mục đích                                                                        |
 | --------------------------------- | ------------------------------------------------------------------------------- |
