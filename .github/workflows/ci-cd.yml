@@ -137,14 +137,6 @@ jobs:
           python3 deploy/upsert_circle_phase2_env.py \
             --path "${PRODUCTION_ENV_FILE}"
 
-      - name: Enable the time-bounded hackathon waiver
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 -m unittest deploy/test_upsert_hackathon_waiver_env.py
-          python3 deploy/upsert_hackathon_waiver_env.py \
-            --path "${PRODUCTION_ENV_FILE}"
-
       - name: Apply migrations and deploy
         shell: bash
         run: |

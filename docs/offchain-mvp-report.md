@@ -194,8 +194,8 @@ states. Signed URLs are requested only at action time and are never cached.
 
 ## Demo data and lifecycle
 
-- Three deterministic role identities: owner, researcher, reviewer.
-- Shared local-only password: `local-demo-password`.
+- Synthetic deterministic role identities are used only by the disposable local/test seed;
+  credentials are intentionally not published.
 - Nine programs with varied statuses; scopes and all five severity tiers.
 - Thirty-six synthetic reports across major states, 36 comments, and 30 reviews.
 - Narratives are rewritten synthetic summaries inspired by common public

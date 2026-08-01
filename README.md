@@ -142,17 +142,11 @@ Stop the local Supabase stack when it is no longer needed:
 pnpm exec supabase stop
 ```
 
-## Demo accounts
+## Local synthetic data
 
-The demo seed provides three local accounts:
-
-| Role       | Email                   | Password              |
-| ---------- | ----------------------- | --------------------- |
-| Owner      | `owner@local.demo`      | `local-demo-password` |
-| Researcher | `researcher@local.demo` | `local-demo-password` |
-| Reviewer   | `reviewer@local.demo`   | `local-demo-password` |
-
-These accounts and credentials are for local and demo environments only.
+The disposable local seed contains synthetic identities and records for automated tests. Their
+credentials are intentionally not documented or shared; use the guarded local reset workflow when
+you need a fresh database.
 
 ## Common commands
 

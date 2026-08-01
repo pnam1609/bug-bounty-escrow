@@ -55,11 +55,13 @@ const expectedMigrations = [
   '20260729000900_cp14_recovery_integrity_hardening.sql',
   '20260729001000_cp14_recovery_rpc_boundary.sql',
   '20260731000100_ai_revisions_queue.sql',
+  '20260731000150_rehome_personal_accounts.sql',
   '20260731000200_rr_flow_review_read_model.sql',
   '20260801000100_rr_flow_review_privacy.sql',
   '20260801000200_rr_flow_attachment_completion_integrity.sql',
   '20260801000300_ai_queue_idempotency_supersession.sql',
   '20260801000400_ai_candidate_union_signals.sql',
+  '20260801000500_restore_duplicate_metadata_constraint.sql',
 ];
 
 const tableMigrations = new Map([

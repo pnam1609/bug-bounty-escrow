@@ -593,68 +593,10 @@ been proven healthy and has become the only supported rollback baseline.
 
 #### Release A prerequisites and snapshot
 
-`SEC-PROD-001` is a separate security requirement, not part of the Arc feature
-rollout. Release A may proceed only through one of these explicitly recorded
-gates:
-
-1. The reviewed security image and migration have been deployed and verified:
-   all seven repository-known demo Auth identities are disabled, their refresh
-   sessions are revoked, password login and pre-ban JWT access are rejected,
-   and the recorded profile/program/report/attachment and other business-row
-   counts are unchanged.
-2. A time-bounded hackathon waiver is active. The owner approved retaining the
-   demo identities through `2026-08-07T16:59:00Z`. This exception permits only
-   a testnet hackathon release; it does not complete `SEC-PROD-001` and must not
-   be represented as hardened production or general availability. No Auth
-   identity, session, database row, image, or deployment was mutated when the
-   waiver was recorded.
-
-The waiver expiry is only an application and deployment control: at expiry the
-Nest API rejects the seven exact UUIDs again, and future production migrations
-fail their active-demo preflight. Expiry does **not** rotate a Supabase password,
-revoke an Auth session or refresh token, invalidate an already-issued JWT at
-PostgREST or Storage, or cancel an existing signed URL before that URL's own
-TTL. Complete `SEC-PROD-001` cleanup at or before the expiry; do not treat the
-timestamp as credential or session revocation.
-
-For Release A, CI atomically manages only
-`LOCAL_DEMO_IDENTITIES_ALLOWED_UNTIL=2026-08-07T16:59:00Z` in the protected VPS
-environment file before migrations run. It preserves every other assignment
-and the file mode, and refuses duplicate managed keys or an unexpected target.
-Remove this CI updater at or before expiry as part of `SEC-PROD-001` cleanup;
-the workflow must not extend or replace the approved timestamp.
-
-While the waiver is active, Arc, Ethereum, Arbitrum, and Base must remain on
-their configured testnets. Do not use real funds, real personal information, or
-confidential vulnerability reports. Stop the release immediately if any
-mainnet asset, real user data, unexpected demo identity, credential abuse,
-security discrepancy, or waiver-boundary violation is observed. The waiver is
-invalid at and after `2026-08-07T16:59:00Z`: stop further releases and privileged
-demo-account use, then complete the original exact-UUID password rotation, ban,
-session revocation, old-JWT/PostgREST/Storage rejection, and preservation-count
-checks before resuming. The exception does not authorize deleting Auth,
-profile, program, report, attachment, or other referenced business rows.
-
-The last recorded read-only inventory found 9 Auth users, with 7 exact demo
-targets, 0 targets banned, 1 active target session, and 1 unrevoked target
-refresh row. The preserved demo references were 7 profiles, 10 programs, 15
-reviewer assignments, 60 reports, 36 attachments, 60 comments, 52 reviews, 2
-disclosures, and 112 notifications. Treat those values as comparison evidence,
-not as permission to mutate: immediately before remediation, take a backup and
-refresh the read-only inventory without selecting or logging credentials,
-tokens, hashes, or signed URLs. Stop for review if the target set or any count
-differs. After rotating and banning only the approved exact UUID allow-list,
-prove all refreshed business counts are unchanged, target sessions and refresh
-rows are zero, password login fails, a pre-ban JWT is denied by API,
-PostgREST, and Storage, and any pre-ban signed download URL has expired.
-
-A partial identity batch is resumed only for the remaining exact approved
-UUIDs; already-disabled identities stay disabled. Never unban a demo identity
-as an application rollback. If a preserved demo-owned program later needs a
-human operator, create a non-demo Auth principal and use a separately reviewed,
-audited, foreign-key-safe ownership reassignment. Do not recover access by
-restoring the discarded demo password, changing historical report authorship,
-or deleting referenced rows.
+The hosted environment must contain only private operator identities. The account-rehome migration
+preserves program/report history, reassigns profile foreign keys, removes the temporary synthetic
+accounts, and restores the strict duplicate-review metadata invariant. Personal credentials are not
+documented in this repository.
 
 Release A is the feature snapshot that adds these seven migrations, in order:
 
@@ -679,10 +621,9 @@ retains the old service-role RPC grants.
 
 Deploy Release A in this order:
 
-1. Confirm either the completed `SEC-PROD-001` deployment evidence and unchanged
-   preservation counts, or the owner-approved hackathon waiver above with its
-   exact expiry and every restriction still satisfied. Stop if the selected
-   evidence is absent, stale, expired, or contradicted by current state.
+1. Confirm the account-rehome migration completed and the post-migration inventory contains no
+   deterministic demo identities or stale profile references. Stop if the evidence is absent or
+   contradicted by current state.
 2. Build and verify immutable API, web, and migration images from one Release A
    SHA. Confirm that the migration image contains the exact `004`-through-`010`
    set above and no Release B revoke migration.

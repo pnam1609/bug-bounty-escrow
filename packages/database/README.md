@@ -49,11 +49,10 @@ authorization, Storage, and atomic off-chain application surface.
 
 ## Local demo lifecycle
 
-The seed contains three local identities (`owner@local.demo`,
-`researcher@local.demo`, and `reviewer@local.demo`) with the shared local-only
-password `local-demo-password`, nine programs, 36 reports, and collaboration/review
-history. Narratives are synthetic rewrites inspired by common patterns in public
-security disclosures and contain no private exploit data.
+The seed contains synthetic local identities, nine programs, 36 reports, and collaboration/review
+history. Identity credentials are intentionally not documented or shared. Narratives are synthetic
+rewrites inspired by common patterns in public security disclosures and contain no private exploit
+data.
 
 Reset a disposable PGlite database only with both guards:
 
@@ -74,7 +73,7 @@ PostgreSQL target. It always refuses `NODE_ENV=production`. A remote disposable
 demo/test target additionally requires `DEMO_ENV=demo` (or `test`) and
 `DEMO_SEED_CONFIRM=SEED_REMOTE_DEMO_DATABASE`; those flags never override the
 production refusal. Production migrations also fail closed before changing the
-schema if deterministic local-demo identities exist without a current Auth ban.
+schema if deterministic local-demo identities or local-demo password markers exist.
 On a completely fresh bare PostgreSQL target, where both `auth.users` and the
 `authenticated` role are absent, that preflight permits the compatibility shim
 to install both. A partial Auth catalog (only one is present) is treated as an
