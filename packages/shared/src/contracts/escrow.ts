@@ -931,14 +931,42 @@ export const observeFundingOperationRequestSchema = z
     }
   });
 
+/** The browser never supplies an escrow authority. The API resolves the platform admin wallet
+ * from server configuration and the Circle wallet is only used as the operational deployer. */
 export const deployEscrowWithCircleRequestSchema = z
+  .object({})
+  .strict();
+
+export const createDeploymentFeeQuoteRequestSchema = z
+  .object({ idempotencyKey: uuidV4Schema })
+  .strict();
+
+export const deploymentFeeQuoteSchema = z
   .object({
-    ownerWallet: nonZeroEvmAddressSchema,
-    withdrawRecipient: nonZeroEvmAddressSchema,
-    refundUnlockAt: isoDateTimeSchema,
-    artifactVersion: z.literal('1.1.0'),
-    walletChallengeId: uuidV4Schema,
-    walletSignature: z.string().regex(/^0x(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$/),
+    id: uuidSchema,
+    programId: uuidSchema,
+    chainId: z.number().int().positive(),
+    tokenAddress: nonZeroEvmAddressSchema,
+    recipientAddress: nonZeroEvmAddressSchema,
+    amount: usdcNonNegativeAmountSchema,
+    status: z.enum(['quoted', 'paid', 'expired', 'waived']),
+    expiresAt: isoDateTimeSchema,
+    paymentTransactionHash: transactionHashSchema.optional(),
+    paidAt: isoDateTimeSchema.optional(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .strict();
+
+export const deploymentFeeQuoteResponseSchema = z
+  .object({ success: z.literal(true), data: deploymentFeeQuoteSchema })
+  .strict();
+
+export const observeDeploymentFeePaymentRequestSchema = z
+  .object({
+    quoteId: uuidSchema,
+    payerAddress: nonZeroEvmAddressSchema,
+    transactionHash: transactionHashSchema,
   })
   .strict();
 
@@ -981,7 +1009,9 @@ export const escrowDeploymentSchema = z
     programKey: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
     chainId: z.literal(ARC_TESTNET_CHAIN_ID),
     tokenAddress: z.literal(ARC_TESTNET_USDC_ADDRESS),
+    /** Immutable program-owner wallet; only this address may withdraw residual program funds. */
     ownerWallet: nonZeroEvmAddressSchema,
+    platformAdminWallet: nonZeroEvmAddressSchema.optional(),
     withdrawRecipient: nonZeroEvmAddressSchema,
     refundUnlockAt: isoDateTimeSchema,
     artifactVersion: z.literal('1.1.0'),
@@ -1176,6 +1206,13 @@ export type AttachFundingRecoveryTelemetryRequest = z.output<
 >;
 export type ObserveFundingOperationRequest = z.output<typeof observeFundingOperationRequestSchema>;
 export type DeployEscrowWithCircleRequest = z.output<typeof deployEscrowWithCircleRequestSchema>;
+export type CreateDeploymentFeeQuoteRequest = z.output<
+  typeof createDeploymentFeeQuoteRequestSchema
+>;
+export type DeploymentFeeQuote = z.output<typeof deploymentFeeQuoteSchema>;
+export type ObserveDeploymentFeePaymentRequest = z.output<
+  typeof observeDeploymentFeePaymentRequestSchema
+>;
 export type CreateEscrowWalletChallengeRequest = z.output<
   typeof createEscrowWalletChallengeRequestSchema
 >;

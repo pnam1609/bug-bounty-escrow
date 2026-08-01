@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Post, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Inject, NotFoundException, Post, UnauthorizedException } from '@nestjs/common';
 import {
   createFundingIntentRequestSchema,
   createEscrowWalletChallengeRequestSchema,
@@ -6,6 +6,9 @@ import {
   attachSourceDepositRequestSchema,
   createWithdrawalIntentRequestSchema,
   deployEscrowWithCircleRequestSchema,
+  createDeploymentFeeQuoteRequestSchema,
+  deploymentFeeQuoteResponseSchema,
+  observeDeploymentFeePaymentRequestSchema,
   escrowDeploymentResponseSchema,
   escrowWalletChallengeResponseSchema,
   fundingIntentParamsSchema,
@@ -35,6 +38,9 @@ import {
   type AttachSourceDepositRequest,
   type CreateWithdrawalIntentRequest,
   type DeployEscrowWithCircleRequest,
+  type CreateDeploymentFeeQuoteRequest,
+  type ObserveDeploymentFeePaymentRequest,
+  type DeploymentFeeQuote,
   type EscrowDeploymentResponse,
   type EscrowWalletChallengeResponse,
   type FundingIntentParams,
@@ -112,6 +118,39 @@ export class EscrowController {
       success: true,
       data: await this.service.deploy(requirePrincipal(principal), params.id, input),
     };
+  }
+
+  @Post(':id/escrow-deployment-fees/quote')
+  @RateLimit({ limit: 5, windowMs: 60_000 })
+  @ApiZodResponse(201, 'Durable owner deployment-fee quote', deploymentFeeQuoteResponseSchema)
+  public async deploymentFeeQuote(
+    @ZodParam(programIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(createDeploymentFeeQuoteRequestSchema) input: CreateDeploymentFeeQuoteRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<{ success: true; data: DeploymentFeeQuote }> {
+    return { success: true, data: await this.service.createDeploymentFeeQuote(requirePrincipal(principal), params.id, input) };
+  }
+
+  @Post(':id/escrow-deployment-fees/payment')
+  @RateLimit({ limit: 10, windowMs: 60_000 })
+  @ApiZodResponse(200, 'Verified owner deployment-fee payment', deploymentFeeQuoteResponseSchema)
+  public async deploymentFeePayment(
+    @ZodParam(programIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(observeDeploymentFeePaymentRequestSchema) input: ObserveDeploymentFeePaymentRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<{ success: true; data: DeploymentFeeQuote }> {
+    return { success: true, data: await this.service.observeDeploymentFeePayment(requirePrincipal(principal), params.id, input) };
+  }
+
+  @Get(':id/escrow-deployment-fees/current')
+  @ApiZodResponse(200, 'Current deployment-fee quote and payment state', deploymentFeeQuoteResponseSchema)
+  public async currentDeploymentFeeQuote(
+    @ZodParam(programIdParamsSchema) params: ProgramIdParams,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<{ success: true; data: DeploymentFeeQuote }> {
+    const quote = await this.service.getDeploymentFeeQuote(requirePrincipal(principal), params.id);
+    if (quote === null) throw new NotFoundException();
+    return { success: true, data: quote };
   }
 
   @Get(':id/escrow-deployments/current')
@@ -756,7 +795,7 @@ export class EscrowController {
   @RateLimit({ limit: 10, windowMs: 60_000 })
   @ApiZodResponse(
     200,
-    'Observed owner-signed close or withdrawal transaction',
+    'Observed program-owner close or withdrawal transaction (admin support never withdraws program funds)',
     withdrawalIntentResponseSchema,
   )
   public async observeWithdrawal(
@@ -779,7 +818,7 @@ export class EscrowController {
   @RateLimit({ limit: 10, windowMs: 60_000 })
   @ApiZodResponse(
     200,
-    'Arc-verified close or idempotently reconciled withdrawal',
+    'Arc-verified program-owner close or idempotently reconciled withdrawal',
     withdrawalIntentResponseSchema,
   )
   public async reconcileWithdrawal(

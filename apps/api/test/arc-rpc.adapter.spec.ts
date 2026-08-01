@@ -22,7 +22,7 @@ const INITIALIZED_ABI = {
   anonymous: false,
   inputs: [
     { name: 'programKey', type: 'bytes32', indexed: true },
-    { name: 'owner', type: 'address', indexed: true },
+    { name: 'platformAdmin', type: 'address', indexed: true },
     { name: 'token', type: 'address', indexed: true },
     { name: 'refundUnlockAt', type: 'uint256', indexed: false },
     { name: 'withdrawRecipient', type: 'address', indexed: false },
@@ -101,13 +101,13 @@ function config() {
   });
 }
 
-function initializedLog(owner = OWNER) {
+function initializedLog(platformAdmin = OWNER) {
   return {
     address: ESCROW,
     topics: encodeEventTopics({
       abi: [INITIALIZED_ABI],
       eventName: 'EscrowInitialized',
-      args: { programKey: PROGRAM_KEY, owner, token: USDC },
+      args: { programKey: PROGRAM_KEY, platformAdmin, token: USDC },
     }),
     data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }], [UNLOCK, RECIPIENT]),
     logIndex: 0,
@@ -130,7 +130,7 @@ function rpc(log = initializedLog(), status: 'success' | 'reverted' = 'success')
     readContract: vi.fn().mockImplementation(({ functionName }: { functionName: string }) => {
       const values: Record<string, unknown> = {
         programKey: PROGRAM_KEY,
-        owner: OWNER,
+        platformAdmin: OWNER,
         token: USDC,
         refundUnlockAt: UNLOCK,
         withdrawRecipient: RECIPIENT,
@@ -347,7 +347,7 @@ describe('Arc RPC escrow verifier', () => {
         expectedBlockNumber: 42n,
         expectedBlockHash: BLOCK_HASH,
         programKey: PROGRAM_KEY,
-        ownerWallet: OWNER,
+        platformAdminWallet: OWNER,
         refundUnlockAt: UNLOCK,
         withdrawRecipient: RECIPIENT,
       }),
@@ -364,7 +364,7 @@ describe('Arc RPC escrow verifier', () => {
         expectedBlockNumber: 42n,
         expectedBlockHash: BLOCK_HASH,
         programKey: PROGRAM_KEY,
-        ownerWallet: OWNER,
+        platformAdminWallet: OWNER,
         refundUnlockAt: UNLOCK,
         withdrawRecipient: RECIPIENT,
       }),
@@ -372,8 +372,8 @@ describe('Arc RPC escrow verifier', () => {
   });
 
   it('rejects a deployment whose initialization event binds another owner', async () => {
-    const wrongOwner = `0x${'d'.repeat(40)}` as const;
-    const adapter = new ArcRpcAdapter(config(), rpc(initializedLog(wrongOwner)));
+    const wrongPlatformAdmin = `0x${'d'.repeat(40)}` as const;
+    const adapter = new ArcRpcAdapter(config(), rpc(initializedLog(wrongPlatformAdmin)));
     await expect(
       adapter.verifyDeployment({
         artifact: ARTIFACT,
@@ -382,7 +382,7 @@ describe('Arc RPC escrow verifier', () => {
         expectedBlockNumber: 42n,
         expectedBlockHash: BLOCK_HASH,
         programKey: PROGRAM_KEY,
-        ownerWallet: OWNER,
+        platformAdminWallet: OWNER,
         refundUnlockAt: UNLOCK,
         withdrawRecipient: RECIPIENT,
       }),

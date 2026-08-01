@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { BountyEscrow } from "../src/BountyEscrow.sol";
+import { BountyEscrowAdmin } from "../src/BountyEscrowAdmin.sol";
 
 interface Vm {
     function etch(address target, bytes calldata code) external;
@@ -14,6 +15,7 @@ interface Vm {
 
 contract MockUSDC is IERC20 {
     mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowances;
 
     function mint(address account, uint256 amount) external {
         balanceOf[account] += amount;
@@ -30,16 +32,21 @@ contract MockUSDC is IERC20 {
         return 0;
     }
 
-    function allowance(address, address) external pure returns (uint256) {
-        return 0;
+    function allowance(address account, address spender) external view returns (uint256) {
+        return allowances[account][spender];
     }
 
-    function approve(address, uint256) external pure returns (bool) {
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowances[msg.sender][spender] = amount;
         return true;
     }
 
-    function transferFrom(address, address, uint256) external pure returns (bool) {
-        return false;
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        require(balanceOf[from] >= amount && allowances[from][msg.sender] >= amount, "balance");
+        allowances[from][msg.sender] -= amount;
+        balanceOf[from] -= amount;
+        balanceOf[to] += amount;
+        return true;
     }
 }
 
@@ -47,8 +54,8 @@ contract BountyEscrowTest {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
     address private constant USDC = 0x3600000000000000000000000000000000000000;
     address private constant OWNER = address(0xA11CE);
+    address private constant ADMIN = address(0xAD01);
     address private constant RESEARCHER = address(0xB0B);
-    address private constant TREASURY = address(0xCAFE);
     bytes32 private constant PROGRAM = keccak256("program");
     bytes32 private constant REPORT = keccak256("report");
     bytes32 private constant CONTENT = keccak256("content");
@@ -60,7 +67,7 @@ contract BountyEscrowTest {
         MockUSDC implementation = new MockUSDC();
         vm.etch(USDC, address(implementation).code);
         usdc = MockUSDC(USDC);
-        escrow = new BountyEscrow(PROGRAM, OWNER, USDC, block.timestamp + 7 days, TREASURY);
+        escrow = new BountyEscrow(PROGRAM, OWNER, ADMIN, USDC, block.timestamp + 7 days, OWNER);
     }
 
     function testExplicitOwnerNotDeployerHasAuthority() public {
@@ -193,7 +200,7 @@ contract BountyEscrowTest {
         escrow.close();
         vm.prank(OWNER);
         assert(escrow.withdrawRemaining(10_000000) == 10_000000);
-        assert(usdc.balanceOf(TREASURY) == 10_000000);
+        assert(usdc.balanceOf(OWNER) == 10_000000);
         vm.prank(OWNER);
         vm.expectRevert(BountyEscrow.NoRemainingFunds.selector);
         escrow.withdrawRemaining(0);
@@ -264,12 +271,100 @@ contract BountyEscrowTest {
 
     function testConstructorRejectsInvalidAuthorityTokenAndUnlock() public {
         vm.expectRevert(BountyEscrow.InvalidProgramKey.selector);
-        new BountyEscrow(bytes32(0), OWNER, USDC, block.timestamp + 1, TREASURY);
+        new BountyEscrow(bytes32(0), OWNER, ADMIN, USDC, block.timestamp + 1, OWNER);
         vm.expectRevert(BountyEscrow.InvalidAddress.selector);
-        new BountyEscrow(PROGRAM, address(0), USDC, block.timestamp + 1, TREASURY);
+        new BountyEscrow(PROGRAM, address(0), ADMIN, USDC, block.timestamp + 1, OWNER);
         vm.expectRevert(BountyEscrow.InvalidToken.selector);
-        new BountyEscrow(PROGRAM, OWNER, address(0x1234), block.timestamp + 1, TREASURY);
+        new BountyEscrow(PROGRAM, OWNER, ADMIN, address(0x1234), block.timestamp + 1, OWNER);
         vm.expectRevert(BountyEscrow.InvalidUnlockTime.selector);
-        new BountyEscrow(PROGRAM, OWNER, USDC, block.timestamp, TREASURY);
+        new BountyEscrow(PROGRAM, OWNER, ADMIN, USDC, block.timestamp, OWNER);
+    }
+}
+
+contract BountyEscrowAdminTest {
+    Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    address private constant USDC = 0x3600000000000000000000000000000000000000;
+    address private constant ADMIN = address(0xAD01);
+    address private constant OWNER = address(0xA11CE);
+    bytes32 private constant PROGRAM = keccak256("admin-program");
+
+    MockUSDC private usdc;
+    BountyEscrowAdmin private controller;
+    BountyEscrow private escrow;
+
+    function setUp() public {
+        MockUSDC implementation = new MockUSDC();
+        vm.etch(USDC, address(implementation).code);
+        usdc = MockUSDC(USDC);
+        controller = new BountyEscrowAdmin(ADMIN, USDC, 10_000000);
+        escrow = new BountyEscrow(
+            PROGRAM, OWNER, address(controller), USDC, block.timestamp + 7 days, OWNER
+        );
+        vm.prank(ADMIN);
+        controller.registerProgramEscrow(PROGRAM, address(escrow));
+    }
+
+    function testCollectsAndWithdrawsOnlyPlatformFees() public {
+        usdc.mint(OWNER, 10_000000);
+        vm.prank(OWNER);
+        usdc.approve(address(controller), 10_000000);
+        vm.prank(OWNER);
+        controller.payProgramFee(PROGRAM);
+        assert(usdc.balanceOf(address(controller)) == 10_000000);
+
+        vm.prank(ADMIN);
+        controller.withdrawPlatformFees(10_000000);
+        assert(usdc.balanceOf(ADMIN) == 10_000000);
+    }
+
+    function testRejectsDuplicateFeeAndNonAdminWithdrawal() public {
+        usdc.mint(OWNER, 20_000000);
+        vm.prank(OWNER);
+        usdc.approve(address(controller), 20_000000);
+        vm.prank(OWNER);
+        controller.payProgramFee(PROGRAM);
+        vm.prank(OWNER);
+        vm.expectRevert(BountyEscrowAdmin.FeeAlreadyPaid.selector);
+        controller.payProgramFee(PROGRAM);
+        vm.prank(OWNER);
+        vm.expectRevert(BountyEscrowAdmin.Unauthorized.selector);
+        controller.withdrawPlatformFees(1);
+    }
+
+    function testAdminCanSupportProgramOperationsButNeverWithdraw() public {
+        usdc.mint(address(escrow), 10_000000);
+        escrow.syncExternalFunding();
+        vm.prank(ADMIN);
+        controller.pauseProgram(PROGRAM);
+        vm.prank(ADMIN);
+        controller.unpauseProgram(PROGRAM);
+        vm.warp(escrow.refundUnlockAt());
+        vm.prank(ADMIN);
+        controller.closeProgram(PROGRAM);
+        vm.prank(ADMIN);
+        vm.expectRevert(BountyEscrow.Unauthorized.selector);
+        escrow.withdrawRemaining(10_000000);
+        vm.prank(OWNER);
+        escrow.withdrawRemaining(10_000000);
+        assert(usdc.balanceOf(OWNER) == 10_000000);
+    }
+
+    function testOnlyAdminCanDeactivateProgram() public {
+        vm.prank(OWNER);
+        vm.expectRevert(BountyEscrow.Unauthorized.selector);
+        escrow.deactivate();
+
+        vm.prank(ADMIN);
+        controller.deactivateProgram(PROGRAM);
+        assert(escrow.deactivated());
+    }
+
+    function testCannotRegisterEscrowWithDifferentController() public {
+        bytes32 otherProgram = keccak256("other");
+        BountyEscrow other =
+            new BountyEscrow(otherProgram, OWNER, ADMIN, USDC, block.timestamp + 7 days, OWNER);
+        vm.prank(ADMIN);
+        vm.expectRevert(BountyEscrowAdmin.InvalidEscrow.selector);
+        controller.registerProgramEscrow(otherProgram, address(other));
     }
 }

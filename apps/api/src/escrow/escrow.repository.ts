@@ -34,6 +34,7 @@ export interface ConfirmedEscrowRow {
   contract_address: `0x${string}`;
   token_address: `0x${string}` | null;
   owner_wallet: `0x${string}` | null;
+  platform_admin_wallet?: `0x${string}` | null;
   withdraw_recipient: `0x${string}` | null;
   refund_unlock_at: string | null;
   deployment_block_number: string | null;
@@ -217,7 +218,18 @@ export interface EscrowDeploymentRow {
   deployment_transaction_hash: `0x${string}` | null;
   failure_code: string | null;
   updated_at: string;
+  platform_admin_wallet?: `0x${string}` | null;
+  deployment_fee_quote_id?: string | null;
 }
+
+export interface DeploymentFeeQuoteRow {
+  id: string; program_id: string; chain_id: number; token_address: `0x${string}`;
+  recipient_address: `0x${string}`; amount_base_units: string; status: 'quoted'|'paid'|'expired'|'waived';
+  expires_at: string; payment_transaction_hash: `0x${string}`|null; payer_address: `0x${string}`|null;
+  payment_block_number: string|null; payment_block_hash: `0x${string}`|null; payment_log_index: number|null;
+  paid_at: string|null; created_at: string; updated_at: string;
+}
+export type DeploymentFeeQuoteProjection = ReturnType<typeof mapDeploymentFeeQuote>;
 
 export interface WithdrawalIntentRow {
   id: string;
@@ -568,6 +580,9 @@ function mapEscrowDeployment(row: EscrowDeploymentRow): EscrowDeployment {
     chainId: 5_042_002,
     tokenAddress: row.token_address,
     ownerWallet: row.owner_wallet,
+    ...(row.platform_admin_wallet === null || row.platform_admin_wallet === undefined
+      ? {}
+      : { platformAdminWallet: row.platform_admin_wallet }),
     withdrawRecipient: row.withdraw_recipient,
     refundUnlockAt: row.refund_unlock_at,
     artifactVersion: row.contract_version,
@@ -582,6 +597,23 @@ function mapEscrowDeployment(row: EscrowDeploymentRow): EscrowDeployment {
     ...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
     updatedAt: row.updated_at,
   });
+}
+
+function mapDeploymentFeeQuote(row: DeploymentFeeQuoteRow) {
+  return {
+    id: row.id,
+    programId: row.program_id,
+    chainId: row.chain_id,
+    tokenAddress: row.token_address,
+    recipientAddress: row.recipient_address,
+    amount: formatUsdcBaseUnits(BigInt(row.amount_base_units)),
+    status: row.status,
+    expiresAt: row.expires_at,
+    ...(row.payment_transaction_hash === null ? {} : { paymentTransactionHash: row.payment_transaction_hash }),
+    ...(row.paid_at === null ? {} : { paidAt: row.paid_at }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function mapWithdrawalIntent(row: WithdrawalIntentRow): WithdrawalIntent {
@@ -695,7 +727,7 @@ export class EscrowRepository
 
   public async getProgramStatus(
     programId: string,
-  ): Promise<'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed' | null> {
+  ): Promise<'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed' | null> {
     const result = await this.client
       .from('programs')
       .select('status')
@@ -705,7 +737,7 @@ export class EscrowRepository
     return (
       (
         result.data as {
-          status: 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed';
+          status: 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed';
         } | null
       )?.status ?? null
     );
@@ -752,7 +784,7 @@ export class EscrowRepository
     const result = await this.client
       .from('escrow_contracts')
       .select(
-        'id,program_id,contract_address,token_address,owner_wallet,withdraw_recipient,refund_unlock_at,deployment_block_number,last_synced_block,late_funding_scanned_through_block,program_key,contract_version,artifact_checksum,runtime_bytecode_checksum',
+        'id,program_id,contract_address,token_address,owner_wallet,platform_admin_wallet,withdraw_recipient,refund_unlock_at,deployment_block_number,last_synced_block,late_funding_scanned_through_block,program_key,contract_version,artifact_checksum,runtime_bytecode_checksum',
       )
       .eq('program_id', programId)
       .eq('chain_id', 5_042_002)
@@ -811,6 +843,77 @@ export class EscrowRepository
         target_idempotency_key: input.idempotencyKey,
       },
     );
+    const row = await this.findDeploymentById(id);
+    if (row === null) throw new Error('escrow_deployment_not_found_after_create');
+    return row;
+  }
+
+  public async createDeploymentFeeQuote(input: {
+    id: string; actorId: string; programId: string; chainId: number; tokenAddress: string;
+    recipientAddress: string; amountBaseUnits: bigint; expiresAt: string;
+  }): Promise<DeploymentFeeQuoteRow> {
+    const id = await this.executeAtomicRpc<string>('create_deployment_fee_quote_atomic', {
+      target_quote_id: input.id, actor_id: input.actorId, target_program_id: input.programId,
+      target_chain_id: input.chainId, target_token_address: input.tokenAddress.toLowerCase(),
+      target_recipient_address: input.recipientAddress.toLowerCase(), target_amount_base_units: input.amountBaseUnits.toString(),
+      target_expires_at: input.expiresAt,
+    });
+    return (await this.findDeploymentFeeQuoteById(id))!;
+  }
+
+  public async findDeploymentFeeQuoteById(id: string): Promise<DeploymentFeeQuoteRow | null> {
+    const result = await this.client.from('escrow_deployment_fee_quotes' as never).select('*').eq('id', id).maybeSingle();
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    return result.data as DeploymentFeeQuoteRow | null;
+  }
+
+  public async findActiveDeploymentFeeQuote(programId: string): Promise<DeploymentFeeQuoteRow | null> {
+    const result = await this.client
+      .from('escrow_deployment_fee_quotes' as never)
+      .select('*')
+      .eq('program_id', programId)
+      .in('status', ['quoted', 'paid', 'waived'])
+      .order('created_at', { ascending: false });
+    if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
+    const rows = (result.data as DeploymentFeeQuoteRow[] | null) ?? [];
+    const now = Date.now();
+    return (
+      rows.find(
+        (row) => row.status === 'paid' || row.status === 'waived' || Date.parse(row.expires_at) > now,
+      ) ?? null
+    );
+  }
+
+  public toDeploymentFeeQuote(row: DeploymentFeeQuoteRow) {
+    return mapDeploymentFeeQuote(row);
+  }
+
+  public async markDeploymentFeePaid(input: {
+    quoteId: string; programId: string; payerAddress: string; transactionHash: string;
+    blockNumber: bigint; blockHash: string; logIndex: number;
+  }): Promise<DeploymentFeeQuoteRow> {
+    await this.executeAtomicRpc<string>('mark_deployment_fee_paid_atomic', {
+      target_quote_id: input.quoteId, target_program_id: input.programId, target_payer_address: input.payerAddress.toLowerCase(),
+      target_payment_transaction_hash: input.transactionHash.toLowerCase(), target_payment_block_number: input.blockNumber.toString(),
+      target_payment_block_hash: input.blockHash.toLowerCase(), target_payment_log_index: input.logIndex,
+    });
+    return (await this.findDeploymentFeeQuoteById(input.quoteId))!;
+  }
+
+  public async createServerDeploymentRecord(input: {
+    actorId: string; programId: string; programKey: string; platformAdminWallet: string;
+    programOwnerWallet: string;
+    withdrawRecipient: string; refundUnlockAt: string; artifactChecksum: string; runtimeChecksum: string;
+    immutableReferences: unknown; idempotencyKey: string; feeQuoteId: string;
+  }): Promise<EscrowDeploymentRow> {
+    const id = await this.executeAtomicRpc<string>('create_escrow_deployment_server_atomic', {
+      actor_id: input.actorId, target_program_id: input.programId, target_program_key: input.programKey.toLowerCase(),
+      target_platform_admin_wallet: input.platformAdminWallet.toLowerCase(), target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
+      target_program_owner_wallet: input.programOwnerWallet.toLowerCase(),
+      target_refund_unlock_at: input.refundUnlockAt, target_artifact_checksum: input.artifactChecksum.toLowerCase(),
+      target_runtime_checksum: input.runtimeChecksum.toLowerCase(), target_immutable_references: input.immutableReferences,
+      target_idempotency_key: input.idempotencyKey, target_fee_quote_id: input.feeQuoteId,
+    });
     const row = await this.findDeploymentById(id);
     if (row === null) throw new Error('escrow_deployment_not_found_after_create');
     return row;

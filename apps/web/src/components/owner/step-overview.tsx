@@ -341,7 +341,7 @@ export function StepOverview({ draft, errors, onCancel, onContinue, update }: St
               key={resource.rowId}
               tabIndex={-1}
             >
-              <div className="flex flex-wrap items-end gap-md">
+              <div className="grid gap-md md:grid-cols-[10rem_minmax(12rem,1fr)_minmax(16rem,1fr)_auto] md:items-end">
                 <Field
                   className="w-40"
                   htmlFor={fieldId(`resources.${resource.rowId}.type`)}
@@ -394,6 +394,7 @@ export function StepOverview({ draft, errors, onCancel, onContinue, update }: St
                   />
                 </Field>
                 <DeleteRowButton
+                  className="md:mb-0 md:self-end"
                   label={`Remove resource ${index + 1}`}
                   onClick={() =>
                     update({

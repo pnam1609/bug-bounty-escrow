@@ -26,6 +26,9 @@ import {
   type CreateFundingIntentRequest,
   type CreateEscrowWalletChallengeRequest,
   type DeployEscrowWithCircleRequest,
+  type CreateDeploymentFeeQuoteRequest,
+  type DeploymentFeeQuote,
+  type ObserveDeploymentFeePaymentRequest,
   type EscrowDeployment,
   type EscrowWalletChallenge,
   type FundingIntent,
@@ -41,7 +44,7 @@ import {
   type RequestPrincipal,
   type WithdrawalIntent,
 } from '@bug-bounty-escrow/shared';
-import { encodeAbiParameters, keccak256, stringToHex, verifyMessage, type Hex } from 'viem';
+import { encodeAbiParameters, keccak256, stringToHex, type Hex } from 'viem';
 
 import { API_CONFIG } from '../config/api-config.module.js';
 import { createApiErrorResponse } from '../common/http/api-error.js';
@@ -52,11 +55,9 @@ import {
   EscrowProviderError,
   type ArcEscrowGateway,
   type CircleContractsGateway,
-  type EscrowArtifact,
 } from './escrow-gateways.js';
 import {
   EscrowRepository,
-  type EscrowDeploymentRow,
   type FundingIntentRow,
   type WithdrawalIntentRow,
 } from './escrow.repository.js';
@@ -156,124 +157,115 @@ export class EscrowService {
     };
   }
 
+  public async createDeploymentFeeQuote(
+    principal: RequestPrincipal,
+    programId: string,
+    input: CreateDeploymentFeeQuoteRequest,
+  ): Promise<DeploymentFeeQuote> {
+    await this.requireOwner(principal, programId);
+    const amount = BigInt(
+      this.config.PLATFORM_FEE_AMOUNT_BASE_UNITS > 0
+        ? this.config.PLATFORM_FEE_AMOUNT_BASE_UNITS
+        : this.config.DEPLOYMENT_FEE_AMOUNT_BASE_UNITS,
+    );
+    if (amount <= 0n) throw new ServiceUnavailableException('deployment_fee_not_configured');
+    // Program fees are paid to the canonical BountyEscrowAdmin controller. The
+    // controller owns the platform pool and is the only contract allowed to
+    // move that pool to the admin treasury; never quote a program escrow or a
+    // Circle deployment wallet as the fee recipient.
+    const recipient = this.config.BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS ?? this.config.DEPLOYMENT_FEE_RECIPIENT_ADDRESS;
+    if (recipient === undefined) throw new ServiceUnavailableException('deployment_fee_recipient_not_configured');
+    if (
+      (this.config.PLATFORM_FEE_CHAIN_ID ?? this.config.DEPLOYMENT_FEE_CHAIN_ID) !== ARC_TESTNET_CHAIN_ID ||
+      (this.config.PLATFORM_FEE_TOKEN_ADDRESS ?? this.config.DEPLOYMENT_FEE_TOKEN_ADDRESS).toLowerCase() !== ARC_TESTNET_USDC_ADDRESS.toLowerCase()
+    ) {
+      throw new ServiceUnavailableException('deployment_fee_asset_not_supported');
+    }
+    const row = await this.repository.createDeploymentFeeQuote({
+      id: input.idempotencyKey, actorId: principal.userId, programId,
+      chainId: this.config.PLATFORM_FEE_CHAIN_ID,
+      tokenAddress: this.config.PLATFORM_FEE_TOKEN_ADDRESS,
+      recipientAddress: recipient, amountBaseUnits: amount,
+      expiresAt: new Date(Date.now() + INTENT_TTL_MS).toISOString(),
+    });
+    return this.repository.toDeploymentFeeQuote(row) as DeploymentFeeQuote;
+  }
+
+  public async observeDeploymentFeePayment(
+    principal: RequestPrincipal,
+    programId: string,
+    input: ObserveDeploymentFeePaymentRequest,
+  ): Promise<DeploymentFeeQuote> {
+    await this.requireOwner(principal, programId);
+    const quote = await this.repository.findDeploymentFeeQuoteById(input.quoteId);
+    if (quote === null || quote.program_id !== programId) throw new NotFoundException();
+    if (quote.status === 'paid') return this.repository.toDeploymentFeeQuote(quote) as DeploymentFeeQuote;
+    const evidence = await this.arc.verifyDeploymentFeePayment({
+      transactionHash: input.transactionHash as `0x${string}`,
+      payerAddress: input.payerAddress as `0x${string}`,
+      recipientAddress: quote.recipient_address,
+      tokenAddress: quote.token_address,
+      amountBaseUnits: BigInt(quote.amount_base_units),
+      chainId: quote.chain_id,
+    });
+    return this.repository.toDeploymentFeeQuote(await this.repository.markDeploymentFeePaid({
+      quoteId: quote.id, programId, payerAddress: input.payerAddress,
+      transactionHash: input.transactionHash, blockNumber: evidence.blockNumber,
+      blockHash: evidence.blockHash, logIndex: evidence.logIndex,
+    })) as DeploymentFeeQuote;
+  }
+
+  public async getDeploymentFeeQuote(
+    principal: RequestPrincipal,
+    programId: string,
+  ): Promise<DeploymentFeeQuote | null> {
+    await this.requireOwner(principal, programId);
+    const row = await this.repository.findActiveDeploymentFeeQuote(programId);
+    return row === null ? null : (this.repository.toDeploymentFeeQuote(row) as DeploymentFeeQuote);
+  }
+
   public async deploy(
     principal: RequestPrincipal,
     programId: string,
     input: DeployEscrowWithCircleRequest,
   ): Promise<EscrowDeployment> {
+    void input;
     await this.requireOwner(principal, programId);
-    const challenge = await this.repository.findWalletChallenge(input.walletChallengeId);
-    if (
-      challenge === null ||
-      challenge.program_id !== programId ||
-      challenge.actor_id !== principal.userId
-    ) {
-      throw new NotFoundException(
-        createApiErrorResponse(
-          'wallet_control_challenge_not_found',
-          'The wallet authorization challenge was not found.',
-        ),
-      );
+    const fee = await this.repository.findActiveDeploymentFeeQuote(programId);
+    if (fee === null || !['paid', 'waived'].includes(fee.status)) {
+      throw new ConflictException('deployment_fee_payment_required');
     }
-    if (
-      challenge.owner_wallet.toLowerCase() !== input.ownerWallet.toLowerCase() ||
-      challenge.withdraw_recipient.toLowerCase() !== input.withdrawRecipient.toLowerCase() ||
-      challenge.chain_id !== ARC_TESTNET_CHAIN_ID
-    ) {
-      throw new ConflictException(
-        createApiErrorResponse(
-          'wallet_control_challenge_binding_mismatch',
-          'The wallet authorization does not match this deployment.',
-        ),
-      );
-    }
-    if (challenge.invalidated_at !== null) {
-      throw new ConflictException(
-        createApiErrorResponse(
-          'wallet_control_challenge_invalidated',
-          'The wallet authorization was replaced. Request and sign a new challenge.',
-        ),
-      );
-    }
-    if (challenge.consumed_at !== null) {
-      throw new ConflictException(
-        createApiErrorResponse(
-          'wallet_control_challenge_replayed',
-          'The wallet authorization was already used. Request and sign a new challenge.',
-        ),
-      );
-    }
-    if (Date.parse(challenge.expires_at) <= Date.now()) {
-      throw new ConflictException(
-        createApiErrorResponse(
-          'wallet_control_challenge_expired',
-          'The wallet authorization expired. Request and sign a new challenge.',
-        ),
-      );
-    }
-    const message = buildEscrowWalletControlMessage({
-      programId: challenge.program_id,
-      actorId: challenge.actor_id,
-      ownerWallet: challenge.owner_wallet,
-      withdrawRecipient: challenge.withdraw_recipient,
-      nonce: challenge.nonce,
-      issuedAt: challenge.issued_at,
-      expiresAt: challenge.expires_at,
-    });
-    let ownsWallet: boolean;
-    try {
-      ownsWallet = await verifyMessage({
-        address: asAddress(challenge.owner_wallet),
-        message,
-        signature: input.walletSignature as Hex,
-      });
-    } catch {
-      ownsWallet = false;
-    }
-    if (!ownsWallet) {
-      throw new ForbiddenException(
-        createApiErrorResponse(
-          'wallet_control_signature_invalid',
-          'The signature does not prove control of the selected owner wallet.',
-        ),
-      );
-    }
+    const platformAdminContract = this.config.BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS;
+    if (platformAdminContract === undefined) throw new ServiceUnavailableException('bounty_escrow_admin_contract_not_configured');
     const programDeadline = await this.repository.getProgramDeadline(programId);
     if (programDeadline === null) {
       throw new ConflictException('program_deadline_required_for_escrow');
     }
-    if (Date.parse(input.refundUnlockAt) !== Date.parse(programDeadline)) {
-      throw new ConflictException('refund_unlock_must_equal_program_deadline');
-    }
     const artifact = await loadEscrowArtifact(this.config.BOUNTY_ESCROW_ARTIFACT_PATH);
     const programKey = canonicalProgramKey(programId);
     const deploymentWalletAddress = await this.circle.getDeploymentWalletAddress();
-    if (
-      deploymentWalletAddress.toLowerCase() === input.ownerWallet.toLowerCase() ||
-      deploymentWalletAddress.toLowerCase() === input.withdrawRecipient.toLowerCase()
-    ) {
-      throw new ConflictException('circle_deployment_wallet_must_not_be_privileged');
-    }
     let deployment = await this.repository.findDeployment(programId);
-    if (deployment !== null) {
-      this.assertDeploymentParameters(deployment, input, programKey, artifact);
-    } else {
-      if (new Date(input.refundUnlockAt).getTime() <= Date.now()) {
-        throw new ConflictException('refund_unlock_must_be_in_the_future');
-      }
+    if (deployment === null && new Date(programDeadline).getTime() <= Date.now()) throw new ConflictException('refund_unlock_must_be_in_the_future');
+    // The payer is captured only after Arc verifies the canonical USDC
+    // transfer to BountyEscrowAdmin. Never trust a wallet address from the
+    // browser as the immutable program withdrawal authority.
+    const programOwnerWallet = fee.payer_address;
+    if (programOwnerWallet === undefined || programOwnerWallet === null) {
+      throw new ConflictException('program_owner_wallet_required');
     }
-    deployment = await this.repository.createDeploymentRecord({
+    deployment = await this.repository.createServerDeploymentRecord({
       actorId: principal.userId,
       programId,
-      walletChallengeId: input.walletChallengeId,
       programKey,
-      ownerWallet: input.ownerWallet,
-      withdrawRecipient: input.withdrawRecipient,
-      refundUnlockAt: input.refundUnlockAt,
+      platformAdminWallet: platformAdminContract,
+      programOwnerWallet,
+      withdrawRecipient: programOwnerWallet,
+      refundUnlockAt: programDeadline,
       artifactChecksum: artifact.artifactSha256,
       runtimeChecksum: artifact.runtimeBytecodeSha256,
       immutableReferences: artifact.immutableReferences,
       idempotencyKey: deployment?.deploy_idempotency_key ?? randomUUID(),
+      feeQuoteId: fee.id,
     });
     if (deployment.deployment_status === 'confirmed' || deployment.deployment_status === 'failed') {
       return this.repository.toEscrowDeployment(deployment);
@@ -285,10 +277,11 @@ export class EscrowService {
           idempotencyKey: deployment.deploy_idempotency_key,
           programId,
           programKey,
-          ownerWallet: asAddress(input.ownerWallet),
+          platformAdminWallet: asAddress(platformAdminContract),
+          ownerWallet: asAddress(programOwnerWallet),
           tokenAddress: asAddress(ARC_TESTNET_USDC_ADDRESS),
-          refundUnlockAt: BigInt(Math.floor(new Date(input.refundUnlockAt).getTime() / 1000)),
-          withdrawRecipient: asAddress(input.withdrawRecipient),
+          refundUnlockAt: BigInt(Math.floor(new Date(programDeadline).getTime() / 1000)),
+          withdrawRecipient: asAddress(programOwnerWallet),
           artifact,
         });
         deployment = await this.repository.storeCircleDeploymentIdentifiers(
@@ -309,13 +302,10 @@ export class EscrowService {
       if (result.state === 'pending') {
         return this.repository.toEscrowDeployment(deployment);
       }
-      if (
-        result.deploymentWalletAddress.toLowerCase() === input.ownerWallet.toLowerCase() ||
-        result.deploymentWalletAddress.toLowerCase() === input.withdrawRecipient.toLowerCase()
-      ) {
-        throw new ConflictException('circle_deployment_wallet_must_not_be_privileged');
+      if (result.deploymentWalletAddress.toLowerCase() !== deploymentWalletAddress.toLowerCase()) {
+        throw new EscrowProviderError('circle_deployment_wallet_mismatch', false);
       }
-      const refundUnlockAt = BigInt(Math.floor(new Date(input.refundUnlockAt).getTime() / 1000));
+      const refundUnlockAt = BigInt(Math.floor(new Date(programDeadline).getTime() / 1000));
       await this.arc.verifyDeployment({
         artifact,
         contractAddress: result.contractAddress,
@@ -323,10 +313,21 @@ export class EscrowService {
         expectedBlockNumber: result.blockNumber,
         expectedBlockHash: result.blockHash,
         programKey,
-        ownerWallet: asAddress(input.ownerWallet),
+        platformAdminWallet: asAddress(platformAdminContract),
+        ownerWallet: asAddress(programOwnerWallet),
         refundUnlockAt,
-        withdrawRecipient: asAddress(input.withdrawRecipient),
+        withdrawRecipient: asAddress(programOwnerWallet),
       });
+      const registration = await this.circle.registerProgramEscrow({
+        idempotencyKey: deployment.id,
+        adminContractAddress: asAddress(platformAdminContract),
+        programKey,
+        escrowAddress: result.contractAddress,
+      });
+      const registrationResult = await this.circle.waitForTransaction(registration.transactionId);
+      if (registrationResult.state === 'failed') {
+        throw new EscrowProviderError('bounty_escrow_admin_registration_failed', false);
+      }
       return this.repository.toEscrowDeployment(
         await this.repository.confirmDeployment(deployment.id, {
           contractAddress: result.contractAddress,
@@ -370,6 +371,9 @@ export class EscrowService {
       escrow.token_address.toLowerCase() !== ARC_TESTNET_USDC_ADDRESS.toLowerCase()
     ) {
       throw new ConflictException('verified_arc_escrow_required');
+    }
+    if (escrow.owner_wallet === null || escrow.owner_wallet.toLowerCase() !== input.walletAddress.toLowerCase()) {
+      throw new ConflictException('funding_wallet_must_match_program_owner');
     }
     const grossBaseUnits = parseUsdcBaseUnits(input.grossAmount);
     const feeReserveBaseUnits = parseUsdcBaseUnits(input.estimatedFeeReserve);
@@ -1340,6 +1344,9 @@ export class EscrowService {
     ) {
       throw new ConflictException('verified_arc_escrow_required');
     }
+    // The admin controller is never a program-funds withdrawal authority. The
+    // owner wallet is the only signer allowed by BountyEscrow.withdrawRemaining;
+    // the API therefore rejects any wallet other than the immutable owner.
     if (escrow.owner_wallet.toLowerCase() !== input.walletAddress.toLowerCase()) {
       throw new ConflictException('withdrawal_owner_wallet_mismatch');
     }
@@ -1449,28 +1456,6 @@ export class EscrowService {
     const row = await this.repository.findWithdrawalIntentRow(programId, intentId);
     if (row === null) throw new NotFoundException();
     return row;
-  }
-
-  private assertDeploymentParameters(
-    deployment: EscrowDeploymentRow,
-    input: DeployEscrowWithCircleRequest,
-    programKey: Hex,
-    artifact: EscrowArtifact,
-  ): void {
-    if (
-      typeof deployment.program_key !== 'string' ||
-      typeof deployment.owner_wallet !== 'string' ||
-      typeof deployment.withdraw_recipient !== 'string' ||
-      typeof deployment.refund_unlock_at !== 'string' ||
-      typeof deployment.artifact_checksum !== 'string' ||
-      deployment.program_key.toLowerCase() !== programKey.toLowerCase() ||
-      deployment.owner_wallet.toLowerCase() !== input.ownerWallet.toLowerCase() ||
-      deployment.withdraw_recipient.toLowerCase() !== input.withdrawRecipient.toLowerCase() ||
-      deployment.refund_unlock_at !== input.refundUnlockAt ||
-      deployment.artifact_checksum.toLowerCase() !== artifact.artifactSha256.toLowerCase()
-    ) {
-      throw new ConflictException('escrow_deployment_parameters_locked');
-    }
   }
 
   private rethrowProviderError(error: unknown): never {

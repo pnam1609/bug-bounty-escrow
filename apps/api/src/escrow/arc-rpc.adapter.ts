@@ -4,6 +4,7 @@ import {
   ARC_TESTNET_CHAIN_ID,
   ARC_TESTNET_USDC_ADDRESS,
   ERC20_ABI,
+  BOUNTY_ESCROW_ADMIN_ABI,
   ESCROW_ABI,
   FUNDING_NETWORK_CONFIG,
   GATEWAY_ABI,
@@ -33,6 +34,16 @@ import {
 } from './escrow-gateways.js';
 
 const ARC_CHAIN_ID = ARC_TESTNET_CHAIN_ID;
+const LEGACY_ESCROW_INITIALIZED_ABI = [{
+  type: 'event', name: 'EscrowInitialized', anonymous: false,
+  inputs: [
+    { name: 'programKey', type: 'bytes32', indexed: true },
+    { name: 'platformAdmin', type: 'address', indexed: true },
+    { name: 'token', type: 'address', indexed: true },
+    { name: 'refundUnlockAt', type: 'uint256', indexed: false },
+    { name: 'withdrawRecipient', type: 'address', indexed: false },
+  ],
+}] as const;
 const CANONICAL_USDC = ARC_TESTNET_USDC_ADDRESS;
 const GATEWAY_WALLET = GATEWAY_WALLET_EVM_TESTNET_ADDRESS;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -335,7 +346,8 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
     expectedBlockNumber: bigint;
     expectedBlockHash: `0x${string}`;
     programKey: `0x${string}`;
-    ownerWallet: `0x${string}`;
+    platformAdminWallet: `0x${string}`;
+    ownerWallet?: `0x${string}`;
     refundUnlockAt: bigint;
     withdrawRecipient: `0x${string}`;
   }): Promise<void> {
@@ -361,14 +373,40 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
           data: log.data,
           topics: [...log.topics],
         });
+        const args = decoded.args as typeof decoded.args & {
+          programOwner?: `0x${string}`;
+          adminController?: `0x${string}`;
+          platformAdmin?: `0x${string}`;
+        };
+        const expectedAdmin = input.platformAdminWallet ?? input.ownerWallet!;
         initializedEventVerified =
-          equalHex(decoded.args.programKey, input.programKey) &&
-          equalHex(decoded.args.owner, input.ownerWallet) &&
-          equalHex(decoded.args.token, CANONICAL_USDC) &&
-          decoded.args.refundUnlockAt === input.refundUnlockAt &&
-          equalHex(decoded.args.withdrawRecipient, input.withdrawRecipient);
+          equalHex(args.programKey, input.programKey) &&
+          equalHex(args.programOwner ?? input.ownerWallet!, input.ownerWallet ?? args.programOwner!) &&
+          equalHex(args.adminController ?? args.platformAdmin!, expectedAdmin) &&
+          equalHex(args.token, CANONICAL_USDC) &&
+          args.refundUnlockAt === input.refundUnlockAt &&
+          equalHex(args.withdrawRecipient, input.withdrawRecipient);
       } catch {
-        // Ignore unrelated contract logs.
+        // Accept receipts from the pre-controller 1.1 deployment while old
+        // records are being rolled forward. New deployments must satisfy the
+        // programOwner/adminController event above.
+        try {
+          const legacy = decodeEventLog({
+            abi: LEGACY_ESCROW_INITIALIZED_ABI,
+            eventName: 'EscrowInitialized',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          const args = legacy.args;
+          initializedEventVerified =
+            equalHex(args.programKey, input.programKey) &&
+            equalHex(args.platformAdmin, input.platformAdminWallet ?? input.ownerWallet) &&
+            equalHex(args.token, CANONICAL_USDC) &&
+            args.refundUnlockAt === input.refundUnlockAt &&
+            equalHex(args.withdrawRecipient, input.withdrawRecipient);
+        } catch {
+          // Ignore unrelated contract logs.
+        }
       }
     }
     if (!initializedEventVerified) {
@@ -391,27 +429,88 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
         abi: ESCROW_ABI,
         functionName,
       });
-    const [programKey, owner, token, refundUnlockAt, withdrawRecipient] = await Promise.all([
+    const [programKey, programOwner, adminController, token, refundUnlockAt, withdrawRecipient] = await Promise.all([
       read('programKey'),
-      read('owner'),
+      read('programOwner'),
+      read('adminController'),
       read('token'),
       read('refundUnlockAt'),
       read('withdrawRecipient'),
     ]);
+    const legacyPlatformAdmin =
+      typeof programOwner !== 'string' || typeof adminController !== 'string'
+        ? await read('platformAdmin')
+        : undefined;
+    const verifiedProgramOwner =
+      typeof programOwner === 'string' ? programOwner : (input.ownerWallet ?? withdrawRecipient);
+    const verifiedAdminController =
+      typeof adminController === 'string' ? adminController : legacyPlatformAdmin;
     if (
       typeof programKey !== 'string' ||
-      typeof owner !== 'string' ||
+      typeof verifiedProgramOwner !== 'string' ||
+      typeof verifiedAdminController !== 'string' ||
       typeof token !== 'string' ||
       typeof refundUnlockAt !== 'bigint' ||
       typeof withdrawRecipient !== 'string' ||
       !equalHex(programKey, input.programKey) ||
-      !equalHex(owner, input.ownerWallet) ||
+      !equalHex(verifiedProgramOwner, input.ownerWallet ?? verifiedProgramOwner) ||
+      !equalHex(verifiedAdminController, input.platformAdminWallet ?? input.ownerWallet!) ||
       !equalHex(token, CANONICAL_USDC) ||
       refundUnlockAt !== input.refundUnlockAt ||
       !equalHex(withdrawRecipient, input.withdrawRecipient)
     ) {
       throw new EscrowProviderError('escrow_immutable_mismatch', false);
     }
+  }
+
+  public async verifyDeploymentFeePayment(input: {
+    transactionHash: `0x${string}`;
+    payerAddress: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    tokenAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    chainId: number;
+  }): Promise<{ blockNumber: bigint; blockHash: `0x${string}`; logIndex: number }> {
+    if (input.chainId !== ARC_CHAIN_ID) throw new EscrowProviderError('deployment_fee_chain_mismatch', false);
+    await this.assertArcChain();
+    const receipt = await this.client.getTransactionReceipt({ hash: input.transactionHash });
+    await this.assertCommittedReceipt(receipt);
+    const matches: { logIndex: number; blockNumber: bigint; blockHash: `0x${string}` }[] = [];
+    let feeEventMatches = 0;
+    for (const log of receipt.logs) {
+      if (equalHex(log.address, input.recipientAddress)) {
+        try {
+          const decoded = decodeEventLog({
+            abi: BOUNTY_ESCROW_ADMIN_ABI,
+            eventName: 'ProgramFeePaid',
+            data: log.data,
+            topics: [...log.topics],
+          });
+          if (equalHex(decoded.args.payer, input.payerAddress) && decoded.args.amount === input.amountBaseUnits) {
+            feeEventMatches += 1;
+          }
+        } catch {
+          // Ignore unrelated admin-controller logs.
+        }
+      }
+      if (!equalHex(log.address, input.tokenAddress) || log.logIndex === null) continue;
+      try {
+        const decoded = decodeEventLog({ abi: ERC20_ABI, eventName: 'Transfer', data: log.data, topics: [...log.topics] });
+        if (
+          equalHex(decoded.args.from, input.payerAddress) &&
+          equalHex(decoded.args.to, input.recipientAddress) &&
+          decoded.args.value === input.amountBaseUnits
+        ) {
+          matches.push({ logIndex: log.logIndex, blockNumber: receipt.blockNumber, blockHash: receipt.blockHash });
+        }
+      } catch {
+        // Ignore unrelated logs.
+      }
+    }
+    if (matches.length !== 1 || feeEventMatches !== 1) {
+      throw new EscrowProviderError('deployment_fee_payment_not_found', false);
+    }
+    return matches[0]!;
   }
 
   public async verifyFundingDestination(input: {

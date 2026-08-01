@@ -27,6 +27,8 @@ function config(enabled = true) {
           CIRCLE_API_KEY: 'circle-api-key',
           CIRCLE_ENTITY_SECRET: 'circle-entity-secret',
           CIRCLE_DEPLOYMENT_WALLET_ID: WALLET_ID,
+          DEPLOYMENT_FEE_RECIPIENT_ADDRESS: DEPLOYER,
+          DEPLOYMENT_FEE_AMOUNT_BASE_UNITS: '1000000',
           CIRCLE_GATEWAY_WEBHOOKS_ENABLED: 'true',
           CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS: WALLET_ID,
         }
@@ -107,7 +109,7 @@ const DEPLOY_INPUT = {
   idempotencyKey: '31000000-0000-4000-8000-000000000010',
   programId: '31000000-0000-4000-8000-000000000011',
   programKey: `0x${'3'.repeat(64)}` as const,
-  ownerWallet: `0x${'c'.repeat(40)}` as const,
+  platformAdminWallet: `0x${'c'.repeat(40)}` as const,
   tokenAddress: '0x3600000000000000000000000000000000000000' as const,
   refundUnlockAt: 2_000_000_000n,
   withdrawRecipient: `0x${'d'.repeat(40)}` as const,
@@ -147,7 +149,7 @@ describe('Circle Contracts adapter', () => {
         bytecode: DEPLOY_INPUT.artifact.bytecode,
         constructorParameters: [
           DEPLOY_INPUT.programKey,
-          DEPLOY_INPUT.ownerWallet,
+          DEPLOY_INPUT.platformAdminWallet,
           DEPLOY_INPUT.tokenAddress,
           DEPLOY_INPUT.refundUnlockAt.toString(),
           DEPLOY_INPUT.withdrawRecipient,

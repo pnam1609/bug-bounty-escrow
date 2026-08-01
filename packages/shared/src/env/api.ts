@@ -35,6 +35,10 @@ const positiveIntegerSchema = z.union([
   z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   positiveIntegerStringSchema,
 ]);
+const nonNegativeIntegerSchema = z.union([
+  z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)),
+]);
 
 const portSchema = positiveIntegerSchema.pipe(z.number().max(65_535));
 const durationMillisecondsSchema = positiveIntegerSchema.pipe(z.number().max(600_000));
@@ -91,6 +95,17 @@ export const apiEnvironmentSchema = z
     CIRCLE_API_KEY: secretValueSchema.optional(),
     CIRCLE_ENTITY_SECRET: secretValueSchema.optional(),
     CIRCLE_DEPLOYMENT_WALLET_ID: z.string().uuid().optional(),
+    /** Canonical BountyEscrowAdmin controller. Every program escrow delegates
+     * support operations to this contract; it must never be used as a program
+     * withdrawal recipient. */
+    BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS: evmAddressSchema.optional(),
+    PLATFORM_FEE_TOKEN_ADDRESS: evmAddressSchema.default('0x3600000000000000000000000000000000000000'),
+    PLATFORM_FEE_CHAIN_ID: positiveIntegerSchema.default(5_042_002),
+    PLATFORM_FEE_AMOUNT_BASE_UNITS: nonNegativeIntegerSchema.default(0),
+    DEPLOYMENT_FEE_RECIPIENT_ADDRESS: evmAddressSchema.optional(),
+    DEPLOYMENT_FEE_TOKEN_ADDRESS: evmAddressSchema.default('0x3600000000000000000000000000000000000000'),
+    DEPLOYMENT_FEE_CHAIN_ID: positiveIntegerSchema.default(5_042_002),
+    DEPLOYMENT_FEE_AMOUNT_BASE_UNITS: nonNegativeIntegerSchema.default(0),
     CIRCLE_API_BASE_URL: httpUrlSchema.default('https://api.circle.com'),
     CIRCLE_REQUEST_TIMEOUT_MS: durationMillisecondsSchema.default(15_000),
     CIRCLE_POLL_INTERVAL_MS: durationMillisecondsSchema.default(2_000),
@@ -168,6 +183,64 @@ export const apiEnvironmentSchema = z
           code: 'custom',
           path: ['ARC_CHAIN_ID'],
           message: 'Circle escrow deployment is locked to Arc Testnet chain ID 5042002',
+        });
+      }
+      if (environment.NODE_ENV === 'production' && environment.BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS'],
+          message: 'BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS is required when Circle escrow deployment is enabled',
+        });
+      }
+      if (environment.NODE_ENV === 'production' && environment.PLATFORM_FEE_CHAIN_ID !== 5_042_002) {
+        context.addIssue({
+          code: 'custom',
+          path: ['PLATFORM_FEE_CHAIN_ID'],
+          message: 'Platform fee payments are locked to Arc Testnet chain ID 5042002',
+        });
+      }
+      if (environment.NODE_ENV === 'production' && environment.PLATFORM_FEE_TOKEN_ADDRESS.toLowerCase() !== '0x3600000000000000000000000000000000000000') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PLATFORM_FEE_TOKEN_ADDRESS'],
+          message: 'Platform fee payments are locked to canonical Arc Testnet USDC',
+        });
+      }
+      if (environment.NODE_ENV === 'production' && environment.PLATFORM_FEE_AMOUNT_BASE_UNITS <= 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['PLATFORM_FEE_AMOUNT_BASE_UNITS'],
+          message: 'PLATFORM_FEE_AMOUNT_BASE_UNITS must be positive when Circle escrow deployment is enabled',
+        });
+      }
+      if (environment.NODE_ENV === 'production' &&
+          environment.BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS === undefined &&
+          environment.DEPLOYMENT_FEE_RECIPIENT_ADDRESS === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['DEPLOYMENT_FEE_RECIPIENT_ADDRESS'],
+          message: 'DEPLOYMENT_FEE_RECIPIENT_ADDRESS is required when Circle escrow deployment is enabled',
+        });
+      }
+      if (environment.NODE_ENV !== 'production' && environment.DEPLOYMENT_FEE_CHAIN_ID !== 5_042_002) {
+        context.addIssue({
+          code: 'custom',
+          path: ['DEPLOYMENT_FEE_CHAIN_ID'],
+          message: 'Deployment fee payments are locked to Arc Testnet chain ID 5042002',
+        });
+      }
+      if (environment.NODE_ENV !== 'production' && environment.DEPLOYMENT_FEE_TOKEN_ADDRESS.toLowerCase() !== '0x3600000000000000000000000000000000000000') {
+        context.addIssue({
+          code: 'custom',
+          path: ['DEPLOYMENT_FEE_TOKEN_ADDRESS'],
+          message: 'Deployment fee payments are locked to canonical Arc Testnet USDC',
+        });
+      }
+      if (environment.NODE_ENV !== 'production' && environment.DEPLOYMENT_FEE_AMOUNT_BASE_UNITS <= 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['DEPLOYMENT_FEE_AMOUNT_BASE_UNITS'],
+          message: 'DEPLOYMENT_FEE_AMOUNT_BASE_UNITS must be positive when Circle escrow deployment is enabled',
         });
       }
       if (environment.USDC_ADDRESS.toLowerCase() !== '0x3600000000000000000000000000000000000000') {

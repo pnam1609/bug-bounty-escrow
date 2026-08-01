@@ -152,7 +152,7 @@ export function StepRewards({
         className="flex flex-col gap-md rounded-md border border-border bg-surface-raised p-lg"
         key={tier.rowId}
       >
-        <div className="flex flex-wrap items-end gap-md">
+        <div className="flex flex-wrap items-start gap-md">
           <Field className="w-44" error={severityError} htmlFor={severityId} label="Severity">
             <Select
               onValueChange={(value) => patchTier(tier.rowId, { severity: value as Severity })}
@@ -264,7 +264,7 @@ export function StepRewards({
           {/* CP-03: a `trash-2` icon button, never a `Remove` text action. The name is screen
               reader only, so it carries the row's severity to tell the rows apart. */}
           <DeleteRowButton
-            className="mb-xs"
+            className="self-end"
             label={`Delete ${SEVERITY_LABELS[tier.severity]} reward tier`}
             onClick={() =>
               update({

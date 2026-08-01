@@ -1,33 +1,34 @@
 'use client';
 
 import {
+  createDeploymentFeeQuoteRequestSchema,
   createFundingIntentRequestSchema,
   attachSourceDepositRequestSchema,
   attachFundingDestinationRequestSchema,
   attachFundingRecoveryTelemetryRequestSchema,
   createSourceDepositRequestSchema,
-  createWithdrawalIntentRequestSchema,
-  createEscrowWalletChallengeRequestSchema,
   deployEscrowWithCircleRequestSchema,
-  escrowWalletChallengeResponseSchema,
+  deploymentFeeQuoteResponseSchema,
   escrowDeploymentResponseSchema,
   fundingConfirmationArtifactResponseSchema,
   fundingDestinationAttemptRequestSchema,
   fundingIntentResponseSchema,
   gatewayFundingReadinessResponseSchema,
   observeFundingOperationRequestSchema,
+  observeDeploymentFeePaymentRequestSchema,
   observeSourceDepositRequestSchema,
   refreshFundingQuoteRequestSchema,
   releaseRejectedSendAttemptRequestSchema,
   walletBoundaryClaimRequestSchema,
   bridgeDeliveryRetryClaimRequestSchema,
-  observeWithdrawalRequestSchema,
   programResponseSchema,
   withdrawalIntentResponseSchema,
   type FundingIntent as ApiFundingIntent,
   type FundingConfirmationArtifact,
   type GatewayFundingReadiness,
   type Program,
+  type DeploymentFeeQuote,
+  type EscrowDeployment,
   type WithdrawalIntent,
 } from '@bug-bounty-escrow/shared';
 import {
@@ -39,14 +40,13 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
-  Input,
   Separator,
   StatusBadge,
   Stepper,
 } from '@bug-bounty-escrow/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, LoaderCircle } from 'lucide-react';
+import { encodeAbiParameters, encodeFunctionData, keccak256, stringToHex } from 'viem';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -57,7 +57,6 @@ import {
   CircleBridgeIncompleteError,
   CircleUnifiedBalanceManualRecoveryError,
   connectCircleWallet,
-  signEscrowWalletChallenge,
   type CircleWalletSession,
 } from './circle-funding-executor';
 import { GuidancePanel, WorkspaceHeading } from './owner-workspace';
@@ -107,13 +106,6 @@ import {
   FundingPending,
   type SourceDepositStatus,
 } from './program-funding-views';
-import {
-  assertWithdrawalRecoveryStorage,
-  clearPendingWithdrawalHash,
-  persistAndObserveReturnedWithdrawalHash,
-  readPendingWithdrawalHash,
-  withdrawalContinuationAction,
-} from './program-withdrawal-flow';
 import { CREATE_PROGRAM_STEPS } from './program-wizard';
 import { formatUsdc, shortenAddress } from './program-draft';
 import { buildProgramReadiness, type ProgramReadinessItem } from './program-readiness-model';
@@ -121,6 +113,65 @@ import { FormCard, StepLayout, SummaryRow, WizardShell } from './wizard-parts';
 import { apiRequest, ApiClientError } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { useAuth } from '@/providers/auth-provider';
+
+const ERC20_APPROVE_ABI = [
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
+const BOUNTY_ESCROW_ADMIN_PAY_FEE_ABI = [
+  {
+    type: 'function',
+    name: 'payProgramFee',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'programKey', type: 'bytes32' }],
+    outputs: [],
+  },
+] as const;
+
+function canonicalProgramKey(programId: string): `0x${string}` {
+  const uuidBytes = `0x${programId.replaceAll('-', '')}` as `0x${string}`;
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'bytes32' }, { type: 'uint256' }, { type: 'bytes16' }],
+      [keccak256(stringToHex('bountyescrow.xyz/BountyEscrow/v1')), 5_042_002n, uuidBytes],
+    ),
+  );
+}
+
+async function waitForWalletReceipt(
+  provider: { request(args: { method: string; params?: unknown[] }): Promise<unknown> },
+  transactionHash: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const receipt = await provider.request({
+      method: 'eth_getTransactionReceipt',
+      params: [transactionHash],
+    });
+    if (receipt !== null && typeof receipt === 'object') {
+      if ((receipt as { status?: unknown }).status === '0x0') {
+        throw new Error('The deployment-fee approval transaction reverted.');
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error('Timed out waiting for the deployment-fee approval transaction.');
+}
+
+function deploymentFeeStatusLabel(status: DeploymentFeeQuote['status']): string {
+  if (status === 'quoted') return 'Awaiting payment';
+  if (status === 'paid') return 'Paid';
+  if (status === 'waived') return 'Waived';
+  return 'Expired';
+}
 
 function fundingPhaseFromApi(status: ApiFundingIntent['status']): FundingOperationPhase {
   if (status === 'failed' || status === 'cancelled') return 'sync_failed';
@@ -354,21 +405,6 @@ function sourceDepositStatusFromApi(
   return 'not_started';
 }
 
-function withdrawalActionLabel(intent: WithdrawalIntent | undefined): string {
-  if (intent === undefined) return 'Check remaining funds';
-  if (intent.status === 'ready_to_close') return 'Sign close transaction';
-  if (intent.status === 'close_submission_uncertain') return 'Attach close transaction';
-  if (intent.status === 'close_submitted') return 'Verify program close';
-  if (intent.status === 'ready_to_withdraw') return 'Sign withdrawal';
-  if (intent.status === 'withdraw_submission_uncertain') return 'Attach withdrawal transaction';
-  if (intent.status === 'withdraw_submitted' || intent.status === 'verifying') {
-    return 'Verify withdrawal';
-  }
-  if (intent.status === 'complete') return 'Check for late funds';
-  if (intent.status === 'failed') return 'Start a new withdrawal';
-  return 'Withdrawal needs support';
-}
-
 class DeploymentSupportRequiredError extends Error {
   constructor() {
     super(
@@ -379,7 +415,8 @@ class DeploymentSupportRequiredError extends Error {
 }
 
 function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
-  const Icon = item.complete ? CheckCircle2 : Circle;
+  const deploying = item.status.toLowerCase() === 'deploying';
+  const Icon = deploying ? LoaderCircle : item.complete ? CheckCircle2 : Circle;
 
   return (
     <li
@@ -388,7 +425,9 @@ function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
     >
       <Icon
         aria-hidden="true"
-        className={`size-5 shrink-0 ${item.complete ? 'text-escrow' : 'text-text-disabled'}`}
+        className={`size-5 shrink-0 ${
+          deploying ? 'animate-spin text-escrow' : item.complete ? 'text-escrow' : 'text-text-disabled'
+        }`}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-xs sm:flex-row sm:items-start sm:justify-between sm:gap-lg">
         <span className="flex min-w-0 flex-col">
@@ -397,7 +436,7 @@ function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
         </span>
         <span
           className={`shrink-0 text-label-sm font-semibold uppercase ${
-            item.complete ? 'text-escrow' : 'text-medium'
+            deploying ? 'text-escrow' : item.complete ? 'text-escrow' : 'text-medium'
           }`}
         >
           {item.status}
@@ -446,6 +485,11 @@ export function ProgramLifecycle({
 
   const [view, setView] = useState<'readiness' | 'fund'>('readiness');
   const [deployOpen, setDeployOpen] = useState(false);
+  const [deploymentFeeQuote, setDeploymentFeeQuote] = useState<DeploymentFeeQuote>();
+  const [deploymentFeePaymentHash, setDeploymentFeePaymentHash] = useState<string>();
+  const [deploymentFeeLoading, setDeploymentFeeLoading] = useState(false);
+  const [deploymentFeeError, setDeploymentFeeError] = useState<string>();
+  const [deploymentStatus, setDeploymentStatus] = useState<EscrowDeployment['status']>();
   const [grossAmount, setGrossAmount] = useState('');
   const [sources, setSources] = useState<readonly FundingSource[]>([
     { rowId: 'source-1', network: 'Arc_Testnet', amount: '' },
@@ -472,10 +516,6 @@ export function ProgramLifecycle({
   const bridgeDeliveryRetryClaimTokens = useRef<Record<string, string>>({});
   const sourceWalletClaimTokens = useRef<Record<string, string>>({});
   const volatileSourceDepositHashes = useRef<Record<string, string>>({});
-  const withdrawalIdempotencyKey = useRef<string | undefined>(undefined);
-  const withdrawalReplacementKey = useRef<
-    { failedIntentId: string; idempotencyKey: string } | undefined
-  >(undefined);
   const [depositStatuses, setDepositStatuses] = useState<
     Readonly<Record<string, SourceDepositStatus>>
   >({});
@@ -490,16 +530,91 @@ export function ProgramLifecycle({
   const [fundingConfirmation, setFundingConfirmation] = useState<FundingConfirmationArtifact>();
   const [fundingConfirmationError, setFundingConfirmationError] = useState<string>();
   const [withdrawalIntent, setWithdrawalIntent] = useState<WithdrawalIntent>();
-  const [withdrawalWorking, setWithdrawalWorking] = useState(false);
-  const [withdrawalError, setWithdrawalError] = useState<string>();
-  const [withdrawalRecoveryHash, setWithdrawalRecoveryHash] = useState('');
-  const [volatileWithdrawalHashes, setVolatileWithdrawalHashes] = useState<
-    Readonly<Record<'close' | 'withdraw', string | undefined>>
-  >({ close: undefined, withdraw: undefined });
   const [formError, setFormError] = useState<Record<string, string>>({});
 
   const chainLabel = 'Arc Testnet';
   const deployed = program.contractAddress !== undefined;
+
+  useEffect(() => {
+    if (session?.access_token === undefined || deployed) return;
+    let cancelled = false;
+    setDeploymentFeeLoading(true);
+    void apiRequest(
+      `/api/programs/${program.id}/escrow-deployment-fees/current`,
+      deploymentFeeQuoteResponseSchema,
+      { token: session.access_token },
+    )
+      .then((response) => {
+        if (!cancelled) {
+          setDeploymentFeeQuote(response.data);
+          setDeploymentFeeError(undefined);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled && !(error instanceof ApiClientError && error.status === 404)) {
+          setDeploymentFeeError(
+            error instanceof Error ? error.message : 'Deployment fee status could not be loaded.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDeploymentFeeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deployed, program.id, session?.access_token]);
+
+  // CP-10 is durable: if Circle accepted the operation but Arc verification is still pending,
+  // keep the page in DEPLOYING and resume from the server record after reloads.
+  useEffect(() => {
+    if (session?.access_token === undefined || deployed) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const response = await apiRequest(
+          `/api/programs/${program.id}/escrow-deployments/current`,
+          escrowDeploymentResponseSchema,
+          { token: session.access_token },
+        );
+        if (cancelled) return;
+        const current = response.data;
+        if (['accepted', 'pending', 'verifying'].includes(current.status)) {
+          setDeploymentStatus(current.status);
+          timer = globalThis.setTimeout(() => void poll(), 2_000);
+          return;
+        }
+        if (current.status === 'confirmed') {
+          const saved = await apiRequest(
+            `/api/owner/programs/${program.id}`,
+            programResponseSchema,
+            { token: session.access_token },
+          );
+          if (!cancelled) {
+            setDeploymentStatus(current.status);
+            await cacheProgram(saved.data);
+            setView(Number(saved.data.totalPool) > 0 ? 'readiness' : 'fund');
+            setDeployOpen(false);
+          }
+          return;
+        }
+        if (!cancelled) setDeploymentStatus(current.status);
+      } catch (error: unknown) {
+        // A missing deployment is the normal pre-deploy state. Other errors are retried while
+        // the local status remains unchanged so a transient API failure cannot create a second
+        // Circle operation.
+        if (!cancelled && !(error instanceof ApiClientError && error.status === 404)) {
+          timer = globalThis.setTimeout(() => void poll(), 2_000);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+    };
+  }, [deployed, deploymentStatus, program.id, session?.access_token]);
 
   useEffect(() => {
     if (fundingReadiness === undefined) return;
@@ -614,11 +729,9 @@ export function ProgramLifecycle({
         if (!cancelled) setWithdrawalIntent(response.data);
       })
       .catch((error: unknown) => {
-        if (!cancelled && !(error instanceof ApiClientError && error.status === 404)) {
-          setWithdrawalError(
-            error instanceof Error ? error.message : 'Withdrawal state could not be restored.',
-          );
-        }
+        // Withdrawal execution is platform-admin managed; an unavailable optional projection
+        // must not turn the owner readiness page into an error state.
+        void error;
       });
     return () => {
       cancelled = true;
@@ -633,69 +746,190 @@ export function ProgramLifecycle({
     return client.invalidateQueries({ queryKey: ['programs'] });
   }
 
-  const deployMutation = useMutation({
-    mutationFn: async (): Promise<Program> => {
-      if (walletSession === undefined) {
-        throw new Error('Connect the owner wallet before deploying the escrow.');
-      }
-      if (program.deadline === undefined) {
-        throw new Error('Set a program deadline before deploying the escrow.');
-      }
-      const challengeBody = createEscrowWalletChallengeRequestSchema.parse({
-        ownerWallet: walletSession.address,
-        withdrawRecipient: walletSession.address,
+  const deploymentFeeQuoteMutation = useMutation({
+    mutationFn: async (): Promise<DeploymentFeeQuote> => {
+      const body = createDeploymentFeeQuoteRequestSchema.parse({
+        idempotencyKey: globalThis.crypto.randomUUID(),
       });
-      const challenge = await apiRequest(
-        `/api/programs/${program.id}/escrow-wallet-challenges`,
-        escrowWalletChallengeResponseSchema,
+      const response = await apiRequest(
+        `/api/programs/${program.id}/escrow-deployment-fees/quote`,
+        deploymentFeeQuoteResponseSchema,
+        { method: 'POST', token: session?.access_token, body },
+      );
+      return response.data;
+    },
+    onSuccess: (quote) => {
+      setDeploymentFeeQuote(quote);
+      setDeploymentFeePaymentHash(undefined);
+      setDeploymentFeeError(undefined);
+    },
+    onError: (error: unknown) => {
+      setDeploymentFeeError(error instanceof Error ? error.message : 'Fee quote unavailable.');
+    },
+  });
+
+  const deploymentFeePaymentMutation = useMutation({
+    mutationFn: async (): Promise<DeploymentFeeQuote> => {
+      if (walletSession === undefined) {
+        throw new Error('Connect the owner wallet before paying the deployment fee.');
+      }
+      const quote = deploymentFeeQuote;
+      if (quote === undefined) throw new Error('Request a deployment fee quote first.');
+      if (deploymentFeePaymentHash !== undefined) {
+        const paymentBody = observeDeploymentFeePaymentRequestSchema.parse({
+          quoteId: quote.id,
+          payerAddress: walletSession.address,
+          transactionHash: deploymentFeePaymentHash,
+        });
+        const response = await apiRequest(
+          `/api/programs/${program.id}/escrow-deployment-fees/payment`,
+          deploymentFeeQuoteResponseSchema,
+          { method: 'POST', token: session?.access_token, body: paymentBody },
+        );
+        return response.data;
+      }
+      const amount = parseUsdcBaseUnits(quote.amount);
+      if (amount === undefined || amount <= 0n)
+        throw new Error('The server returned an invalid deployment fee.');
+      const chainHex = `0x${quote.chainId.toString(16)}`;
+      const chainId = await walletSession.wallet.provider.request({
+        method: 'eth_chainId',
+        params: undefined,
+      });
+      if (typeof chainId !== 'string' || Number.parseInt(chainId, 16) !== quote.chainId) {
+        await walletSession.wallet.provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: chainHex }],
+        });
+      }
+      const approvalHash = await walletSession.wallet.provider.request({
+        method: 'eth_sendTransaction',
+        params: [
+          {
+            from: walletSession.address as `0x${string}`,
+            to: quote.tokenAddress as `0x${string}`,
+            data: encodeFunctionData({
+              abi: ERC20_APPROVE_ABI,
+              functionName: 'approve',
+              args: [quote.recipientAddress as `0x${string}`, amount],
+            }),
+            value: '0x0',
+          },
+        ],
+      });
+      if (typeof approvalHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(approvalHash)) {
+        throw new Error('The wallet did not return a valid deployment-fee approval hash.');
+      }
+      await waitForWalletReceipt(
+        walletSession.wallet.provider as unknown as {
+          request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+        },
+        approvalHash,
+      );
+      const transactionHash = await walletSession.wallet.provider.request({
+        method: 'eth_sendTransaction',
+        params: [
+          {
+            from: walletSession.address as `0x${string}`,
+            to: quote.recipientAddress as `0x${string}`,
+            data: encodeFunctionData({
+              abi: BOUNTY_ESCROW_ADMIN_PAY_FEE_ABI,
+              functionName: 'payProgramFee',
+              args: [canonicalProgramKey(program.id)],
+            }),
+            value: '0x0',
+          },
+        ],
+      });
+      if (typeof transactionHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(transactionHash)) {
+        throw new Error('The wallet did not return a valid deployment fee transaction hash.');
+      }
+      await waitForWalletReceipt(
+        walletSession.wallet.provider as unknown as {
+          request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+        },
+        transactionHash,
+      );
+      setDeploymentFeePaymentHash(transactionHash);
+      const paymentBody = observeDeploymentFeePaymentRequestSchema.parse({
+        quoteId: quote.id,
+        payerAddress: walletSession.address,
+        transactionHash,
+      });
+      const response = await apiRequest(
+        `/api/programs/${program.id}/escrow-deployment-fees/payment`,
+        deploymentFeeQuoteResponseSchema,
         {
           method: 'POST',
           token: session?.access_token,
-          body: challengeBody,
+          body: paymentBody,
         },
       );
-      const walletSignature = await signEscrowWalletChallenge(
-        walletSession.wallet.provider,
-        walletSession.address,
-        challenge.data.message,
+      return response.data;
+    },
+    onSuccess: (quote) => {
+      setDeploymentFeeQuote(quote);
+      setDeploymentFeePaymentHash(undefined);
+      setDeploymentFeeError(undefined);
+    },
+    onError: (error: unknown) => {
+      setDeploymentFeeError(
+        error instanceof Error ? error.message : 'Fee payment could not be verified.',
       );
-      const body = deployEscrowWithCircleRequestSchema.parse({
-        ownerWallet: walletSession.address,
-        withdrawRecipient: walletSession.address,
-        refundUnlockAt: program.deadline,
-        artifactVersion: '1.1.0',
-        walletChallengeId: challenge.data.challengeId,
-        walletSignature,
-      });
+    },
+  });
+
+  const deployMutation = useMutation({
+    mutationFn: async (): Promise<EscrowDeployment> => {
+      if (program.deadline === undefined) {
+        throw new Error('Set a program deadline before deploying the escrow.');
+      }
+      if (
+        deploymentFeeQuote === undefined ||
+        !['paid', 'waived'].includes(deploymentFeeQuote.status)
+      ) {
+        throw new Error('Pay the deployment fee before deploying the escrow.');
+      }
+      const body = deployEscrowWithCircleRequestSchema.parse({});
       const deployment = await apiRequest(
         `/api/programs/${program.id}/escrow-deployments`,
         escrowDeploymentResponseSchema,
         { method: 'POST', token: session?.access_token, body },
       );
+      setDeploymentStatus(deployment.data.status);
       if (deployment.data.status === 'failed' || deployment.data.status === 'reverted') {
         throw new DeploymentSupportRequiredError();
       }
-      if (deployment.data.status !== 'confirmed') {
-        throw new Error(
-          'Circle accepted the deployment, but Arc verification is not complete. Resume the same deployment instead of creating another one.',
-        );
+      return deployment.data;
+    },
+    onSuccess: async (deployment) => {
+      if (deployment.status !== 'confirmed') {
+        // The polling effect above owns the transition to confirmed. Keep CP-10 visible and
+        // disable duplicate clicks while Circle/Arc finalization is in progress.
+        setDeployOpen(true);
+        return;
       }
       const response = await apiRequest(
         `/api/owner/programs/${program.id}`,
         programResponseSchema,
         { token: session?.access_token },
       );
-      return response.data;
-    },
-    onSuccess: async (saved) => {
       setDeployOpen(false);
-      await cacheProgram(saved);
+      await cacheProgram(response.data);
       // CP-10 → CP-11 happens automatically once the contract is ready.
-      setView(Number(saved.totalPool) > 0 ? 'readiness' : 'fund');
+      setView(Number(response.data.totalPool) > 0 ? 'readiness' : 'fund');
     },
   });
 
-  const lifecyclePending = deployMutation.isPending || fundingWorking || withdrawalWorking;
+  const lifecyclePending =
+    deployMutation.isPending ||
+    ['accepted', 'pending', 'verifying'].includes(deploymentStatus ?? '') ||
+    deploymentFeeQuoteMutation.isPending ||
+    deploymentFeePaymentMutation.isPending ||
+    fundingWorking;
+
+  const deploymentFeeReady =
+    deploymentFeeQuote?.status === 'paid' || deploymentFeeQuote?.status === 'waived';
 
   useEffect(() => {
     onBlockingPendingChange(lifecyclePending);
@@ -723,7 +957,16 @@ export function ProgramLifecycle({
     },
   });
 
-  const readiness = buildProgramReadiness(program);
+  const readiness = buildProgramReadiness(program).map((item) =>
+    item.id === 'escrow-contract' &&
+    ['accepted', 'pending', 'verifying'].includes(deploymentStatus ?? '')
+      ? {
+          ...item,
+          detail: 'The platform admin wallet is deploying and verifying the Arc escrow contract',
+          status: 'Deploying',
+        }
+      : item,
+  );
   const collateralReady = readiness.find((item) => item.id === 'funding')?.complete === true;
   const publishingReady = readiness.find((item) => item.id === 'publishing')?.status === 'Ready';
   const currentFundingValidation = validateFundingSelection(grossAmount, sources);
@@ -764,6 +1007,7 @@ export function ProgramLifecycle({
         walletSession !== undefined &&
         walletSession.address.toLowerCase() !== connected.address.toLowerCase()
       ) {
+        setDeploymentFeePaymentHash(undefined);
         setFundingSelection(undefined);
         setFundingResult(undefined);
         setFundingPhase('ready_to_sign');
@@ -2297,242 +2541,11 @@ export function ProgramLifecycle({
     setFundingPhase('ready_to_sign');
   }
 
-  async function createWithdrawalIntent(): Promise<WithdrawalIntent | undefined> {
-    if (walletSession === undefined) {
-      setWithdrawalError('Connect the contract owner wallet first.');
-      return undefined;
-    }
-    withdrawalIdempotencyKey.current ??= globalThis.crypto.randomUUID();
-    const body = createWithdrawalIntentRequestSchema.parse({
-      idempotencyKey: withdrawalIdempotencyKey.current,
-      walletAddress: walletSession.address,
-    });
-    const response = await apiRequest(
-      `/api/programs/${program.id}/withdrawal-intents`,
-      withdrawalIntentResponseSchema,
-      { method: 'POST', token: session?.access_token, body },
-    );
-    setWithdrawalIntent(response.data);
-    return response.data;
-  }
-
-  async function createWithdrawalReplacement(
-    failedIntent: WithdrawalIntent,
-  ): Promise<WithdrawalIntent | undefined> {
-    if (walletSession === undefined) {
-      setWithdrawalError('Connect the contract owner wallet first.');
-      return undefined;
-    }
-    if (withdrawalReplacementKey.current?.failedIntentId !== failedIntent.id) {
-      withdrawalReplacementKey.current = {
-        failedIntentId: failedIntent.id,
-        idempotencyKey: globalThis.crypto.randomUUID(),
-      };
-    }
-    const body = createWithdrawalIntentRequestSchema.parse({
-      idempotencyKey: withdrawalReplacementKey.current.idempotencyKey,
-      walletAddress: walletSession.address,
-    });
-    const response = await apiRequest(
-      `/api/programs/${program.id}/withdrawal-intents/${failedIntent.id}/replacement`,
-      withdrawalIntentResponseSchema,
-      { method: 'POST', token: session?.access_token, body },
-    );
-    setWithdrawalIntent(response.data);
-    return response.data;
-  }
-
-  async function observeWithdrawal(
-    intent: WithdrawalIntent,
-    operation: 'close' | 'withdraw',
-    transactionHash?: string,
-  ): Promise<WithdrawalIntent> {
-    const body = observeWithdrawalRequestSchema.parse({
-      operation,
-      outcome: transactionHash === undefined ? 'submission_uncertain' : 'submitted',
-      ...(transactionHash === undefined ? {} : { transactionHash }),
-    });
-    const response = await apiRequest(
-      `/api/programs/${program.id}/withdrawal-intents/${intent.id}/operations`,
-      withdrawalIntentResponseSchema,
-      { method: 'POST', token: session?.access_token, body },
-    );
-    setWithdrawalIntent(response.data);
-    return response.data;
-  }
-
-  async function reconcileWithdrawal(intent: WithdrawalIntent): Promise<WithdrawalIntent> {
-    const response = await apiRequest(
-      `/api/programs/${program.id}/withdrawal-intents/${intent.id}/reconcile`,
-      withdrawalIntentResponseSchema,
-      { method: 'POST', token: session?.access_token },
-    );
-    setWithdrawalIntent(response.data);
-    await client.invalidateQueries({
-      queryKey: queryKeys.ownerProgram(session?.user.id ?? 'no-session', program.id),
-    });
-    await client.invalidateQueries({ queryKey: ['programs'] });
-    return response.data;
-  }
-
-  async function continueWithdrawal() {
-    if (withdrawalWorking) return;
-    setWithdrawalWorking(true);
-    setWithdrawalError(undefined);
-    let recoveryIntentId = withdrawalIntent?.id;
-    try {
-      let intent = withdrawalIntent;
-      if (intent?.status === 'complete') {
-        withdrawalIdempotencyKey.current = undefined;
-        withdrawalReplacementKey.current = undefined;
-        setWithdrawalIntent(undefined);
-        intent = undefined;
-      } else if (intent?.status === 'failed') {
-        intent = await createWithdrawalReplacement(intent);
-      }
-      intent ??= await createWithdrawalIntent();
-      if (intent === undefined) return;
-      recoveryIntentId = intent.id;
-      if (walletSession === undefined) {
-        setWithdrawalError('Connect the contract owner wallet first.');
-        return;
-      }
-      if (intent.walletAddress.toLowerCase() !== walletSession.address.toLowerCase()) {
-        setWithdrawalError(
-          `This withdrawal is locked to ${shortenAddress(intent.walletAddress)}. Connect that owner wallet.`,
-        );
-        return;
-      }
-      const storage = window.localStorage;
-      let pendingCloseHash =
-        volatileWithdrawalHashes.close ??
-        readPendingWithdrawalHash(storage, program.id, intent.id, 'close');
-      let pendingWithdrawHash =
-        volatileWithdrawalHashes.withdraw ??
-        readPendingWithdrawalHash(storage, program.id, intent.id, 'withdraw');
-      let action = withdrawalContinuationAction(intent, pendingCloseHash, pendingWithdrawHash);
-
-      if (action === 'attach_close' || action === 'attach_withdraw') {
-        const transactionHash = withdrawalRecoveryHash.trim();
-        if (!/^0x[0-9a-fA-F]{64}$/.test(transactionHash)) {
-          setWithdrawalError(
-            'Enter the original transaction hash. This flow will not submit a replacement transaction.',
-          );
-          return;
-        }
-        const operation = action === 'attach_close' ? 'close' : 'withdraw';
-        intent = await observeWithdrawal(intent, operation, transactionHash);
-        setWithdrawalRecoveryHash('');
-        await reconcileWithdrawal(intent);
-        return;
-      }
-
-      if (action === 'sign_close') {
-        assertWithdrawalRecoveryStorage(storage);
-        await walletSession.executor.prepareEscrowOwnerCall(
-          walletSession.wallet.provider,
-          walletSession.address,
-          intent.escrowAddress,
-          'close',
-        );
-        intent = await observeWithdrawal(intent, 'close');
-        pendingCloseHash = await walletSession.executor.closeEscrow(
-          walletSession.wallet.provider,
-          walletSession.address,
-          intent.escrowAddress,
-        );
-        intent = await persistAndObserveReturnedWithdrawalHash({
-          storage,
-          programId: program.id,
-          intentId: intent.id,
-          operation: 'close',
-          transactionHash: pendingCloseHash,
-          observe: (transactionHash) => observeWithdrawal(intent!, 'close', transactionHash),
-          setVolatileHash: (transactionHash) =>
-            setVolatileWithdrawalHashes((current) => ({
-              ...current,
-              close: transactionHash,
-            })),
-        });
-        pendingCloseHash = undefined;
-        action = 'verify_close';
-      }
-      if (action === 'observe_close' && pendingCloseHash !== undefined) {
-        intent = await observeWithdrawal(intent, 'close', pendingCloseHash);
-        clearPendingWithdrawalHash(storage, program.id, intent.id, 'close');
-        action = 'verify_close';
-      }
-      if (action === 'verify_close') {
-        await reconcileWithdrawal(intent);
-        return;
-      }
-      if (action === 'sign_withdraw') {
-        const expectedWithdrawalAmount = parseUsdcBaseUnits(intent.amount);
-        if (expectedWithdrawalAmount === undefined || expectedWithdrawalAmount <= 0n) {
-          throw new Error('The server-verified withdrawal amount is invalid.');
-        }
-        assertWithdrawalRecoveryStorage(storage);
-        await walletSession.executor.prepareEscrowOwnerCall(
-          walletSession.wallet.provider,
-          walletSession.address,
-          intent.escrowAddress,
-          'withdrawRemaining',
-          expectedWithdrawalAmount,
-        );
-        intent = await observeWithdrawal(intent, 'withdraw');
-        pendingWithdrawHash = await walletSession.executor.withdrawRemaining(
-          walletSession.wallet.provider,
-          walletSession.address,
-          intent.escrowAddress,
-          expectedWithdrawalAmount,
-        );
-        intent = await persistAndObserveReturnedWithdrawalHash({
-          storage,
-          programId: program.id,
-          intentId: intent.id,
-          operation: 'withdraw',
-          transactionHash: pendingWithdrawHash,
-          observe: (transactionHash) => observeWithdrawal(intent!, 'withdraw', transactionHash),
-          setVolatileHash: (transactionHash) =>
-            setVolatileWithdrawalHashes((current) => ({
-              ...current,
-              withdraw: transactionHash,
-            })),
-        });
-        pendingWithdrawHash = undefined;
-        action = 'verify_withdraw';
-      }
-      if (action === 'observe_withdraw' && pendingWithdrawHash !== undefined) {
-        intent = await observeWithdrawal(intent, 'withdraw', pendingWithdrawHash);
-        clearPendingWithdrawalHash(storage, program.id, intent.id, 'withdraw');
-        action = 'verify_withdraw';
-      }
-      if (action === 'verify_withdraw') {
-        await reconcileWithdrawal(intent);
-      }
-    } catch (error) {
-      if (recoveryIntentId !== undefined) {
-        try {
-          const restored = await apiRequest(
-            `/api/programs/${program.id}/withdrawal-intents/${recoveryIntentId}`,
-            withdrawalIntentResponseSchema,
-            { token: session?.access_token },
-          );
-          setWithdrawalIntent(restored.data);
-        } catch {
-          // Keep the local no-replay state when the durable intent cannot be restored.
-        }
-      }
-      setWithdrawalError(
-        error instanceof Error ? error.message : 'The remaining-funds withdrawal needs attention.',
-      );
-    } finally {
-      setWithdrawalWorking(false);
-    }
-  }
-
-  /* CP-10 — Deploying escrow. Navigation and actions stay locked while the mutation is pending. */
-  if (deployMutation.isPending) {
+  /* CP-10 — Deploying escrow. Navigation and actions stay locked while Circle/Arc is pending. */
+  if (
+    deployMutation.isPending ||
+    ['accepted', 'pending', 'verifying'].includes(deploymentStatus ?? '')
+  ) {
     return (
       <WizardShell>
         <WorkspaceHeading
@@ -2861,22 +2874,15 @@ export function ProgramLifecycle({
 
           {withdrawalAvailable ? (
             <FormCard
-              description="After the refund unlock, the contract owner closes the Arc escrow and withdraws only the unreserved USDC to the immutable recipient."
+              description="After the refund unlock, the platform admin closes the Arc escrow and withdraws only the unreserved USDC to the immutable recipient."
               title="Remaining escrow funds"
             >
-              {withdrawalError === undefined ? null : (
-                <Callout title="Withdrawal needs attention" variant="danger">
-                  {withdrawalError}
-                </Callout>
-              )}
               <div className="flex flex-col">
                 <SummaryRow
-                  label="Contract owner"
+                  label="Platform admin wallet"
                   value={
                     withdrawalIntent === undefined
-                      ? walletSession === undefined
-                        ? 'Connect wallet to verify'
-                        : shortenAddress(walletSession.address)
+                      ? 'Managed by the platform'
                       : shortenAddress(withdrawalIntent.walletAddress)
                   }
                 />
@@ -2901,39 +2907,11 @@ export function ProgramLifecycle({
                   value={withdrawalIntent?.status.replaceAll('_', ' ') ?? 'Not started'}
                 />
               </div>
-              {withdrawalIntent?.status !== 'close_submission_uncertain' &&
-              withdrawalIntent?.status !== 'withdraw_submission_uncertain' ? null : (
-                <Field htmlFor="withdrawal-recovery-hash" label="Original Arc transaction hash">
-                  <Input
-                    id="withdrawal-recovery-hash"
-                    onChange={(event) => setWithdrawalRecoveryHash(event.currentTarget.value)}
-                    placeholder="0x…"
-                    value={withdrawalRecoveryHash}
-                  />
-                </Field>
-              )}
               <Callout variant="warning">
-                Close and withdrawal are separate owner-signed Arc transactions. Once a hash is
-                observed, Continue verifies that same transaction and never submits it again.
+                Closing and withdrawing are privileged platform-admin operations. The backend
+                submits and verifies both Arc transactions; this page never asks the program
+                owner to connect or sign a contract-owner wallet.
               </Callout>
-              <div className="mt-2xl flex flex-wrap items-center justify-end gap-md pt-md">
-                <Button
-                  loading={walletPending}
-                  onClick={() => void connectFundingWallet()}
-                  size="lg"
-                  variant="secondary"
-                >
-                  {walletSession === undefined ? 'Connect owner wallet' : 'Change wallet'}
-                </Button>
-                <Button
-                  disabled={walletSession === undefined}
-                  loading={withdrawalWorking}
-                  onClick={() => void continueWithdrawal()}
-                  size="lg"
-                >
-                  {withdrawalActionLabel(withdrawalIntent)}
-                </Button>
-              </div>
             </FormCard>
           ) : null}
         </StepLayout>
@@ -2978,7 +2956,11 @@ export function ProgramLifecycle({
             </div>
             <p className="text-label-sm uppercase text-text-muted">Next action</p>
             <p className="text-body-sm text-primary">
-              {deployed ? 'Fund the reward pool' : 'Deploy escrow contract'}
+              {deployed
+                ? 'Fund the reward pool'
+                : deploymentFeeReady
+                  ? 'Deploy escrow contract'
+                  : 'Pay deployment fee'}
             </p>
           </GuidancePanel>
         }
@@ -3003,6 +2985,13 @@ export function ProgramLifecycle({
             ))}
           </ul>
 
+          {!deployed && !deploymentFeeReady ? (
+            <Callout className="mt-lg" title="Deployment fee required" variant="warning">
+              Request the server quote and pay the exact USDC amount to the verified platform
+              recipient before escrow deployment can begin.
+            </Callout>
+          ) : null}
+
           <div className="mt-2xl grid grid-cols-1 gap-md pt-md sm:flex sm:flex-wrap sm:items-center sm:justify-end">
             <Button asChild className="w-full sm:w-auto" size="lg" variant="ghost">
               <Link href="/owner/programs">Back to programs</Link>
@@ -3017,7 +3006,7 @@ export function ProgramLifecycle({
             </Button>
             {deployed ? null : (
               <Button className="w-full sm:w-auto" onClick={() => setDeployOpen(true)} size="lg">
-                Deploy escrow
+                {deploymentFeeReady ? 'Deploy escrow' : 'Pay deployment fee'}
               </Button>
             )}
             {deployed ? (
@@ -3034,10 +3023,76 @@ export function ProgramLifecycle({
           <DialogHeader>
             <DialogTitle>Deploy escrow contract</DialogTitle>
             <DialogDescription>
-              Circle deploys the versioned escrow artifact on Arc Testnet. The connected owner
-              wallet becomes both the contract owner and the verified withdrawal recipient.
+              Pay the server-quoted deployment fee from your connected wallet. The backend then
+              deploys the versioned escrow artifact on Arc Testnet using the configured deployment
+              wallet and platform-admin controls.
             </DialogDescription>
           </DialogHeader>
+
+          {deploymentFeeError === undefined ? null : (
+            <Callout title="Deployment fee needs attention" variant="danger">
+              {deploymentFeeError}
+            </Callout>
+          )}
+
+          <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-raised p-lg">
+            <span className="text-label-md text-text-muted">Deployment fee</span>
+            {deploymentFeeLoading || deploymentFeeQuoteMutation.isPending ? (
+              <span className="text-body-sm text-text-muted">Loading a server quote…</span>
+            ) : deploymentFeeQuote === undefined || deploymentFeeQuote.status === 'expired' ? (
+              <>
+                <span className="text-body-sm text-text-muted">
+                  A verified quote is required before deployment.
+                </span>
+                <Button
+                  className="w-fit"
+                  loading={deploymentFeeQuoteMutation.isPending}
+                  onClick={() => deploymentFeeQuoteMutation.mutate()}
+                  size="md"
+                  variant="secondary"
+                >
+                  Get fee quote
+                </Button>
+              </>
+            ) : (
+              <>
+                <SummaryRow label="Amount" value={`${deploymentFeeQuote.amount} USDC`} />
+                <SummaryRow label="Network" value={`Chain ${deploymentFeeQuote.chainId}`} />
+                <SummaryRow
+                  label="Recipient"
+                  value={shortenAddress(deploymentFeeQuote.recipientAddress)}
+                />
+                <SummaryRow
+                  label="Status"
+                  value={
+                    deploymentFeePaymentMutation.isPending
+                      ? 'Payment verifying'
+                      : deploymentFeeStatusLabel(deploymentFeeQuote.status)
+                  }
+                />
+                {deploymentFeeReady ? null : walletSession === undefined ? (
+                  <Button
+                    className="w-fit"
+                    loading={walletPending}
+                    onClick={() => void connectFundingWallet()}
+                    size="md"
+                    variant="secondary"
+                  >
+                    Connect wallet to pay
+                  </Button>
+                ) : (
+                  <Button
+                    className="w-fit"
+                    loading={deploymentFeePaymentMutation.isPending}
+                    onClick={() => deploymentFeePaymentMutation.mutate()}
+                    size="md"
+                  >
+                    Pay deployment fee
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
 
           {deployMutation.isError ? (
             <Callout title="The escrow could not be recorded" variant="danger">
@@ -3049,30 +3104,6 @@ export function ProgramLifecycle({
                   : 'The deployment could not be verified. Retry uses the same immutable parameters.'}
             </Callout>
           ) : null}
-
-          <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-raised p-lg">
-            <span className="text-label-md text-text-muted">Owner wallet</span>
-            <span className="text-label-lg text-text">
-              {walletSession === undefined
-                ? 'Not connected'
-                : `${walletSession.wallet.name} · ${shortenAddress(walletSession.address)}`}
-            </span>
-            {walletError === undefined ? null : (
-              <span className="text-body-sm text-danger">{walletError}</span>
-            )}
-            {formError['wallet'] === undefined ? null : (
-              <span className="text-body-sm text-danger">{formError['wallet']}</span>
-            )}
-            <Button
-              className="w-fit"
-              loading={walletPending}
-              onClick={() => void connectFundingWallet()}
-              size="md"
-              variant="secondary"
-            >
-              {walletSession === undefined ? 'Connect owner wallet' : 'Change wallet'}
-            </Button>
-          </div>
 
           <div className="flex flex-col">
             <SummaryRow label="Network" value={chainLabel} />
@@ -3092,12 +3123,15 @@ export function ProgramLifecycle({
               Cancel
             </Button>
             <Button
-              disabled={deployMutation.error instanceof DeploymentSupportRequiredError}
+              disabled={
+                !deploymentFeeReady ||
+                deployMutation.isPending ||
+                ['accepted', 'pending', 'verifying'].includes(deploymentStatus ?? '') ||
+                deploymentFeePaymentMutation.isPending ||
+                deployMutation.error instanceof DeploymentSupportRequiredError
+              }
               onClick={() => {
                 const next: Record<string, string> = {};
-                if (walletSession === undefined) {
-                  next['wallet'] = 'Connect the owner wallet before deploying.';
-                }
                 if (program.deadline === undefined) {
                   next['refundUnlockAt'] = 'Set a program deadline before deploying.';
                 } else if (Date.parse(program.deadline) <= Date.now()) {
@@ -3112,7 +3146,9 @@ export function ProgramLifecycle({
                 ? 'Support required'
                 : deployMutation.isError
                   ? 'Resume deployment'
-                  : 'Deploy escrow'}
+                  : deploymentFeeReady
+                    ? 'Deploy escrow'
+                    : 'Pay deployment fee first'}
             </Button>
           </DialogFooter>
         </DialogContent>

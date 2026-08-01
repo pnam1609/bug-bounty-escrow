@@ -8,10 +8,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
   Field,
   Input,
   Label,
@@ -29,13 +25,14 @@ import {
   Textarea,
 } from '@bug-bounty-escrow/ui';
 import type { AuthorableAssetType } from '@bug-bounty-escrow/shared';
-import { Ellipsis, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
 
 import {
   ASSET_TYPE_LABELS,
   ASSET_TYPE_TAB_LABELS,
   AUTHORABLE_ASSET_TYPES,
+  contractExplorerHref,
   fieldId,
   nextRowId,
   shortenAddress,
@@ -45,24 +42,28 @@ import {
   type ScopeRow,
 } from './program-draft';
 import { GuidancePanel } from './owner-workspace';
-import { FormCard, InlineAction, StepActions, StepLayout, ValidationSummary } from './wizard-parts';
+import {
+  DeleteRowButton,
+  FormCard,
+  InlineAction,
+  StepActions,
+  StepLayout,
+  ValidationSummary,
+} from './wizard-parts';
 
 const MAX_SCOPES = 50;
-
 function ScopeStatusBadge({ inScope }: { readonly inScope: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-sm rounded-full border bg-surface-raised px-md py-xs text-label-sm font-semibold uppercase ${
-        inScope ? 'border-escrow' : 'border-border'
+      className={`inline-flex w-full items-center gap-sm rounded-full border bg-surface-raised px-md py-xs text-label-sm font-semibold uppercase ${
+        inScope ? 'border-escrow text-escrow' : 'border-error text-error'
       }`}
     >
       <span
         aria-hidden="true"
-        className={`size-sm rounded-full ${inScope ? 'bg-escrow' : 'bg-text-muted'}`}
+        className={`size-sm shrink-0 rounded-full ${inScope ? 'bg-escrow' : 'bg-error'}`}
       />
-      <span className={inScope ? 'text-escrow' : 'text-text-muted'}>
-        {inScope ? 'In scope' : 'Out of scope'}
-      </span>
+      <span>{inScope ? 'In scope' : 'Out of scope'}</span>
     </span>
   );
 }
@@ -161,13 +162,28 @@ export function StepScope({ draft, errors, onBack, onContinue, update }: StepSco
             >
               <ScopeStatusBadge inScope={scope.isInScope} />
               <p className="text-h3 text-text">{scope.assetName}</p>
-              {scope.assetUrl === '' && scope.contractAddress === '' ? null : (
-                <p className="truncate text-body-sm text-primary">
-                  {scope.contractAddress === ''
-                    ? scope.assetUrl
-                    : shortenAddress(scope.contractAddress)}
-                </p>
-              )}
+              {scope.assetUrl === '' && scope.contractAddress === '' ? null :
+                scope.contractAddress === '' ? (
+                  <a
+                    className="truncate text-body-sm text-primary hover:underline"
+                    href={scope.assetUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {scope.assetUrl}
+                  </a>
+                ) : (
+                  <a
+                    aria-label={`Open ${scope.assetName} contract in the Arc explorer`}
+                    className="truncate text-body-sm text-primary hover:underline"
+                    href={contractExplorerHref(scope.contractAddress)}
+                    rel="noreferrer"
+                    target="_blank"
+                    title={scope.contractAddress}
+                  >
+                    {shortenAddress(scope.contractAddress)}
+                  </a>
+                )}
               {scope.description === '' ? null : (
                 <p className="line-clamp-2 text-body-sm text-text-muted">{scope.description}</p>
               )}
@@ -178,25 +194,14 @@ export function StepScope({ draft, errors, onBack, onContinue, update }: StepSco
               )}
               <div className="flex items-center gap-md">
                 <InlineAction onClick={() => openEdit(scope)}>Edit</InlineAction>
-                {/* CP-02: `Edit` sits on the card; `Remove` lives behind the overflow menu. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface-raised text-text-muted transition-colors hover:bg-ambient hover:text-text motion-reduce:transition-none">
-                    <Ellipsis aria-hidden="true" className="size-4" />
-                    <span className="sr-only">{`More actions for ${scope.assetName}`}</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        update({
-                          scopes: draft.scopes.filter((entry) => entry.rowId !== scope.rowId),
-                        })
-                      }
-                      variant="destructive"
-                    >
-                      Remove
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <DeleteRowButton
+                  label={`Delete scope ${scope.assetName}`}
+                  onClick={() =>
+                    update({
+                      scopes: draft.scopes.filter((entry) => entry.rowId !== scope.rowId),
+                    })
+                  }
+                />
               </div>
             </li>
           );

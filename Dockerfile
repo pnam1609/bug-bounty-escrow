@@ -102,6 +102,9 @@ RUN pnpm --filter @bug-bounty-escrow/api deploy --prod --legacy /opt/api
 RUN install -D -m 0444 \
     /workspace/packages/contracts/artifacts/BountyEscrow.v1.json \
     /opt/api/packages/contracts/artifacts/BountyEscrow.v1.json \
+    && install -D -m 0444 \
+    /workspace/packages/contracts/artifacts/BountyEscrowAdmin.v1.json \
+    /opt/api/packages/contracts/artifacts/BountyEscrowAdmin.v1.json \
     && test -s /opt/api/packages/contracts/artifacts/BountyEscrow.v1.json
 
 FROM node:22-bookworm-slim AS api

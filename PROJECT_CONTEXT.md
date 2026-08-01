@@ -9,7 +9,25 @@
 Xây dựng một nền tảng bug bounty dành cho Web3, trong đó:
 
 - Project owner tạo bug bounty program.
-- Owner khóa USDC vào escrow contract trên Arc.
+- A single `BountyEscrowAdmin` contract is deployed once by the platform admin. It collects the
+  per-program platform/deployment fee, registers each program escrow, and provides the admin
+  treasury withdrawal path for fees only. It must never withdraw a program's reward pool.
+- Backend deploys one program-specific `BountyEscrow` contract per program through the
+  `BountyEscrowAdmin` control plane using a server-controlled Circle Developer-Controlled
+  deployment wallet (the operational gas signer). The program escrow stores the verified program
+  owner/funder as its owner authority; the admin contract is an emergency operator, not the program
+  funds' withdrawal recipient.
+- Before deployment, the owner pays the server-quoted platform/deployment fee into
+  `BountyEscrowAdmin`. Deployment is blocked until that payment is reconciled and marked paid (or
+  an explicit admin waiver is recorded).
+- Owner funding still goes directly from the connected owner wallet (Send, Bridge or Unified Balance)
+  to the escrow address; the admin wallet is never an intermediary for reward-pool funds.
+
+Operationally, `BountyEscrowAdmin.adminWallet` is the address returned by the configured
+`CIRCLE_DEPLOYMENT_WALLET_ID`; there is no separate admin-wallet or treasury environment
+variable. The backend uses that signer to register each Circle-deployed program escrow and
+execute audited emergency support calls. The controller's fee withdrawal destination is this
+same immutable on-chain address and must never be substituted for a program owner wallet.
 - Security researcher gửi vulnerability report.
 - Reviewer kiểm tra và xác nhận report.
 - Khi report được chấp nhận, smart contract thanh toán USDC trực tiếp cho researcher.
@@ -42,7 +60,7 @@ Owner creates program
         ↓
 Defines scope and reward tiers
         ↓
-Deploys escrow contract
+Pays deployment fee and requests backend deployment
         ↓
 Funds escrow with USDC
         ↓
@@ -83,18 +101,41 @@ TRIAGED
 
 ## 3. Vai trò trong hệ thống
 
+### Platform Admin
+
+- Owns/administers `BountyEscrowAdmin` and its role configuration.
+- Receives platform fees from program owners and may withdraw only the accumulated fee pool from
+  `BountyEscrowAdmin` to the Circle deployment wallet returned for `CIRCLE_DEPLOYMENT_WALLET_ID`.
+- Deploys/registers program-specific `BountyEscrow` instances through the backend/Circle deployment
+  wallet.
+- May perform emergency support actions that are normally owned by the program owner (pause,
+  deactivate, close, timeline extension/edit and reward-approval execution) when policy and audit
+  require it.
+- **Must never withdraw remaining funds from a program's `BountyEscrow`.** Program reward-pool
+  withdrawals are reserved for that program's owner authority.
+
 ### Project Owner
 
 - Tạo bounty program.
 - Định nghĩa scope.
 - Định nghĩa reward tiers.
-- Deploy escrow.
+- Pay the quoted platform/deployment fee into `BountyEscrowAdmin` and request deployment; the
+  backend/Circle deployment wallet performs deployment, while the program escrow records the owner
+  authority separately.
 - Fund USDC.
+- The first verified owner funding wallet is stored/bound as the program escrow's owner authority
+  and remaining-funds withdrawal recipient. It is not inferred from a client-supplied address.
+- Normally execute program lifecycle controls: pause, close, edit/extend timeline and
+  approve rewards for paid researchers. The platform admin may assist these actions only for
+  emergency support.
+- After the program is closed/unlocked and all approved rewards are settled, withdraw only the
+  remaining funds from that program's escrow to the bound owner wallet. The platform admin cannot
+  perform this withdrawal.
 - Review report.
 - Yêu cầu thêm thông tin.
 - Validate hoặc reject.
 - Approve reward.
-- Thực hiện payout.
+- Thực hiện payout/approve researcher reward theo policy; payout transfer vẫn đi qua escrow rules.
 
 ### Researcher
 
@@ -291,15 +332,16 @@ Hai chỗ Figma và flow doc lệch nhau, đã theo flow doc:
 ┌──────────────┐  ┌──────────────────┐
 │   Supabase   │  │   Arc Testnet    │
 │              │  │                  │
-│ PostgreSQL   │  │ Escrow Contract  │
-│ Auth         │  │ USDC Funding     │
-│ Storage      │  │ Reward Payout    │
-│ Realtime     │  │ Refund           │
+│ PostgreSQL   │  │ BountyEscrowAdmin│
+│ Auth         │  │ BountyEscrow per │
+│ Storage      │  │ program + USDC   │
+│ Realtime     │  │ payout/refund    │
 └──────────────┘  └──────────────────┘
 ```
 
 Blockchain chỉ quản lý:
 
+- `BountyEscrowAdmin` platform fee pool, program registry và emergency controls.
 - Escrow.
 - USDC.
 - Payout.
@@ -438,9 +480,16 @@ bug-bounty-escrow/
 ### Program
 
 ```ts
-type ProgramStatus = 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed';
+type ProgramStatus =
+  | 'draft'
+  | 'awaiting_funding'
+  | 'active'
+  | 'paused'
+  | 'deactivated'
+  | 'expired'
+  | 'closed';
 
-// Lifecycle mà người xem ẩn danh nhìn thấy. draft/awaiting_funding/paused
+// Lifecycle mà người xem ẩn danh nhìn thấy. draft/awaiting_funding/paused/deactivated
 // không có biểu diễn public nào.
 type PublicProgramStatus = 'active' | 'ended';
 
@@ -466,6 +515,23 @@ type BountyProgram = {
   maxBounty: string;
 
   contractAddress?: string;
+  // Server-maintained deployment gate; owner cannot mark this paid from the browser.
+  deploymentFeeStatus:
+    | 'not_required'
+    | 'quoted'
+    | 'awaiting_payment'
+    | 'payment_submitted'
+    | 'paid'
+    | 'waived'
+    | 'expired'
+    | 'failed';
+  deploymentFeeQuoteId?: string;
+  deploymentFeeAmount?: string;
+  deploymentFeeToken?: string;
+  deploymentFeeChainId?: string;
+  deploymentFeePaidAt?: string;
+  deploymentFeePaymentTxHash?: string;
+  deploymentStatus: 'not_started' | 'blocked_fee' | 'pending' | 'confirmed' | 'failed';
   deadline?: string;
   publishedAt?: string;
 };
@@ -660,10 +726,25 @@ notifications
 audit_logs
 ```
 
+Deployment fee payment is a separate durable projection. `deployment_fee_intents` stores the
+server quote/version, amount in base units, token and chain, immutable `BountyEscrowAdmin`
+recipient,
+expiry, payment transaction/log evidence, status (`quoted`, `awaiting_payment`,
+`payment_submitted`, `paid`, `waived`, `expired`, `failed`), idempotency key and audit timestamps.
+`bounty_escrow_admin` stores the single `BountyEscrowAdmin` address, fee token/configuration and
+allowlisted admin treasury. `escrow_contracts` stores `circle_deployment_wallet_id` (operational
+gas signer), `bounty_escrow_admin_address` (controller) and the server-bound
+`program_owner_address`/withdraw recipient separately. They must not be inferred from a later
+Bridge/Unified Balance `Transfer.from`, and they may resolve to the same underlying wallet only when
+an explicit deployment policy says so.
+`programs.deployment_fee_status` is a server-maintained denormalized gate only; neither status nor
+payment evidence is writable from the owner browser. Deployment may start only after `paid` or an
+explicit audited `waived` state.
+
 Important security rules:
 
 - Public xem được program `active` và ended (`expired`/`closed`); `draft`,
-  `awaiting_funding` và `paused` không bao giờ xuất hiện trong listing công khai.
+  `awaiting_funding`, `paused` và `deactivated` không bao giờ xuất hiện trong listing công khai.
   Cột generated `programs.public_status` là ranh giới đó.
 - Researcher chỉ xem report của chính mình.
 - Owner chỉ xem report thuộc program của mình; reviewer chỉ xem program được assign.
@@ -683,27 +764,39 @@ Important security rules:
 
 ## 10. Smart contract design
 
-MVP dùng một custom escrow đã version cho mỗi program:
+MVP có một platform controller duy nhất và một custom escrow cho mỗi program:
 
 ```text
-Circle Contracts deploys BountyEscrow 1.1.0 on Arc Testnet
+Platform admin deploys BountyEscrowAdmin once on Arc Testnet
         ↓
-One canonical escrow per program
+BountyEscrowAdmin collects per-program platform fees and registers escrows
+        ↓
+Circle Contracts deploys one BountyEscrow 1.1.0 per program
         ↓
 Direct canonical Arc USDC funding + multiple immutable reward payouts
 ```
 
-Không dùng Escrow Factory, ERC-20 template hoặc client-supplied deployed address trong flow
-canonical. Backend deploy ABI/bytecode đã pin checksum qua Circle Contracts. Circle
-Developer-Controlled Wallet chỉ deploy/trả gas; constructor nhận `owner` tường minh nên deployment
-wallet không giữ admin, approver hoặc withdraw role.
+`BountyEscrowAdmin` là controller/fee treasury, **không phải** pool của bất kỳ program nào.
+Admin contract có thể register/deactivate/pause/close hoặc execute emergency support theo policy,
+nhưng không có hàm và không có role để withdraw remaining funds từ một `BountyEscrow`.
+Platform admin chỉ được withdraw platform fee đã thu trong chính `BountyEscrowAdmin` về đúng địa
+chỉ Circle deployment wallet được resolve từ `CIRCLE_DEPLOYMENT_WALLET_ID`.
+
+Mỗi `BountyEscrow` là contract riêng, giữ pool và reward state của đúng một program. Backend deploy
+ABI/bytecode đã pin checksum qua Circle Contracts. Circle Developer-Controlled Wallet là
+operational deployment wallet: nó deploy và trả gas. Program owner authority được bind bằng server
+policy vào escrow owner field/withdraw recipient; không suy ra từ `Transfer.from` của một bridge hoặc
+Unified Balance destination transfer. Owner wallet chỉ có quyền sau khi backend đã xác minh fee,
+funding intent và wallet binding. Admin contract là emergency operator, không phải beneficiary của
+program escrow.
 
 Constructor canonical:
 
 ```solidity
 constructor(
         bytes32 programKey,
-        address owner,
+        address programOwner,
+        address escrowAdmin,
         address token,
         uint256 refundUnlockAt,
         address withdrawRecipient
@@ -714,7 +807,15 @@ constructor(
   `0x3600000000000000000000000000000000000000`, 6 decimals.
 - `refundUnlockAt` do server derive chính xác từ `program.deadline`; thiếu deadline thì deploy fail
   closed.
-- `withdrawRecipient` immutable và được owner review trước deploy.
+- `escrowAdmin` là địa chỉ `BountyEscrowAdmin` được server cấu hình; client không được nhập hoặc
+  override địa chỉ này. Circle deployment wallet ID là field/custody role riêng.
+- `programOwner` là owner authority/remaining-funds recipient được bind từ verified owner account và
+  funding intent. Với Bridge/Unified Balance, không dùng source transaction `from` làm quyền nếu
+  chưa có server-side wallet binding; destination receipt chỉ chứng minh amount/net funding.
+- `withdrawRecipient` bắt buộc bằng `programOwner`; admin controller không thể trở thành recipient
+  của program remainder.
+- `programOwner` không được thay đổi bằng client hoặc bằng một funding transfer khác. Nếu ownership
+  transfer được hỗ trợ sau MVP, phải là explicit audited admin/owner action.
 - Sau deployment confirmed, deadline không được sửa database-only. Nếu hỗ trợ extension, phải tăng
   lock on-chain trước, verify final receipt/state rồi mới cập nhật projection; không được shorten.
 
@@ -736,6 +837,11 @@ interface IBountyEscrow {
     function payReward(bytes32 reportKey) external;
 
     function extendRefundUnlockAt(uint256 newUnlockAt) external;
+
+    function pause() external;
+
+    /// Only BountyEscrowAdmin may call this emergency soft-deactivation action.
+    function deactivate() external;
 
     function close() external;
 
@@ -766,9 +872,34 @@ interface IBountyEscrow {
 }
 ```
 
+`BountyEscrowAdmin` tối thiểu phải expose:
+
+```solidity
+function registerProgram(bytes32 programKey, address escrow, address programOwner) external;
+function deactivateProgram(bytes32 programKey) external;
+function pauseProgram(bytes32 programKey) external;
+function closeProgram(bytes32 programKey) external;
+function extendProgramTimeline(bytes32 programKey, uint256 newUnlockAt) external;
+function approveRewardEmergency(
+    bytes32 programKey,
+    bytes32 reportKey,
+    bytes32 approvedContentHash,
+    address researcher,
+    uint256 amount
+) external;
+function withdrawPlatformFees(uint256 amount, address adminTreasury) external;
+```
+
+`withdrawPlatformFees` chỉ chuyển fee token của `BountyEscrowAdmin` tới an allowlisted admin
+treasury. Không có `withdrawProgramFunds`, arbitrary `sweep(escrow, ...)`, callback hoặc delegatecall
+path có thể chuyển token từ a program escrow. Program owner withdrawal phải đi qua
+`BountyEscrow.withdrawRemaining` sau close/unlock/outstanding checks.
+
 Primary funding không gọi `approve(escrow)`, `fund(amount)` hoặc native `msg.value`. Send, Bridge và
-Unified Balance chuyển canonical Arc USDC trực tiếp tới escrow; backend verify exact destination
-receipt/event rồi gọi permissionless `syncExternalFunding()`.
+Unified Balance chuyển canonical Arc USDC trực tiếp từ owner source wallet tới escrow; admin wallet
+và `BountyEscrowAdmin` không nhận, giữ hoặc forward pool funds. Backend verify exact destination
+receipt/event, verify the locked owner/funding intent binding, rồi gọi permissionless
+`syncExternalFunding()`.
 
 Unified Balance source deposit còn có một Gateway subscription boundary bắt buộc:
 
@@ -807,10 +938,21 @@ Events chính:
 ```solidity
 event EscrowInitialized(
     bytes32 indexed programKey,
-    address indexed owner,
+    address indexed escrowAdmin,
+    address indexed programOwner,
     address indexed token,
-    uint256 refundUnlockAt,
-    address withdrawRecipient
+    uint256 refundUnlockAt
+);
+
+event ProgramRegistered(
+    bytes32 indexed programKey,
+    address indexed escrow,
+    address indexed programOwner
+);
+
+event PlatformFeesWithdrawn(
+    address indexed adminTreasury,
+    uint256 amount
 );
 
 event ExternalFundingSynced(
@@ -842,16 +984,29 @@ event RemainingFundsWithdrawn(
 
 Security requirements:
 
-- Chỉ authorized on-chain approver được tạo immutable reward snapshot; reviewer role trong database
-  không tự động có contract role.
+- `BountyEscrowAdmin` is the only platform controller. It may register/deactivate/pause/close a
+  program escrow or execute an emergency support action, but it has no code path to withdraw from
+  that escrow.
+- Program owner authority is established by an explicit server-side owner/funding binding and stored
+  as the escrow's immutable (or explicitly audited) `programOwner`/withdraw recipient. It is not
+  inferred from `Transfer.from` for Bridge or Unified Balance, and a later arbitrary funder cannot
+  silently replace it.
+- Only the bound program owner may execute the program's owner operations and
+  `withdrawRemaining`; the admin may support pause/deactivate/close/timeline/reward approval under
+  an audited emergency path, but **never** program-fund withdrawal.
+- Chỉ authorized owner or emergency-admin on-chain approver được tạo immutable reward snapshot;
+  reviewer role trong database không tự động có contract role. The normal execution path is the
+  owner; admin execution is an explicitly logged exception.
 - Sau approval, `payReward(reportKey)` permissionless nhưng chỉ chuyển đúng recipient/amount đã
   snapshot; không payout cùng report hai lần và không payout vượt live available balance.
-- `close()` chỉ owner, chỉ sau `refundUnlockAt`, là transition một chiều và chặn approval mới; payout
-  đã approve vẫn được thực thi.
-- `withdrawRemaining(expectedAmount)` chỉ owner, sau close/unlock và khi
-  `totalApprovedOutstanding == 0`.
+- `close()` is normally callable by the bound program owner; `BountyEscrowAdmin` may call it only via
+  the emergency-support path and policy/audit. It is a one-way transition after `refundUnlockAt`
+  and blocks new approvals while allowing already-approved payouts.
+- `withdrawRemaining(expectedAmount)` is callable only by the bound program owner, after
+  close/unlock and when `totalApprovedOutstanding == 0`. Neither `BountyEscrowAdmin` nor the admin
+  treasury can call it or receive the program remainder.
 - `expectedAmount` là exact 6-decimal base-unit snapshot từ server-verified withdrawal intent.
-  Contract require live balance **ít nhất** snapshot rồi chỉ chuyển đúng snapshot tới immutable
+  Contract require live balance **ít nhất** snapshot rồi chỉ chuyển đúng snapshot tới owner-bound
   recipient; không require equality để tránh dust grief.
 - Late/dust USDC vượt snapshot ở lại escrow. Backend scan/reconcile và tạo withdrawal intent +
   idempotency key mới; không reuse intent hoặc transaction hash đã complete.
@@ -918,7 +1073,10 @@ GET    /api/owner/programs/:id
 POST   /api/programs
 PATCH  /api/programs/:id
 POST   /api/programs/:id/logo/upload-url
-POST   /api/programs/:id/deploy
+POST   /api/programs/:id/escrow-deployment-fees/quote
+POST   /api/programs/:id/escrow-deployment-fees/payment
+GET    /api/programs/:id/escrow-deployment-fees/current
+POST   /api/programs/:id/escrow-deployments
 POST   /api/programs/:id/fund
 POST   /api/programs/:id/publish
 POST   /api/programs/:id/status
@@ -927,8 +1085,24 @@ POST   /api/programs/:id/reviewers
 DELETE /api/programs/:id/reviewers/:reviewerId
 ```
 
+Program lifecycle authorization is split explicitly: the owner is the normal authority for
+`pause`, `close`, verified timeline extension and reward approval. Platform admin
+support endpoints may execute those same actions only as audited emergency operations. There is no
+admin endpoint that withdraws from a program escrow; only the verified program-owner wallet may
+submit the escrow's remaining-funds withdrawal after close/unlock/outstanding checks. Admin treasury
+withdrawal is limited to `BountyEscrowAdmin`'s accumulated platform-fee balance.
+
+`deployment-fee` là một durable owner-payment flow. Server tạo quote với amount/token/network,
+immutable `BountyEscrowAdmin` recipient và expiry; owner submits a direct payment from the connected
+wallet; API chỉ đánh dấu `paid` sau khi verify exact token transfer/receipt tới admin contract.
+Client-supplied
+"paid" flags, balances hoặc transaction hashes không đủ bằng chứng. `POST /deploy` fail-closed nếu
+fee status chưa `paid` hoặc `waived`, và khi accepted trả `pending` trong lúc Circle deployment
+worker chạy bằng configured Circle deployment wallet; controller registration binds the verified
+`BountyEscrowAdmin` address and the program owner authority/withdraw recipient.
+
 Owner listing tách khỏi public listing để route công khai chỉ phục vụ dữ liệu công khai.
-`POST /:id/status` xử lý `awaiting_funding`, `paused`, `expired`, `closed`; publish có endpoint
+`POST /:id/status` xử lý `awaiting_funding`, `paused`, `deactivated`, `expired`, `closed`; publish có endpoint
 riêng vì nó kiểm tra readiness (coverage, reward policy, escrow, funded pool).
 
 ### Reports

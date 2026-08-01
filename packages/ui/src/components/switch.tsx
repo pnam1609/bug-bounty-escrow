@@ -68,15 +68,28 @@ export interface SwitchFieldProps extends Omit<SwitchProps, 'children' | 'classN
   /** Validation message; linked with `aria-describedby` and announced. */
   error?: ReactNode;
   label: ReactNode;
+  /** Place the switch after the label, as in right-aligned settings rows. */
+  controlPosition?: 'start' | 'end';
 }
 
 /**
- * Switch with its label, laid out control-then-label the way node 38:83 draws it. The label cell
- * is `min-h-11` and spans the rest of the row, so the pointer target clears 44x44.
+ * Switch with its label, laid out control-then-label by default (or label-then-control for
+ * right-aligned settings rows). The label cell is `min-h-11` and spans the rest of the row, so the
+ * pointer target clears 44x44.
  */
 export const SwitchField = forwardRef<ComponentRef<typeof SwitchPrimitive.Root>, SwitchFieldProps>(
   function SwitchField(
-    { className, controlClassName, description, disabled, error, id, label, ...switchProps },
+    {
+      className,
+      controlClassName,
+      controlPosition = 'start',
+      description,
+      disabled,
+      error,
+      id,
+      label,
+      ...switchProps
+    },
     ref,
   ) {
     const generatedId = useId();
@@ -93,30 +106,48 @@ export const SwitchField = forwardRef<ComponentRef<typeof SwitchPrimitive.Root>,
     }
     const describedBy = describedByIds.length > 0 ? describedByIds.join(' ') : undefined;
 
+    const control = (
+      <span className="flex min-h-11 items-center">
+        <Switch
+          {...switchProps}
+          ref={ref}
+          id={controlId}
+          disabled={disabled}
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={controlClassName}
+        />
+      </span>
+    );
+    const labelControl = (
+      <LabelPrimitive.Root
+        htmlFor={controlId}
+        className={cn(
+          'flex min-h-11 items-center text-body-sm',
+          disabled ? 'cursor-not-allowed text-text-disabled' : 'cursor-pointer text-text',
+        )}
+      >
+        {label}
+      </LabelPrimitive.Root>
+    );
+
     return (
-      <div className={cn('grid grid-cols-[auto_1fr] gap-x-sm', className)}>
-        <span className="flex min-h-11 items-center">
-          <Switch
-            {...switchProps}
-            ref={ref}
-            id={controlId}
-            disabled={disabled}
-            aria-describedby={describedBy}
-            aria-invalid={error ? true : undefined}
-            className={controlClassName}
-          />
-        </span>
-        <LabelPrimitive.Root
-          htmlFor={controlId}
-          className={cn(
-            'flex min-h-11 items-center text-body-sm',
-            disabled ? 'cursor-not-allowed text-text-disabled' : 'cursor-pointer text-text',
-          )}
-        >
-          {label}
-        </LabelPrimitive.Root>
+      <div
+        className={cn(
+          'grid gap-x-sm',
+          controlPosition === 'end' ? 'grid-cols-[1fr_auto]' : 'grid-cols-[auto_1fr]',
+          className,
+        )}
+      >
+        {controlPosition === 'end' ? labelControl : control}
+        {controlPosition === 'end' ? control : labelControl}
         {description || error ? (
-          <div className="col-start-2 flex flex-col gap-sm pb-sm">
+          <div
+            className={cn(
+              'flex flex-col gap-sm pb-sm',
+              controlPosition === 'end' ? 'col-start-1' : 'col-start-2',
+            )}
+          >
             {description ? (
               <p id={descriptionId} className="text-body-sm text-text-muted">
                 {description}

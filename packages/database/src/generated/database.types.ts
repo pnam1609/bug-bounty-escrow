@@ -448,6 +448,7 @@ export type Database = {
           contract_version: string | null
           created_at: string
           deploy_idempotency_key: string | null
+          deployment_fee_quote_id: string | null
           deployed_at: string | null
           deployment_block_hash: string | null
           deployment_block_number: number | null
@@ -460,6 +461,7 @@ export type Database = {
           last_synced_block: number | null
           late_funding_scanned_through_block: number | null
           owner_wallet: string | null
+          platform_admin_wallet: string | null
           program_id: string
           program_key: string | null
           refund_unlock_at: string | null
@@ -478,6 +480,7 @@ export type Database = {
           contract_version?: string | null
           created_at?: string
           deploy_idempotency_key?: string | null
+          deployment_fee_quote_id?: string | null
           deployed_at?: string | null
           deployment_block_hash?: string | null
           deployment_block_number?: number | null
@@ -490,6 +493,7 @@ export type Database = {
           last_synced_block?: number | null
           late_funding_scanned_through_block?: number | null
           owner_wallet?: string | null
+          platform_admin_wallet?: string | null
           program_id: string
           program_key?: string | null
           refund_unlock_at?: string | null
@@ -508,6 +512,7 @@ export type Database = {
           contract_version?: string | null
           created_at?: string
           deploy_idempotency_key?: string | null
+          deployment_fee_quote_id?: string | null
           deployed_at?: string | null
           deployment_block_hash?: string | null
           deployment_block_number?: number | null
@@ -520,6 +525,7 @@ export type Database = {
           last_synced_block?: number | null
           late_funding_scanned_through_block?: number | null
           owner_wallet?: string | null
+          platform_admin_wallet?: string | null
           program_id?: string
           program_key?: string | null
           refund_unlock_at?: string | null
@@ -532,6 +538,71 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "escrow_contracts_program_id_fkey"
+            columns: ["program_id"]
+            isOneToOne: false
+            referencedRelation: "programs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      escrow_deployment_fee_quotes: {
+        Row: {
+          amount_base_units: number
+          chain_id: number
+          created_at: string
+          expires_at: string
+          id: string
+          paid_at: string | null
+          payer_address: string | null
+          payment_block_hash: string | null
+          payment_block_number: number | null
+          payment_log_index: number | null
+          payment_transaction_hash: string | null
+          program_id: string
+          recipient_address: string
+          status: string
+          token_address: string
+          updated_at: string
+        }
+        Insert: {
+          amount_base_units: number
+          chain_id: number
+          created_at?: string
+          expires_at: string
+          id: string
+          paid_at?: string | null
+          payer_address?: string | null
+          payment_block_hash?: string | null
+          payment_block_number?: number | null
+          payment_log_index?: number | null
+          payment_transaction_hash?: string | null
+          program_id: string
+          recipient_address: string
+          status?: string
+          token_address: string
+          updated_at?: string
+        }
+        Update: {
+          amount_base_units?: number
+          chain_id?: number
+          created_at?: string
+          expires_at?: string
+          id?: string
+          paid_at?: string | null
+          payer_address?: string | null
+          payment_block_hash?: string | null
+          payment_block_number?: number | null
+          payment_log_index?: number | null
+          payment_transaction_hash?: string | null
+          program_id?: string
+          recipient_address?: string
+          status?: string
+          token_address?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "escrow_deployment_fee_quotes_program_id_fkey"
             columns: ["program_id"]
             isOneToOne: false
             referencedRelation: "programs"
@@ -2765,6 +2836,36 @@ export type Database = {
         }
         Returns: boolean
       }
+      create_deployment_fee_quote_atomic: {
+        Args: {
+          actor_id: string
+          target_amount_base_units: number
+          target_chain_id: number
+          target_expires_at: string
+          target_program_id: string
+          target_quote_id: string
+          target_recipient_address: string
+          target_token_address: string
+        }
+        Returns: string
+      }
+      create_escrow_deployment_server_atomic: {
+        Args: {
+          actor_id: string
+          target_artifact_checksum: string
+          target_fee_quote_id: string
+          target_idempotency_key: string
+          target_immutable_references: Json
+          target_platform_admin_wallet: string
+          target_program_owner_wallet: string
+          target_program_id: string
+          target_program_key: string
+          target_refund_unlock_at: string
+          target_runtime_checksum: string
+          target_withdraw_recipient: string
+        }
+        Returns: string
+      }
       create_escrow_deployment_atomic: {
         Args: {
           actor_id: string
@@ -3013,6 +3114,18 @@ export type Database = {
         Returns: {
           intent_id: string
         }[]
+      }
+      mark_deployment_fee_paid_atomic: {
+        Args: {
+          target_payment_block_hash: string
+          target_payment_block_number: number
+          target_payment_log_index: number
+          target_payment_transaction_hash: string
+          target_payer_address: string
+          target_program_id: string
+          target_quote_id: string
+        }
+        Returns: string
       }
       mark_notifications_read_atomic: {
         Args: { actor_id: string; notification_ids: string[] }

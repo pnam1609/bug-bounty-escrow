@@ -345,6 +345,7 @@ export function StepImpacts({
 
         <SwitchField
           checked={draft.rules.allowCustomImpact}
+          controlPosition="end"
           description="Custom impacts still require reviewer approval."
           label="Allow researchers to propose a custom impact"
           onCheckedChange={(checked) =>

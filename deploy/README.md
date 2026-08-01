@@ -107,6 +107,33 @@ the environment file.
 
 ### Bootstrap Circle Contracts and Gateway webhooks
 
+#### Deploy the single `BountyEscrowAdmin` controller
+
+The controller is deployed once from the API image. The deployer resolves the EVM admin address
+from `CIRCLE_DEPLOYMENT_WALLET_ID`; do not configure a second admin-wallet or treasury address.
+Before running it, ensure `CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`,
+`CIRCLE_DEPLOYMENT_WALLET_ID`, `PLATFORM_FEE_TOKEN_ADDRESS`,
+`PLATFORM_FEE_AMOUNT_BASE_UNITS=1000000` and a stable
+`BOUNTY_ESCROW_ADMIN_DEPLOY_IDEMPOTENCY_KEY` are present in `.env.production`.
+
+```sh
+set -a
+. /opt/bounty-escrow/.deployment.env
+set +a
+export API_IMAGE="${IMAGE_NAMESPACE}/bug-bounty-escrow-api"
+export IMAGE_TAG
+export ENV_FILE=/opt/bounty-escrow/.env.production
+docker compose \
+  --project-directory /opt/bounty-escrow \
+  --file /opt/bounty-escrow/docker-compose.production.yml \
+  --env-file /opt/bounty-escrow/.env.production \
+  run --rm --no-deps api node dist/tools/deploy-bounty-escrow-admin.js
+```
+
+Save the returned `contractAddress` as `BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS`, then enable
+`CIRCLE_CONTRACTS_ENABLED=true` and recreate the API. If the command times out, rerun it with the
+same idempotency key; never generate a new key for the same deployment attempt.
+
 Use this two-phase bootstrap only for Arc Testnet. It avoids a circular
 dependency: Circle sends a signed `webhooks.test` callback while creating the
 subscription, before its new subscription ID is known.

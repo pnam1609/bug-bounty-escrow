@@ -169,13 +169,9 @@ export class CircleContractsAdapter implements CircleContractsGateway {
           walletId,
           abiJson: JSON.stringify(input.artifact.abi),
           bytecode: input.artifact.bytecode,
-          constructorParameters: [
-            input.programKey,
-            input.ownerWallet,
-            input.tokenAddress,
-            input.refundUnlockAt.toString(),
-            input.withdrawRecipient,
-          ],
+          constructorParameters: input.ownerWallet === undefined
+            ? [input.programKey, input.platformAdminWallet, input.tokenAddress, input.refundUnlockAt.toString(), input.withdrawRecipient]
+            : [input.programKey, input.ownerWallet, input.platformAdminWallet, input.tokenAddress, input.refundUnlockAt.toString(), input.withdrawRecipient],
           fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
         }),
       );
@@ -268,6 +264,32 @@ export class CircleContractsAdapter implements CircleContractsGateway {
       return { transactionId: parsed.id };
     } catch (error) {
       throw this.providerError(error, 'circle_sync_submit_failed');
+    }
+  }
+
+  public async registerProgramEscrow(input: {
+    idempotencyKey: string;
+    adminContractAddress: `0x${string}`;
+    programKey: `0x${string}`;
+    escrowAddress: `0x${string}`;
+  }): Promise<{ transactionId: string }> {
+    const { wallets, walletId } = this.requireClients();
+    try {
+      uuidV4Schema.parse(input.idempotencyKey);
+      const response = await this.withTimeout(
+        wallets.createContractExecutionTransaction({
+          idempotencyKey: input.idempotencyKey,
+          walletId,
+          contractAddress: input.adminContractAddress,
+          abiFunctionSignature: 'registerProgramEscrow(bytes32,address)',
+          abiParameters: [input.programKey, input.escrowAddress],
+          fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
+        }),
+      );
+      const parsed = createdTransactionSchema.parse(extractSdkData(response));
+      return { transactionId: parsed.id };
+    } catch (error) {
+      throw this.providerError(error, 'circle_admin_registration_submit_failed');
     }
   }
 

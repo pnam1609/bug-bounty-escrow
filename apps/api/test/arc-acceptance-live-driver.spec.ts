@@ -57,7 +57,7 @@ const OFFICIAL_DEPOSIT_FOR_BURN_TOPIC =
 const OFFICIAL_MINT_AND_WITHDRAW_TOPIC =
   '0x1b2a7ff080b8cb6ff436ce0372e399692bbfb6d4ae5766fd8d58a7b8cc6142e6';
 const PINNED_ARTIFACT_CHECKSUM =
-  '0xd828e598351662ec3520a55110587c041d6f5c50737263465f7284cb7e45a5c4';
+  '0x1e6024b77e3ac8d603ebc4eb110ee1144c615db05e29af002131c6bda986a5db';
 
 const ERC20_ABI = [
   {
@@ -101,7 +101,7 @@ const ESCROW_ABI = [
     anonymous: false,
     inputs: [
       { name: 'programKey', type: 'bytes32', indexed: true },
-      { name: 'owner', type: 'address', indexed: true },
+      { name: 'platformAdmin', type: 'address', indexed: true },
       { name: 'token', type: 'address', indexed: true },
       { name: 'refundUnlockAt', type: 'uint256', indexed: false },
       { name: 'withdrawRecipient', type: 'address', indexed: false },
@@ -833,7 +833,7 @@ describe('QA-ARC-01 live read-only verifier', () => {
       topics: encodeEventTopics({
         abi: ESCROW_ABI,
         eventName: 'EscrowInitialized',
-        args: { programKey: REPORT_KEY, owner: OWNER, token: USDC },
+        args: { programKey: REPORT_KEY, platformAdmin: OWNER, token: USDC },
       }),
       data: encodeAbiParameters(
         [{ type: 'uint256' }, { type: 'address' }],

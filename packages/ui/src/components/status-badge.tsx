@@ -91,6 +91,7 @@ export const PROGRAM_STATUS_LABELS: Readonly<Record<ProgramStatus, string>> = Ob
   awaiting_funding: 'Awaiting funding',
   active: 'Active',
   paused: 'Paused',
+  deactivated: 'Deactivated',
   expired: 'Expired',
   closed: 'Closed',
 });
@@ -100,6 +101,7 @@ const PROGRAM_STATUS_TONES: Readonly<Record<ProgramStatus, StatusBadgeVariant>> 
   awaiting_funding: 'warning',
   active: 'success',
   paused: 'attention',
+  deactivated: 'danger',
   expired: 'neutral',
   closed: 'neutral',
 });

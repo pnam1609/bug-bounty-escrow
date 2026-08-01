@@ -14,7 +14,7 @@ import { LANDING_CONTAINER, SectionIntro } from './section';
 const STEPS: readonly { readonly body: string; readonly title: string }[] = [
   {
     title: 'Fund rewards',
-    body: 'Owner deploys the escrow and locks USDC before the program goes live.',
+    body: 'The platform deploys the escrow after the owner pays the deployment fee; the owner then funds it before the program goes live.',
   },
   {
     title: 'Submit privately',

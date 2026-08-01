@@ -15,7 +15,9 @@ export interface CircleDeployInput {
   idempotencyKey: string;
   programId: string;
   programKey: `0x${string}`;
-  ownerWallet: `0x${string}`;
+  platformAdminWallet?: `0x${string}`;
+  /** @deprecated rolling-deploy compatibility; server code never uses it. */
+  ownerWallet?: `0x${string}`;
   tokenAddress: `0x${string}`;
   refundUnlockAt: bigint;
   withdrawRecipient: `0x${string}`;
@@ -46,6 +48,12 @@ export interface CircleContractsGateway {
     accepted: CircleDeploymentAccepted,
     signal?: AbortSignal,
   ): Promise<CircleDeploymentResult>;
+  registerProgramEscrow(input: {
+    idempotencyKey: string;
+    adminContractAddress: `0x${string}`;
+    programKey: `0x${string}`;
+    escrowAddress: `0x${string}`;
+  }): Promise<{ transactionId: string }>;
   submitSyncExternalFunding(input: {
     idempotencyKey: string;
     escrowAddress: `0x${string}`;
@@ -175,10 +183,19 @@ export interface ArcEscrowGateway {
     expectedBlockNumber: bigint;
     expectedBlockHash: `0x${string}`;
     programKey: `0x${string}`;
-    ownerWallet: `0x${string}`;
+    platformAdminWallet?: `0x${string}`;
+    ownerWallet?: `0x${string}`;
     refundUnlockAt: bigint;
     withdrawRecipient: `0x${string}`;
   }): Promise<void>;
+  verifyDeploymentFeePayment(input: {
+    transactionHash: `0x${string}`;
+    payerAddress: `0x${string}`;
+    recipientAddress: `0x${string}`;
+    tokenAddress: `0x${string}`;
+    amountBaseUnits: bigint;
+    chainId: number;
+  }): Promise<{ blockNumber: bigint; blockHash: `0x${string}`; logIndex: number }>;
   verifyFundingDestination(input: {
     escrowAddress: `0x${string}`;
     routeMode: import('@bug-bounty-escrow/shared').FundingRouteMode;

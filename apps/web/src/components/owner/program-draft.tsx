@@ -395,6 +395,18 @@ export function shortenAddress(address: string): string {
   return address.length <= 12 ? address : `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
+/** Build the Arc testnet address link used by owner scope previews. */
+export function contractExplorerHref(
+  address: string,
+  explorerBaseUrl = process.env['NEXT_PUBLIC_ARC_EXPLORER_URL'] ?? 'https://testnet.arcscan.app',
+): string {
+  const base = new URL(explorerBaseUrl);
+  base.pathname = `${base.pathname.replace(/\/+$/u, '')}/address/${address}`;
+  base.search = '';
+  base.hash = '';
+  return base.toString();
+}
+
 export function describeTier(tier: TierRow): string {
   if (tier.calculationType === 'flat') {
     return tier.flatAmount === '' ? 'Flat amount not set' : `Flat ${formatUsdc(tier.flatAmount)}`;

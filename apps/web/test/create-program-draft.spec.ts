@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assetTypeForErrorKey,
   buildCreatePayload,
+  contractExplorerHref,
   createEmptyDraft,
   createTierRow,
   draftFromProgram,
@@ -63,6 +64,14 @@ function validDraft(): ProgramDraft {
     ],
   };
 }
+
+describe('create-program scope links', () => {
+  it('builds an explorer link without leaking query or hash state', () => {
+    expect(contractExplorerHref('0x1234567890123456789012345678901234567890', 'https://arc.test/')).toBe(
+      'https://arc.test/address/0x1234567890123456789012345678901234567890',
+    );
+  });
+});
 
 describe('buildCreatePayload against createProgramRequestSchema', () => {
   it('produces a payload the tightened schema accepts', () => {

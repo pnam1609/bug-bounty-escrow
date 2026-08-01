@@ -36,21 +36,14 @@ describe('wallet-control API contract', () => {
     ).toBe(CHALLENGE_ID);
   });
 
-  it('requires the challenge id and EVM signature on deployment', () => {
-    const deployment = {
-      ownerWallet: WALLET,
-      withdrawRecipient: WALLET,
-      refundUnlockAt: '2026-08-29T00:00:00.000Z',
-      artifactVersion: '1.1.0',
-    };
-
-    expect(deployEscrowWithCircleRequestSchema.safeParse(deployment).success).toBe(false);
+  it('does not accept browser wallet authority fields on deployment', () => {
+    expect(deployEscrowWithCircleRequestSchema.parse({})).toEqual({});
     expect(
-      deployEscrowWithCircleRequestSchema.parse({
-        ...deployment,
+      deployEscrowWithCircleRequestSchema.safeParse({
+        ownerWallet: WALLET,
         walletChallengeId: CHALLENGE_ID,
         walletSignature: SIGNATURE,
-      }).walletChallengeId,
-    ).toBe(CHALLENGE_ID);
+      }).success,
+    ).toBe(false);
   });
 });

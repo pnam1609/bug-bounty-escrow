@@ -62,6 +62,10 @@ const expectedMigrations = [
   '20260801000300_ai_queue_idempotency_supersession.sql',
   '20260801000400_ai_candidate_union_signals.sql',
   '20260801000500_restore_duplicate_metadata_constraint.sql',
+  '20260801000600_cp11_server_deployment_fee_gate.sql',
+  '20260801000700_program_owner_withdraw_authority.sql',
+  '20260801000800_program_deactivated_status.sql',
+  '20260801000900_admin_only_deactivation.sql',
 ];
 
 const tableMigrations = new Map([
@@ -195,6 +199,19 @@ for (const tableName of [
   if (!gatewayLifecycle.includes(`create table public.${tableName}`)) {
     fail(`CP-13 Gateway lifecycle migration does not own public.${tableName}`);
   }
+}
+
+const deploymentFeeGate = migrationContents.get('20260801000600_cp11_server_deployment_fee_gate.sql');
+if (!/create table(?: if not exists)? public\.escrow_deployment_fee_quotes/i.test(deploymentFeeGate)) {
+  fail('CP-11 deployment fee migration does not create escrow_deployment_fee_quotes');
+}
+const programOwnerAuthority = migrationContents.get('20260801000700_program_owner_withdraw_authority.sql');
+if (!/create or replace function public\.create_escrow_deployment_server_atomic/i.test(programOwnerAuthority) ||
+    !/target_program_owner_wallet/i.test(programOwnerAuthority)) {
+  fail('Program-owner authority migration does not bind target_program_owner_wallet');
+}
+if (!/alter table public\.escrow_deployment_fee_quotes enable row level security/i.test(deploymentFeeGate)) {
+  fail('CP-11 deployment fee migration does not enable RLS on escrow_deployment_fee_quotes');
 }
 for (const functionName of [
   'list_active_unified_balance_gateway_intent_ids',

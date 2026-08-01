@@ -34,6 +34,7 @@ export const PROGRAM_STATUS_TRANSITIONS: Readonly<Record<ProgramStatus, readonly
     awaiting_funding: programTransitions('active', 'closed'),
     active: programTransitions('paused', 'expired', 'closed'),
     paused: programTransitions('active', 'expired', 'closed'),
+    deactivated: programTransitions(),
     expired: programTransitions('closed'),
     closed: programTransitions(),
   });

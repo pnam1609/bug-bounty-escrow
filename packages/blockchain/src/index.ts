@@ -11,6 +11,7 @@ export {
   ERC20_READ_ABI,
   ESCROW_ABI,
   ESCROW_OWNER_ABI,
+  BOUNTY_ESCROW_ADMIN_ABI,
   GATEWAY_ABI,
 } from './abis.js';
 

@@ -3,6 +3,7 @@ export const PROGRAM_STATUSES = Object.freeze([
   'awaiting_funding',
   'active',
   'paused',
+  'deactivated',
   'expired',
   'closed',
 ] as const);
@@ -22,6 +23,7 @@ const PUBLIC_STATUS_BY_PROGRAM_STATUS: Readonly<Record<ProgramStatus, PublicProg
     draft: null,
     awaiting_funding: null,
     paused: null,
+    deactivated: null,
     active: 'active',
     expired: 'ended',
     closed: 'ended',
