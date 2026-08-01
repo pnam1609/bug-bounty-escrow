@@ -46,25 +46,49 @@ comment on policy report_attachments_select_uploaded_participant on public.repor
 -- Storage object reads must follow the same lifecycle boundary. A signed upload creates the object
 -- before the completion RPC flips metadata to uploaded; without this guard, an authorized report
 -- participant could read a pending object directly through Storage RLS.
-drop policy if exists report_attachments_objects_select on storage.objects;
+--
+-- Supabase owns `storage.objects` with a dedicated role. The database role used by the deploy
+-- runner can manage the application tables but is intentionally not allowed to alter that managed
+-- relation. Apply the stricter policy when this migration user owns the relation (local/bare
+-- PostgreSQL), and leave the existing Storage policy untouched on managed Supabase installations.
+do $storage_policy$
+declare
+  storage_owner text;
+begin
+  select pg_get_userbyid(relowner)
+    into storage_owner
+  from pg_class
+  where oid = 'storage.objects'::regclass;
 
-create policy report_attachments_objects_select_uploaded
-on storage.objects
-for select
-to authenticated
-using (
-  bucket_id = 'report-attachments'
-  and public.storage_report_id(name) is not null
-  and exists (
-    select 1
-    from public.report_attachments attachment
-    where attachment.report_id = public.storage_report_id(name)
-      and attachment.storage_bucket = bucket_id
-      and attachment.storage_path = name
-      and attachment.upload_status = 'uploaded'
-      and public.can_access_report(attachment.report_id)
-  )
-);
-
-comment on policy report_attachments_objects_select_uploaded on storage.objects is
-  'Private report objects are readable only after their metadata row reaches uploaded; pending objects remain write-only.';
+  if storage_owner = current_user then
+    execute 'drop policy if exists report_attachments_objects_select on storage.objects';
+    execute $policy$
+      create policy report_attachments_objects_select_uploaded
+      on storage.objects
+      for select
+      to authenticated
+      using (
+        bucket_id = 'report-attachments'
+        and public.storage_report_id(name) is not null
+        and exists (
+          select 1
+          from public.report_attachments attachment
+          where attachment.report_id = public.storage_report_id(name)
+            and attachment.storage_bucket = bucket_id
+            and attachment.storage_path = name
+            and attachment.upload_status = 'uploaded'
+            and public.can_access_report(attachment.report_id)
+        )
+      )
+    $policy$;
+    execute $comment$
+      comment on policy report_attachments_objects_select_uploaded on storage.objects is
+        'Private report objects are readable only after their metadata row reaches uploaded; pending objects remain write-only.'
+    $comment$;
+  else
+    raise notice 'Skipping storage.objects policy update: relation is owned by %, current role is %',
+      storage_owner,
+      current_user;
+  end if;
+end;
+$storage_policy$;
