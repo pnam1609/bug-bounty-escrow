@@ -134,6 +134,13 @@ Save the returned `contractAddress` as `BOUNTY_ESCROW_ADMIN_CONTRACT_ADDRESS`, t
 `CIRCLE_CONTRACTS_ENABLED=true` and recreate the API. If the command times out, rerun it with the
 same idempotency key; never generate a new key for the same deployment attempt.
 
+Before enabling the runtime flag, verify the public deployment receipt and immutable controller
+configuration. The Arc RPC checks should show a non-empty bytecode result, a successful receipt,
+`adminWallet()` equal to the Circle wallet address, `token()` equal to the Arc Testnet USDC
+address, and `programFeeAmount()` equal to `1000000` (1 USDC in base units). Do not treat a
+successful Circle acceptance response as deployed until the contract status is `COMPLETE` and the
+receipt has `status=0x1`.
+
 Use this two-phase bootstrap only for Arc Testnet. It avoids a circular
 dependency: Circle sends a signed `webhooks.test` callback while creating the
 subscription, before its new subscription ID is known.
