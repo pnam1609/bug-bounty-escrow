@@ -161,11 +161,15 @@ export class CircleContractsAdapter implements CircleContractsGateway {
     try {
       uuidV4Schema.parse(input.idempotencyKey);
       const response = await this.withTimeout(
-        contracts.deployContract({
+        // Circle binds the target chain to the developer-controlled wallet.
+        // Its API rejects requests that include both `walletId` and `blockchain`.
+        // The SDK type still marks blockchain as required, so assert the
+        // payload shape after intentionally omitting the mutually-exclusive
+        // field at runtime.
+        contracts.deployContract(({
           idempotencyKey: input.idempotencyKey,
           name: `BountyEscrow${input.programId.replaceAll('-', '').slice(0, 12)}`,
           description: `BountyEscrow program ${input.programId}`,
-          blockchain: 'ARC-TESTNET',
           walletId,
           abiJson: JSON.stringify(input.artifact.abi),
           bytecode: input.artifact.bytecode,
@@ -173,7 +177,7 @@ export class CircleContractsAdapter implements CircleContractsGateway {
             ? [input.programKey, input.platformAdminWallet, input.tokenAddress, input.refundUnlockAt.toString(), input.withdrawRecipient]
             : [input.programKey, input.ownerWallet, input.platformAdminWallet, input.tokenAddress, input.refundUnlockAt.toString(), input.withdrawRecipient],
           fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-        }),
+        } as Parameters<ContractsClient['deployContract']>[0])),
       );
       return acceptedSchema.parse(extractSdkData(response));
     } catch (error) {
