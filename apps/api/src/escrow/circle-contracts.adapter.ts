@@ -405,6 +405,7 @@ export class CircleContractsAdapter implements CircleContractsGateway {
         return new EscrowProviderError(
           retryable ? 'circle_temporarily_unavailable' : 'circle_request_rejected',
           retryable,
+          status,
         );
       }
     }

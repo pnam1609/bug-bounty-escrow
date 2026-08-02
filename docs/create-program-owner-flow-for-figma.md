@@ -167,8 +167,14 @@ GET /api/programs/:id/withdrawal-intents/:withdrawalIntentId
 
 `deploy` phải dùng ABI/bytecode artifact `BountyEscrow` version `1.1.0` đã pin ở server; API key,
 Entity Secret, Circle Developer-Controlled Wallet ID, BountyEscrowAdmin address và owner binding không bao giờ đi
-xuống browser. Cùng một program + contract version dùng một Circle idempotency key ổn định để retry
-không tạo contract thứ hai. Version `1.1.0` là ABI có `withdrawRemaining(uint256 expectedAmount)`;
+xuống browser. Backend lưu một Circle idempotency key và request fingerprint cho mỗi deployment
+attempt. Retry do timeout, rate limit hoặc lỗi 5xx phải giữ nguyên key để Circle trả lại cùng một
+operation; không được tạo contract thứ hai. Nếu Circle trả lỗi validation HTTP 400 trước khi có
+`circleContractId`/`circleTransactionId`, backend được rotate key đúng **một lần**, ghi audit event
+và retry với cùng fingerprint. Sau khi Circle đã trả bất kỳ identifier nào, key bị khóa vĩnh viễn;
+không được rotate dù polling hoặc registration còn pending. Nếu lần validation thứ hai vẫn thất bại,
+deployment chuyển sang lỗi cần xử lý thủ công thay vì loop vô hạn. Version `1.1.0` là ABI có
+`withdrawRemaining(uint256 expectedAmount)`;
 client/server/OpenAPI
 không được tiếp tục advertise hoặc encode ABI `1.0.0`.
 

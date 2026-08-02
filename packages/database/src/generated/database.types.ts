@@ -448,10 +448,12 @@ export type Database = {
           contract_version: string | null
           created_at: string
           deploy_idempotency_key: string | null
+          deployment_attempt: number
           deployment_fee_quote_id: string | null
           deployed_at: string | null
           deployment_block_hash: string | null
           deployment_block_number: number | null
+          deployment_request_hash: string | null
           deployment_status: string
           deployment_transaction_hash: string | null
           deployment_wallet_reference: string | null
@@ -480,10 +482,12 @@ export type Database = {
           contract_version?: string | null
           created_at?: string
           deploy_idempotency_key?: string | null
+          deployment_attempt?: number
           deployment_fee_quote_id?: string | null
           deployed_at?: string | null
           deployment_block_hash?: string | null
           deployment_block_number?: number | null
+          deployment_request_hash?: string | null
           deployment_status?: string
           deployment_transaction_hash?: string | null
           deployment_wallet_reference?: string | null
@@ -512,10 +516,12 @@ export type Database = {
           contract_version?: string | null
           created_at?: string
           deploy_idempotency_key?: string | null
+          deployment_attempt?: number
           deployment_fee_quote_id?: string | null
           deployed_at?: string | null
           deployment_block_hash?: string | null
           deployment_block_number?: number | null
+          deployment_request_hash?: string | null
           deployment_status?: string
           deployment_transaction_hash?: string | null
           deployment_wallet_reference?: string | null
@@ -2861,6 +2867,7 @@ export type Database = {
           target_program_id: string
           target_program_key: string
           target_refund_unlock_at: string
+          target_request_hash: string
           target_runtime_checksum: string
           target_withdraw_recipient: string
         }
@@ -3666,6 +3673,15 @@ export type Database = {
       write_program_children: {
         Args: { input: Json; target_program_id: string }
         Returns: undefined
+      }
+      rotate_escrow_deployment_idempotency_key_atomic: {
+        Args: {
+          target_deployment_id: string
+          target_idempotency_key: string
+          target_reason: string
+          target_request_hash: string
+        }
+        Returns: string
       }
     }
     Enums: {

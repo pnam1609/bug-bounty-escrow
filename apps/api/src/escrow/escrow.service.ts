@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import {
   ConflictException,
@@ -65,6 +65,7 @@ import { GatewaySubscriptionLifecycleService } from './gateway-subscription-life
 
 const INTENT_TTL_MS = 30 * 60 * 1000;
 const LATE_FUNDING_BATCH_SIZE = 500;
+const MAX_CIRCLE_DEPLOYMENT_ATTEMPTS = 2;
 const PROGRAM_KEY_DOMAIN = keccak256(stringToHex('bountyescrow.xyz/BountyEscrow/v1'));
 
 function canonicalProgramKey(programId: string): Hex {
@@ -79,6 +80,29 @@ function canonicalProgramKey(programId: string): Hex {
 
 function asAddress(value: string): `0x${string}` {
   return value as `0x${string}`;
+}
+
+function deploymentRequestHash(input: {
+  programKey: string;
+  platformAdminWallet: string;
+  ownerWallet: string;
+  tokenAddress: string;
+  refundUnlockAt: string;
+  artifactChecksum: string;
+  runtimeChecksum: string;
+  contractVersion: string;
+}): `0x${string}` {
+  const canonical = JSON.stringify({
+    artifactChecksum: input.artifactChecksum.toLowerCase(),
+    contractVersion: input.contractVersion,
+    ownerWallet: input.ownerWallet.toLowerCase(),
+    platformAdminWallet: input.platformAdminWallet.toLowerCase(),
+    programKey: input.programKey.toLowerCase(),
+    refundUnlockAt: input.refundUnlockAt,
+    runtimeChecksum: input.runtimeChecksum.toLowerCase(),
+    tokenAddress: input.tokenAddress.toLowerCase(),
+  });
+  return `0x${createHash('sha256').update(canonical).digest('hex')}`;
 }
 
 export function buildEscrowWalletControlMessage(input: {
@@ -253,6 +277,16 @@ export class EscrowService {
     if (programOwnerWallet === undefined || programOwnerWallet === null) {
       throw new ConflictException('program_owner_wallet_required');
     }
+    const requestHash = deploymentRequestHash({
+      programKey,
+      platformAdminWallet: platformAdminContract,
+      ownerWallet: programOwnerWallet,
+      tokenAddress: ARC_TESTNET_USDC_ADDRESS,
+      refundUnlockAt: programDeadline,
+      artifactChecksum: artifact.artifactSha256,
+      runtimeChecksum: artifact.runtimeBytecodeSha256,
+      contractVersion: artifact.version,
+    });
     deployment = await this.repository.createServerDeploymentRecord({
       actorId: principal.userId,
       programId,
@@ -265,6 +299,7 @@ export class EscrowService {
       runtimeChecksum: artifact.runtimeBytecodeSha256,
       immutableReferences: artifact.immutableReferences,
       idempotencyKey: deployment?.deploy_idempotency_key ?? randomUUID(),
+      requestHash,
       feeQuoteId: fee.id,
     });
     if (deployment.deployment_status === 'confirmed' || deployment.deployment_status === 'failed') {
@@ -273,22 +308,41 @@ export class EscrowService {
 
     try {
       if (deployment.circle_contract_id === null || deployment.circle_transaction_id === null) {
-        const accepted = await this.circle.deploy({
-          idempotencyKey: deployment.deploy_idempotency_key,
-          programId,
-          programKey,
-          platformAdminWallet: asAddress(platformAdminContract),
-          ownerWallet: asAddress(programOwnerWallet),
-          tokenAddress: asAddress(ARC_TESTNET_USDC_ADDRESS),
-          refundUnlockAt: BigInt(Math.floor(new Date(programDeadline).getTime() / 1000)),
-          withdrawRecipient: asAddress(programOwnerWallet),
-          artifact,
-        });
-        deployment = await this.repository.storeCircleDeploymentIdentifiers(
-          deployment.id,
-          accepted.contractId,
-          accepted.transactionId,
-        );
+        while (true) {
+          try {
+            const accepted = await this.circle.deploy({
+              idempotencyKey: deployment.deploy_idempotency_key,
+              programId,
+              programKey,
+              platformAdminWallet: asAddress(platformAdminContract),
+              ownerWallet: asAddress(programOwnerWallet),
+              tokenAddress: asAddress(ARC_TESTNET_USDC_ADDRESS),
+              refundUnlockAt: BigInt(Math.floor(new Date(programDeadline).getTime() / 1000)),
+              withdrawRecipient: asAddress(programOwnerWallet),
+              artifact,
+            });
+            deployment = await this.repository.storeCircleDeploymentIdentifiers(
+              deployment.id,
+              accepted.contractId,
+              accepted.transactionId,
+            );
+            break;
+          } catch (error) {
+            if (
+              !(error instanceof EscrowProviderError) ||
+              error.providerStatus !== 400 ||
+              deployment.deployment_attempt >= MAX_CIRCLE_DEPLOYMENT_ATTEMPTS
+            ) {
+              throw error;
+            }
+            deployment = await this.repository.rotateDeploymentIdempotencyKey({
+              deploymentId: deployment.id,
+              idempotencyKey: randomUUID(),
+              requestHash,
+              reason: 'circle_validation_rejection_without_provider_identifiers',
+            });
+          }
+        }
       }
       const result = await this.circle.waitForDeployment({
         contractId: deployment.circle_contract_id!,

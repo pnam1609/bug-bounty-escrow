@@ -66,6 +66,7 @@ const expectedMigrations = [
   '20260801000700_program_owner_withdraw_authority.sql',
   '20260801000800_program_deactivated_status.sql',
   '20260801000900_admin_only_deactivation.sql',
+  '20260801001000_cp13_deployment_idempotency_recovery.sql',
 ];
 
 const tableMigrations = new Map([

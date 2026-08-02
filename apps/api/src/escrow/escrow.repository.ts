@@ -217,6 +217,8 @@ export interface EscrowDeploymentRow {
   contract_address: `0x${string}` | null;
   deployment_transaction_hash: `0x${string}` | null;
   failure_code: string | null;
+  deployment_attempt: number;
+  deployment_request_hash: `0x${string}` | null;
   updated_at: string;
   platform_admin_wallet?: `0x${string}` | null;
   deployment_fee_quote_id?: string | null;
@@ -904,7 +906,7 @@ export class EscrowRepository
     actorId: string; programId: string; programKey: string; platformAdminWallet: string;
     programOwnerWallet: string;
     withdrawRecipient: string; refundUnlockAt: string; artifactChecksum: string; runtimeChecksum: string;
-    immutableReferences: unknown; idempotencyKey: string; feeQuoteId: string;
+    immutableReferences: unknown; idempotencyKey: string; requestHash: string; feeQuoteId: string;
   }): Promise<EscrowDeploymentRow> {
     const id = await this.executeAtomicRpc<string>('create_escrow_deployment_server_atomic', {
       actor_id: input.actorId, target_program_id: input.programId, target_program_key: input.programKey.toLowerCase(),
@@ -912,10 +914,31 @@ export class EscrowRepository
       target_program_owner_wallet: input.programOwnerWallet.toLowerCase(),
       target_refund_unlock_at: input.refundUnlockAt, target_artifact_checksum: input.artifactChecksum.toLowerCase(),
       target_runtime_checksum: input.runtimeChecksum.toLowerCase(), target_immutable_references: input.immutableReferences,
-      target_idempotency_key: input.idempotencyKey, target_fee_quote_id: input.feeQuoteId,
+      target_idempotency_key: input.idempotencyKey, target_request_hash: input.requestHash.toLowerCase(),
+      target_fee_quote_id: input.feeQuoteId,
     });
     const row = await this.findDeploymentById(id);
     if (row === null) throw new Error('escrow_deployment_not_found_after_create');
+    return row;
+  }
+
+  public async rotateDeploymentIdempotencyKey(input: {
+    deploymentId: string;
+    idempotencyKey: string;
+    requestHash: string;
+    reason: string;
+  }): Promise<EscrowDeploymentRow> {
+    const id = await this.executeAtomicRpc<string>(
+      'rotate_escrow_deployment_idempotency_key_atomic',
+      {
+        target_deployment_id: input.deploymentId,
+        target_idempotency_key: input.idempotencyKey,
+        target_request_hash: input.requestHash.toLowerCase(),
+        target_reason: input.reason,
+      },
+    );
+    const row = await this.findDeploymentById(id);
+    if (row === null) throw new Error('escrow_deployment_not_found_after_idempotency_rotation');
     return row;
   }
 

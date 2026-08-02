@@ -263,6 +263,8 @@ export class EscrowProviderError extends Error {
   public constructor(
     public readonly code: string,
     public readonly retryable: boolean,
+    /** HTTP status returned by the provider when this was a request validation error. */
+    public readonly providerStatus?: number,
   ) {
     super(code);
     this.name = 'EscrowProviderError';
