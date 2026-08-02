@@ -146,6 +146,7 @@ describe('Circle Contracts adapter', () => {
         idempotencyKey: DEPLOY_INPUT.idempotencyKey,
         walletId: WALLET_ID,
         blockchain: 'ARC-TESTNET',
+        description: `BountyEscrowProgram${DEPLOY_INPUT.programId.replaceAll('-', '')}`,
         bytecode: DEPLOY_INPUT.artifact.bytecode,
         constructorParameters: [
           DEPLOY_INPUT.programKey,

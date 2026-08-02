@@ -66,14 +66,14 @@ const idempotencyKey = uuid('BOUNTY_ESCROW_ADMIN_DEPLOY_IDEMPOTENCY_KEY');
 const acceptedResponse = await contracts.deployContract({
   idempotencyKey,
   name: 'BountyEscrowAdmin',
-  description: 'Platform fee and program escrow controller for Bounty Escrow',
-  walletId,
+  description: 'BountyEscrowAdminPlatformController',
   blockchain: ARC_TESTNET,
+  walletId,
   abiJson: JSON.stringify(artifact.abi),
   bytecode: artifact.bytecode,
   constructorParameters: [wallet.address, tokenAddress, feeAmount],
   fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
-} as Parameters<typeof contracts.deployContract>[0]);
+} as unknown as Parameters<typeof contracts.deployContract>[0]);
 const accepted = acceptedResponse.data;
 const contractId = accepted?.contractId;
 const transactionId = accepted?.transactionId;
