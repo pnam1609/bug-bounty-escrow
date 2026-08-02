@@ -1082,6 +1082,11 @@ Client-supplied
 fee status chưa `paid` hoặc `waived`, và khi accepted trả `pending` trong lúc Circle deployment
 worker chạy bằng configured Circle deployment wallet; controller registration binds the verified
 `BountyEscrowAdmin` address and the program owner authority/withdraw recipient.
+Trước khi ký fee, client kiểm tra chain của wallet. Nếu Arc Testnet chưa được thêm, client phải thông
+báo và gửi `wallet_addEthereumChain` (chain ID `5042002`, RPC/explorer chính thức) tới wallet; chỉ
+sau khi wallet chấp thuận và đang ở Arc Testnet mới gửi approve USDC rồi charge fee. Nếu wallet báo
+từ chối hoặc thiếu USDC/native gas, wallet tự hiển thị lỗi và client chỉ hiển thị thêm trạng thái
+`Deployment fee charge failed`; client không tự suy đoán số dư và không đánh dấu fee đã trả.
 
 Owner listing tách khỏi public listing để route công khai chỉ phục vụ dữ liệu công khai.
 `POST /:id/status` xử lý `awaiting_funding`, `paused`, `deactivated`, `expired`, `closed`; publish có endpoint

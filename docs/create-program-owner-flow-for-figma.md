@@ -1819,6 +1819,15 @@ fee, later escrow funding and program-owner controls, never as the Circle deploy
 - Dùng connector hiện có (`wagmi` + `viem`) để owner xem quote và thực hiện direct fee payment tới
   server-verified `BountyEscrowAdmin` recipient. Payment transaction hash chỉ là lookup hint; backend verify exact
   token/amount/recipient/receipt trước khi mở deploy.
+- Trước khi xin chữ ký fee, client đọc chain hiện tại của wallet. Nếu wallet chưa có Arc Testnet,
+  UI phải thông báo rõ và gửi `wallet_addEthereumChain` với chain ID `5042002`, RPC và explorer
+  chính thức; chỉ sau khi wallet chấp thuận và đã chuyển sang Arc Testnet mới được gửi các request
+  approve USDC và charge fee. Nếu Arc đã được thêm nhưng đang ở chain khác, client gửi
+  `wallet_switchEthereumChain` trước khi charge.
+- Wallet là nơi quyết định số dư USDC/native gas và hiển thị lỗi giao dịch. Khi wallet từ chối hoặc
+  báo thiếu tiền/gas, UI phải hiển thị thêm trạng thái `Deployment fee charge failed` sau khi người
+  dùng quay lại trang; client không tự ghi nhận fee là paid. Chỉ transaction hash đã được wallet
+  trả về mới được gửi lên backend để verify.
 - Hiển thị:
   - Connected address hoặc `Not connected`.
   - Deployment wallet: `Circle deployment wallet` (masked, read-only); `BountyEscrowAdmin` address is shown separately.

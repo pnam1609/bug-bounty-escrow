@@ -44,9 +44,16 @@ import {
   StatusBadge,
   Stepper,
 } from '@bug-bounty-escrow/ui';
+import { ArcTestnet } from '@circle-fin/app-kit/chains';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, LoaderCircle } from 'lucide-react';
-import { encodeAbiParameters, encodeFunctionData, keccak256, stringToHex } from 'viem';
+import {
+  encodeAbiParameters,
+  encodeFunctionData,
+  keccak256,
+  stringToHex,
+  type EIP1193Provider,
+} from 'viem';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -149,6 +156,7 @@ function canonicalProgramKey(programId: string): `0x${string}` {
 async function waitForWalletReceipt(
   provider: { request(args: { method: string; params?: unknown[] }): Promise<unknown> },
   transactionHash: string,
+  transactionLabel: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const receipt = await provider.request({
@@ -157,13 +165,130 @@ async function waitForWalletReceipt(
     });
     if (receipt !== null && typeof receipt === 'object') {
       if ((receipt as { status?: unknown }).status === '0x0') {
-        throw new Error('The deployment-fee approval transaction reverted.');
+        throw new Error(`The ${transactionLabel} transaction was reverted by the wallet.`);
       }
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  throw new Error('Timed out waiting for the deployment-fee approval transaction.');
+  throw new Error(`Timed out waiting for the ${transactionLabel} transaction.`);
+}
+
+type DeploymentFeeStage = 'idle' | 'network' | 'approval' | 'charge' | 'verification';
+
+function providerErrorCode(error: unknown): string | number | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' || typeof code === 'number' ? code : undefined;
+}
+
+function providerErrorMessage(error: unknown): string | undefined {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message.trim();
+  if (typeof error === 'string' && error.trim().length > 0) return error.trim();
+  if (typeof error !== 'object' || error === null || !('message' in error)) return undefined;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim().length > 0 ? message.trim() : undefined;
+}
+
+function isUnknownChainError(error: unknown): boolean {
+  const code = providerErrorCode(error);
+  const message = providerErrorMessage(error) ?? '';
+  return (
+    code === 4902 ||
+    code === '4902' ||
+    /(?:unknown|unrecognized|unsupported|not configured|not found).*chain|chain.*(?:unknown|unrecognized|unsupported|not configured|not found)/iu.test(
+      message,
+    )
+  );
+}
+
+function isWalletRejection(error: unknown): boolean {
+  const code = providerErrorCode(error);
+  const message = providerErrorMessage(error) ?? '';
+  return (
+    code === 4001 ||
+    code === '4001' ||
+    /user rejected|user denied|rejected the request|request rejected|denied/iu.test(message)
+  );
+}
+
+function isInsufficientWalletFunds(error: unknown): boolean {
+  const message = providerErrorMessage(error) ?? '';
+  return /insufficient funds|insufficient balance|not enough funds|balance.*(?:low|insufficient)|gas.*(?:fund|balance)/iu.test(
+    message,
+  );
+}
+
+function deploymentFeeWalletError(error: unknown, stage: DeploymentFeeStage): string {
+  if (stage === 'network') {
+    if (isWalletRejection(error)) {
+      return 'Arc Testnet was not added or selected. Approve the network request in your wallet to continue.';
+    }
+    return 'The wallet could not add or select Arc Testnet. Check the wallet request and try again.';
+  }
+  if (stage === 'verification') {
+    return error instanceof Error ? error.message : 'The deployment fee could not be verified.';
+  }
+  if (isWalletRejection(error)) {
+    return 'The wallet rejected the deployment fee request. No fee was charged.';
+  }
+  if (isInsufficientWalletFunds(error)) {
+    return 'Deployment fee charge failed: the wallet reports insufficient USDC or Arc Testnet gas.';
+  }
+  const message = providerErrorMessage(error);
+  return message === undefined
+    ? 'Deployment fee charge failed in the wallet. Return to the wallet and try again.'
+    : `Deployment fee charge failed in the wallet: ${message}`;
+}
+
+async function ensureArcTestnetWallet(
+  provider: EIP1193Provider,
+  onNetworkPrompt: (message: string) => void,
+): Promise<void> {
+  const targetChainId = `0x${ArcTestnet.chainId.toString(16)}`;
+  const currentChainId = await provider.request({ method: 'eth_chainId' });
+  if (
+    typeof currentChainId === 'string' &&
+    Number.parseInt(currentChainId, 16) === ArcTestnet.chainId
+  ) {
+    return;
+  }
+
+  onNetworkPrompt('Your wallet must switch to Arc Testnet before charging the deployment fee.');
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: targetChainId }],
+    });
+  } catch (error) {
+    if (!isUnknownChainError(error)) throw error;
+    onNetworkPrompt(
+      'Arc Testnet is not added to your wallet. Approve the wallet request to add Arc Testnet, then charging will continue.',
+    );
+    await provider.request({
+      method: 'wallet_addEthereumChain',
+      params: [
+        {
+          chainId: targetChainId,
+          chainName: ArcTestnet.name,
+          nativeCurrency: ArcTestnet.nativeCurrency,
+          rpcUrls: [...ArcTestnet.rpcEndpoints],
+          blockExplorerUrls: [ArcTestnet.explorerUrl.replace(/\/tx\/\{hash\}$/u, '')],
+        },
+      ],
+    });
+  }
+
+  const selectedChainId = await provider.request({ method: 'eth_chainId' });
+  if (
+    typeof selectedChainId !== 'string' ||
+    Number.parseInt(selectedChainId, 16) !== ArcTestnet.chainId
+  ) {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: targetChainId }],
+    });
+  }
 }
 
 function deploymentFeeStatusLabel(status: DeploymentFeeQuote['status']): string {
@@ -489,6 +614,9 @@ export function ProgramLifecycle({
   const [deploymentFeePaymentHash, setDeploymentFeePaymentHash] = useState<string>();
   const [deploymentFeeLoading, setDeploymentFeeLoading] = useState(false);
   const [deploymentFeeError, setDeploymentFeeError] = useState<string>();
+  const [deploymentFeeNotice, setDeploymentFeeNotice] = useState<string>();
+  const [deploymentFeeStage, setDeploymentFeeStage] = useState<DeploymentFeeStage>('idle');
+  const deploymentFeeStageRef = useRef<DeploymentFeeStage>('idle');
   const [deploymentStatus, setDeploymentStatus] = useState<EscrowDeployment['status']>();
   const [grossAmount, setGrossAmount] = useState('');
   const [sources, setSources] = useState<readonly FundingSource[]>([
@@ -776,6 +904,8 @@ export function ProgramLifecycle({
       const quote = deploymentFeeQuote;
       if (quote === undefined) throw new Error('Request a deployment fee quote first.');
       if (deploymentFeePaymentHash !== undefined) {
+        deploymentFeeStageRef.current = 'verification';
+        setDeploymentFeeStage('verification');
         const paymentBody = observeDeploymentFeePaymentRequestSchema.parse({
           quoteId: quote.id,
           payerAddress: walletSession.address,
@@ -788,20 +918,22 @@ export function ProgramLifecycle({
         );
         return response.data;
       }
+
       const amount = parseUsdcBaseUnits(quote.amount);
       if (amount === undefined || amount <= 0n)
         throw new Error('The server returned an invalid deployment fee.');
-      const chainHex = `0x${quote.chainId.toString(16)}`;
-      const chainId = await walletSession.wallet.provider.request({
-        method: 'eth_chainId',
-        params: undefined,
-      });
-      if (typeof chainId !== 'string' || Number.parseInt(chainId, 16) !== quote.chainId) {
-        await walletSession.wallet.provider.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: chainHex }],
-        });
+      if (quote.chainId !== ArcTestnet.chainId) {
+        throw new Error('The server returned an unsupported deployment-fee network.');
       }
+      deploymentFeeStageRef.current = 'network';
+      setDeploymentFeeStage('network');
+      await ensureArcTestnetWallet(walletSession.wallet.provider, (message) => {
+        setDeploymentFeeNotice(message);
+      });
+      setDeploymentFeeNotice(undefined);
+
+      deploymentFeeStageRef.current = 'approval';
+      setDeploymentFeeStage('approval');
       const approvalHash = await walletSession.wallet.provider.request({
         method: 'eth_sendTransaction',
         params: [
@@ -825,7 +957,11 @@ export function ProgramLifecycle({
           request(args: { method: string; params?: unknown[] }): Promise<unknown>;
         },
         approvalHash,
+        'deployment-fee approval',
       );
+
+      deploymentFeeStageRef.current = 'charge';
+      setDeploymentFeeStage('charge');
       const transactionHash = await walletSession.wallet.provider.request({
         method: 'eth_sendTransaction',
         params: [
@@ -849,8 +985,12 @@ export function ProgramLifecycle({
           request(args: { method: string; params?: unknown[] }): Promise<unknown>;
         },
         transactionHash,
+        'deployment-fee charge',
       );
       setDeploymentFeePaymentHash(transactionHash);
+
+      deploymentFeeStageRef.current = 'verification';
+      setDeploymentFeeStage('verification');
       const paymentBody = observeDeploymentFeePaymentRequestSchema.parse({
         quoteId: quote.id,
         payerAddress: walletSession.address,
@@ -867,15 +1007,25 @@ export function ProgramLifecycle({
       );
       return response.data;
     },
+    onMutate: () => {
+      setDeploymentFeeError(undefined);
+      setDeploymentFeeNotice(undefined);
+      deploymentFeeStageRef.current = 'network';
+      setDeploymentFeeStage('network');
+    },
     onSuccess: (quote) => {
       setDeploymentFeeQuote(quote);
       setDeploymentFeePaymentHash(undefined);
       setDeploymentFeeError(undefined);
+      setDeploymentFeeNotice(undefined);
+      deploymentFeeStageRef.current = 'idle';
+      setDeploymentFeeStage('idle');
     },
     onError: (error: unknown) => {
-      setDeploymentFeeError(
-        error instanceof Error ? error.message : 'Fee payment could not be verified.',
-      );
+      setDeploymentFeeError(deploymentFeeWalletError(error, deploymentFeeStageRef.current));
+      setDeploymentFeeNotice(undefined);
+      deploymentFeeStageRef.current = 'idle';
+      setDeploymentFeeStage('idle');
     },
   });
 
@@ -3034,6 +3184,11 @@ export function ProgramLifecycle({
               {deploymentFeeError}
             </Callout>
           )}
+          {deploymentFeeNotice === undefined ? null : (
+            <Callout title="Wallet action required" variant="warning">
+              {deploymentFeeNotice}
+            </Callout>
+          )}
 
           <div className="flex flex-col gap-sm rounded-md border border-border bg-surface-raised p-lg">
             <span className="text-label-md text-text-muted">Deployment fee</span>
@@ -3066,7 +3221,13 @@ export function ProgramLifecycle({
                   label="Status"
                   value={
                     deploymentFeePaymentMutation.isPending
-                      ? 'Payment verifying'
+                      ? deploymentFeeStage === 'network'
+                        ? 'Waiting for wallet network approval'
+                        : deploymentFeeStage === 'approval'
+                          ? 'Waiting for USDC approval'
+                          : deploymentFeeStage === 'charge'
+                            ? 'Waiting for fee charge'
+                            : 'Payment verifying'
                       : deploymentFeeStatusLabel(deploymentFeeQuote.status)
                   }
                 />
