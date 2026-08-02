@@ -354,6 +354,41 @@ describe('Arc RPC escrow verifier', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('serializes immutable reads to stay below Arc public RPC burst limits', async () => {
+    const client = rpc();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    client.readContract = vi.fn().mockImplementation(async (input: { functionName: string }) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      const values: Record<string, unknown> = {
+        programKey: PROGRAM_KEY,
+        programOwner: OWNER,
+        adminController: OWNER,
+        token: USDC,
+        refundUnlockAt: UNLOCK,
+        withdrawRecipient: RECIPIENT,
+      };
+      return values[input.functionName];
+    });
+
+    await new ArcRpcAdapter(config(), client).verifyDeployment({
+      artifact: ARTIFACT,
+      contractAddress: ESCROW,
+      transactionHash: TRANSACTION_HASH,
+      expectedBlockNumber: 42n,
+      expectedBlockHash: BLOCK_HASH,
+      programKey: PROGRAM_KEY,
+      platformAdminWallet: OWNER,
+      refundUnlockAt: UNLOCK,
+      withdrawRecipient: RECIPIENT,
+    });
+
+    expect(maxInFlight).toBe(1);
+  });
+
   it('rejects a reverted deployment receipt', async () => {
     const adapter = new ArcRpcAdapter(config(), rpc(initializedLog(), 'reverted'));
     await expect(

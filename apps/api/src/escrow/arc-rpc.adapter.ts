@@ -429,14 +429,15 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
         abi: ESCROW_ABI,
         functionName,
       });
-    const [programKey, programOwner, adminController, token, refundUnlockAt, withdrawRecipient] = await Promise.all([
-      read('programKey'),
-      read('programOwner'),
-      read('adminController'),
-      read('token'),
-      read('refundUnlockAt'),
-      read('withdrawRecipient'),
-    ]);
+    // Arc's public RPC applies a per-origin request limit.  Keep these
+    // immutable reads sequential so verification cannot burst six eth_call
+    // requests at once and surface a provider rate-limit as a deployment 500.
+    const programKey = await read('programKey');
+    const programOwner = await read('programOwner');
+    const adminController = await read('adminController');
+    const token = await read('token');
+    const refundUnlockAt = await read('refundUnlockAt');
+    const withdrawRecipient = await read('withdrawRecipient');
     const legacyPlatformAdmin =
       typeof programOwner !== 'string' || typeof adminController !== 'string'
         ? await read('platformAdmin')
