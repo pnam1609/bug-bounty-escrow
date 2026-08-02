@@ -68,6 +68,7 @@ const acceptedResponse = await contracts.deployContract({
   name: 'BountyEscrowAdmin',
   description: 'Platform fee and program escrow controller for Bounty Escrow',
   walletId,
+  blockchain: ARC_TESTNET,
   abiJson: JSON.stringify(artifact.abi),
   bytecode: artifact.bytecode,
   constructorParameters: [wallet.address, tokenAddress, feeAmount],

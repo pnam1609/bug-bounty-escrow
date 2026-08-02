@@ -145,6 +145,7 @@ describe('Circle Contracts adapter', () => {
       expect.objectContaining({
         idempotencyKey: DEPLOY_INPUT.idempotencyKey,
         walletId: WALLET_ID,
+        blockchain: 'ARC-TESTNET',
         bytecode: DEPLOY_INPUT.artifact.bytecode,
         constructorParameters: [
           DEPLOY_INPUT.programKey,
@@ -154,10 +155,6 @@ describe('Circle Contracts adapter', () => {
           DEPLOY_INPUT.withdrawRecipient,
         ],
       }),
-    );
-    const deployMock = vi.mocked(fakeClients.contracts.deployContract);
-    expect(deployMock.mock.calls[0]?.[0]).not.toHaveProperty(
-      'blockchain',
     );
   });
 
