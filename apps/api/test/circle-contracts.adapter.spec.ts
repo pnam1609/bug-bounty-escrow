@@ -158,6 +158,19 @@ describe('Circle Contracts adapter', () => {
     );
   });
 
+  it('treats Circle SDK top-level 4xx status as a terminal request rejection', async () => {
+    const fakeClients = clients();
+    fakeClients.contracts.deployContract = vi
+      .fn()
+      .mockRejectedValue({ status: 400, code: 2, message: 'API parameter invalid' });
+    const adapter = new CircleContractsAdapter(config(), fakeClients);
+
+    await expect(adapter.deploy(DEPLOY_INPUT)).rejects.toMatchObject({
+      code: 'circle_request_rejected',
+      retryable: false,
+    });
+  });
+
   it('accepts only the configured LIVE developer-controlled Arc SCA as deployer', async () => {
     const adapter = new CircleContractsAdapter(config(), clients());
     await expect(adapter.getDeploymentWalletAddress()).resolves.toBe(DEPLOYER);

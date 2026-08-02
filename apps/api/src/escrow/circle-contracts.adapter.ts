@@ -384,8 +384,18 @@ export class CircleContractsAdapter implements CircleContractsGateway {
       return new EscrowProviderError('circle_response_invalid', false);
     }
     if (typeof error === 'object' && error !== null) {
-      const response = (error as { response?: { status?: unknown } }).response;
-      const status = response?.status;
+      // The Circle SDK exposes HTTP status on the error itself (`status`).
+      // Some HTTP clients wrap it under `response.status`, so support both
+      // shapes.  Without the top-level check, a Circle 4xx validation error
+      // is treated as an unknown/retryable failure and surfaces as HTTP 503.
+      const providerError = error as {
+        status?: unknown;
+        response?: { status?: unknown };
+      };
+      const status =
+        typeof providerError.status === 'number'
+          ? providerError.status
+          : providerError.response?.status;
       if (typeof status === 'number') {
         const retryable = status === 408 || status === 429 || status >= 500;
         return new EscrowProviderError(
