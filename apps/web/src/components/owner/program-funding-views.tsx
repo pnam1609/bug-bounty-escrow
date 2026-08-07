@@ -23,6 +23,7 @@ import {
   fundingEstimatedNetAmount,
   fundingRecoveryAction,
   fundingRouteLabel,
+  parseUsdcBaseUnits,
   type FundingDestinationResult,
   type FundingNetworkId,
   type FundingOperationPhase,
@@ -109,6 +110,9 @@ export function FundingAllocations({
   const routeMode = deriveFundingRoute(sources);
   const selectedNetworks = new Set(sources.map((source) => source.network));
   const isUnified = routeMode === 'unified_balance';
+  const hasStartedUnifiedDeposit = sources.some(
+    (source) => (depositStatuses[source.rowId] ?? 'not_started') !== 'not_started',
+  );
 
   return (
     <div className="flex min-w-0 flex-col gap-xl">
@@ -170,6 +174,13 @@ export function FundingAllocations({
           {sources.map((source, index) => {
             const network = FUNDING_NETWORKS[source.network];
             const status = depositStatuses[source.rowId] ?? 'not_started';
+            const amountBaseUnits = parseUsdcBaseUnits(source.amount);
+            const hasValidAmount = amountBaseUnits !== undefined && amountBaseUnits > 0n;
+            const depositBlocked =
+              status === 'submitting' ||
+              status === 'pending' ||
+              status === 'confirmed' ||
+              status === 'recovery_required';
             return (
               <section
                 aria-labelledby={`${fieldId(`fund.source.${source.rowId}`)}-heading`}
@@ -290,8 +301,8 @@ export function FundingAllocations({
                       disabled={
                         !transactionsEnabled ||
                         walletAddress === undefined ||
-                        status === 'submitting' ||
-                        status === 'confirmed'
+                        !hasValidAmount ||
+                        depositBlocked
                       }
                       loading={status === 'submitting'}
                       onClick={() => onDepositSource(source)}
@@ -371,8 +382,9 @@ export function FundingAllocations({
               </Button>
             </div>
             <p className="text-label-md text-text-muted">
-              Existing confirmed Gateway balance can satisfy selected allocations. Pending deposits
-              do not count; add only missing sources, one wallet prompt at a time.
+              {hasStartedUnifiedDeposit
+                ? 'Existing confirmed Unified Balance can satisfy selected allocations; pending deposits do not count. Continue one wallet prompt at a time.'
+                : 'No deposit in this intent yet. Existing confirmed Unified Balance can satisfy selected allocations; pending deposits do not count. Add only missing sources, one wallet prompt at a time.'}
             </p>
             {transactionsEnabled ? null : (
               <p className="text-label-md text-warning">
@@ -777,7 +789,7 @@ export function formatFundingConfirmationTimestamp(iso: string): string {
 
 export function NetworkIdentity({ network }: { readonly network: FundingNetworkId }) {
   return (
-    <span className="flex min-w-0 items-center gap-sm">
+    <span className="!flex min-w-0 flex-row items-center gap-sm">
       <NetworkLogo network={network} />
       <span className="truncate text-label-sm">{FUNDING_NETWORKS[network].label}</span>
     </span>
@@ -789,31 +801,50 @@ function NetworkLogo({ network }: { readonly network: FundingNetworkId }) {
   if (network === 'Ethereum_Sepolia') {
     return (
       <svg aria-hidden="true" className={common} fill="none" viewBox="0 0 24 24">
-        <path d="M12 2 6.5 12 12 15.2 17.5 12 12 2Z" fill="#627EEA" />
-        <path d="m6.5 13.1 5.5 8.2 5.5-8.2-5.5 3.2-5.5-3.2Z" fill="#627EEA" />
+        <path d="m12 1.75-6.1 10.17L12 15.5l6.1-3.58L12 1.75Z" fill="var(--color-usdc)" />
+        <path d="m12 16.63-6.1-3.55L12 22.25l6.1-9.17-6.1 3.55Z" fill="var(--color-usdc)" />
+        <path d="m12 15.5 6.1-3.58-6.1 2.45v1.13Z" fill="var(--color-usdc)" />
       </svg>
     );
   }
   if (network === 'Arbitrum_Sepolia') {
     return (
-      <svg aria-hidden="true" className={`${common} text-usdc`} fill="none" viewBox="0 0 24 24">
-        <path d="m12 2 8.5 5v10L12 22l-8.5-5V7L12 2Z" stroke="currentColor" strokeWidth="1.5" />
-        <path d="m8 17 4-10h2l-4 10H8Zm4 0 4-10h1.5l-4 10H12Z" fill="currentColor" />
+      <svg aria-hidden="true" className={common} fill="none" viewBox="0 0 24 24">
+        <path
+          d="m12 1.75 8.75 5.06v10.38L12 22.25l-8.75-5.06V6.81L12 1.75Z"
+          fill="var(--color-primary)"
+        />
+        <path d="m8.1 16.85 3.25-9.7h2.05l-3.23 9.7H8.1Z" fill="var(--color-primary-contrast)" />
+        <path d="m12.3 16.85 3.25-9.7h2.05l-3.23 9.7H12.3Z" fill="var(--color-low)" />
       </svg>
     );
   }
   if (network === 'Base_Sepolia') {
     return (
-      <svg aria-hidden="true" className={`${common} text-usdc`} fill="none" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" fill="currentColor" r="10" />
-        <path d="M6 12h12" stroke="var(--color-primary-contrast)" strokeWidth="3" />
+      <svg aria-hidden="true" className={common} fill="none" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" fill="var(--color-usdc)" r="10" />
+        <path
+          d="M6.25 12c0-1.02.84-1.85 1.87-1.85h7.89a1.85 1.85 0 1 1 0 3.7H8.12A1.87 1.87 0 0 1 6.25 12Z"
+          fill="var(--color-primary-contrast)"
+        />
       </svg>
     );
   }
   return (
-    <svg aria-hidden="true" className={`${common} text-escrow`} fill="none" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-      <path d="M7 14.5c1.8-5 7-7.3 10-3.2" stroke="currentColor" strokeWidth="2" />
+    <svg aria-hidden="true" className={common} fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9.25" stroke="var(--color-escrow)" strokeWidth="2" />
+      <path
+        d="M7.1 14.55c1.15-3.5 3.18-5.28 5.44-5.28 1.61 0 3.18.88 4.35 2.48"
+        stroke="var(--color-escrow)"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+      <path
+        d="M8.15 16.2c1.28-2.05 2.81-3.08 4.55-3.08 1.27 0 2.42.47 3.2 1.3"
+        stroke="var(--color-escrow)"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }
@@ -826,7 +857,7 @@ function depositStatusLabel(status: SourceDepositStatus): string {
   if (status === 'replaceable') return 'Deposit reverted · replacement available';
   if (status === 'top_up_required') return 'Deposit or fee top-up required';
   if (status === 'recovery_required') return 'Recovery required · no automatic retry';
-  return 'No deposit in this intent · existing confirmed balance may apply';
+  return 'Ready to deposit';
 }
 
 function depositStatusVariant(

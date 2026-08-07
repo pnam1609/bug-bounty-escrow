@@ -38,8 +38,14 @@ export interface DiscoveredEvmWallet {
   readonly id: string;
   readonly name: string;
   readonly icon?: string;
+  /** EIP-6963 reverse-DNS identifier (for example, Rainbow uses `me.rainbow`). */
+  readonly rdns?: string;
   readonly provider: EIP1193Provider;
 }
+
+type LegacyInjectedProvider = EIP1193Provider & {
+  readonly isRainbow?: boolean;
+};
 
 interface Eip6963ProviderDetail {
   readonly info: {
@@ -86,6 +92,7 @@ export async function discoverEvmWallets(): Promise<readonly DiscoveredEvmWallet
       id: detail.info.uuid,
       name: detail.info.name,
       icon: detail.info.icon,
+      rdns: detail.info.rdns,
       provider: detail.provider,
     });
   };
@@ -95,15 +102,30 @@ export async function discoverEvmWallets(): Promise<readonly DiscoveredEvmWallet
   await new Promise((resolve) => window.setTimeout(resolve, 120));
   window.removeEventListener('eip6963:announceProvider', listener);
 
-  const legacy = (window as Window & { ethereum?: EIP1193Provider }).ethereum;
+  const legacy = (window as Window & { ethereum?: LegacyInjectedProvider }).ethereum;
   if (legacy !== undefined && discovered.size === 0) {
+    const isRainbow = legacy.isRainbow === true;
     discovered.set('legacy-injected', {
       id: 'legacy-injected',
-      name: 'Browser wallet',
+      name: isRainbow ? 'Rainbow' : 'Browser wallet',
+      ...(isRainbow ? { rdns: 'me.rainbow' } : {}),
       provider: legacy,
     });
   }
   return [...discovered.values()];
+}
+
+/**
+ * Rainbow announces its injected provider through EIP-6963. Prefer that provider when it is
+ * available so the existing Connect wallet action opens Rainbow's approval popup instead of
+ * silently choosing a different installed extension. Other injected providers remain supported.
+ */
+export function isRainbowWallet(wallet: Pick<DiscoveredEvmWallet, 'name' | 'rdns'>): boolean {
+  return (
+    wallet.rdns?.toLowerCase() === 'me.rainbow' ||
+    wallet.name.trim().toLowerCase() === 'rainbow' ||
+    wallet.name.toLowerCase().includes('rainbow')
+  );
 }
 
 export interface CircleWalletSession {
@@ -125,7 +147,8 @@ async function createCircleViemAdapter(provider: EIP1193Provider) {
 export async function connectCircleWallet(
   selectedWallet?: DiscoveredEvmWallet,
 ): Promise<CircleWalletSession> {
-  const wallet = selectedWallet ?? (await discoverEvmWallets())[0];
+  const wallets = selectedWallet === undefined ? await discoverEvmWallets() : [];
+  const wallet = selectedWallet ?? wallets.find(isRainbowWallet) ?? wallets[0];
   if (wallet === undefined) throw new Error('No EVM browser wallet was detected.');
 
   const accounts = await wallet.provider.request({

@@ -208,4 +208,174 @@ describe('CP-11 and CP-12 funding views', () => {
     );
     expect(submitButton).not.toBeNull();
   });
+
+  it('keeps source guidance in the Unified Balance summary and enables a valid locked deposit', () => {
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources,
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'Test wallet',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: {},
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        confirmedUnifiedBalance: '0',
+        pendingUnifiedBalance: '0',
+        estimatedFeeReserve: '0.25',
+        transactionsEnabled: true,
+        canSubmit: true,
+        readinessChecked: true,
+        working: false,
+        onConnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    expect((html.match(/No deposit in this intent yet/g) ?? []).length).toBe(1);
+    expect(html).toContain('Ready to deposit');
+    expect(html).toContain('!flex min-w-0 flex-row items-center');
+    const addButtons = html.match(/<button[^>]*>Add to Unified Balance<\/button>/g) ?? [];
+    expect(addButtons).toHaveLength(2);
+    expect(addButtons.every((button) => !button.includes('disabled=""'))).toBe(true);
+  });
+
+  it('keeps Add to Unified Balance disabled before the server intent is locked', () => {
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources,
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'Test wallet',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: {},
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        confirmedUnifiedBalance: undefined,
+        pendingUnifiedBalance: undefined,
+        estimatedFeeReserve: undefined,
+        transactionsEnabled: false,
+        canSubmit: false,
+        readinessChecked: false,
+        working: false,
+        onConnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    const addButtons = html.match(/<button[^>]*>Add to Unified Balance<\/button>/g) ?? [];
+    expect(addButtons).toHaveLength(2);
+    expect(addButtons.every((button) => button.includes('disabled=""'))).toBe(true);
+  });
+
+  it('does not claim that no deposit exists when another source is already pending', () => {
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources,
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'Test wallet',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: { arc: 'pending' },
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        confirmedUnifiedBalance: '0',
+        pendingUnifiedBalance: '4',
+        estimatedFeeReserve: '0.25',
+        transactionsEnabled: true,
+        canSubmit: true,
+        readinessChecked: true,
+        working: false,
+        onConnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    expect(html).not.toContain('No deposit in this intent yet');
+    expect(html).toContain('Existing confirmed Unified Balance can satisfy selected allocations');
+  });
+
+  it.each(['pending', 'confirmed', 'recovery_required', 'submitting'] as const)(
+    'keeps deposits fail-closed for %s state',
+    (status) => {
+      const html = renderToStaticMarkup(
+        createElement(FundingAllocations, {
+          program: program(),
+          grossAmount: '10',
+          sources,
+          errors: {},
+          walletAddress: WALLET,
+          walletName: 'Test wallet',
+          walletPending: false,
+          walletError: undefined,
+          depositStatuses: { arc: status, base: status },
+          depositRequiredAmounts: {},
+          depositRecoveryHashes: {},
+          confirmedUnifiedBalance: '0',
+          pendingUnifiedBalance: '0',
+          estimatedFeeReserve: '0.25',
+          transactionsEnabled: true,
+          canSubmit: true,
+          readinessChecked: true,
+          working: false,
+          onConnectWallet: vi.fn(),
+          onGrossAmountChange: vi.fn(),
+          onSourceChange: vi.fn(),
+          onAddSource: vi.fn(),
+          onRemoveSource: vi.fn(),
+          onDepositSource: vi.fn(),
+          onDepositRecoveryHashChange: vi.fn(),
+          onRefreshUnifiedBalance: vi.fn(),
+          onSubmit: vi.fn(),
+          onCheckReadiness: vi.fn(),
+          onLater: vi.fn(),
+        }),
+      );
+
+      const actionButtons =
+        status === 'submitting'
+          ? (html.match(/<button[^>]*aria-busy="true"[^>]*>/g) ?? [])
+          : (html.match(
+              /<button[^>]*>(?:Check deposit|Recover deposit|Add to Unified Balance)<\/button>/g,
+            ) ?? []);
+      expect(actionButtons).toHaveLength(2);
+      expect(actionButtons.every((button) => button.includes('disabled=""'))).toBe(true);
+    },
+  );
 });

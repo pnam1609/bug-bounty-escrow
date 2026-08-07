@@ -26,6 +26,23 @@ function dependencies(overrides: Partial<LogoutDependencies> = {}) {
 }
 
 describe('ACC-07 logout action', () => {
+  it('logs out while a browser wallet remains connected', async () => {
+    const connectedWallet = { address: `0x${'a'.repeat(40)}` };
+    const deps = dependencies({
+      auth: {
+        getSession: vi.fn(async () => ({ access_token: 'still-signed-in' })),
+        signOut: vi.fn(async () => {
+          expect(connectedWallet.address).toMatch(/^0x[0-9a-f]{40}$/u);
+        }),
+      },
+    });
+
+    await expect(createLogoutController(deps).run()).resolves.toBe('signed-out');
+    expect(deps.auth.signOut).toHaveBeenCalledTimes(1);
+    expect(deps.queryCache.clear).toHaveBeenCalledTimes(1);
+    expect(deps.router.replace).toHaveBeenCalledWith(LOGOUT_DESTINATION);
+  });
+
   it('confirms auth invalidation before clearing protected cache and replacing the route', async () => {
     const events: string[] = [];
     const deps = dependencies({

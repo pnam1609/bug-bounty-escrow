@@ -221,6 +221,7 @@ describe('route shell header boundaries', () => {
     );
 
     expect(ownerHtml).toContain('aria-label="Owner workspace"');
+    expect(ownerHtml).toContain('Open account menu');
     expect(reviewHtml).toContain('aria-label="Review workspace"');
     for (const html of [ownerHtml, reviewHtml]) {
       expect(html).not.toContain('>How it works<');

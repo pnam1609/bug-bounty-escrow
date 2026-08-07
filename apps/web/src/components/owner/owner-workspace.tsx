@@ -1,6 +1,12 @@
 'use client';
 
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   SiteBrand,
   SiteFooter,
   SiteFooterLink,
@@ -13,8 +19,10 @@ import {
 } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 
 import { ACCOUNT_SETTINGS_PATH } from '@/components/account/account-settings-model';
+import { LogoutMenuItem } from '@/components/account/logout-action';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 /*
@@ -45,7 +53,7 @@ function initialsOf(name: string): string {
   return letters === '' ? 'BB' : letters.toUpperCase();
 }
 
-/** Right-hand header region: the OWNER role pill and the signed-in account. */
+/** Right-hand header region: the OWNER role pill and the signed-in account menu. */
 function AccountBadge() {
   const user = useCurrentUser();
   const displayName = user.data?.displayName ?? 'Owner';
@@ -55,15 +63,36 @@ function AccountBadge() {
       <span className="inline-flex items-center rounded-full border border-border-brand px-md py-xs text-label-sm font-semibold uppercase text-primary">
         Owner
       </span>
-      <span className="inline-flex items-center gap-sm">
-        <span
-          aria-hidden="true"
-          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-raised text-label-sm text-text"
-        >
-          {initialsOf(displayName)}
-        </span>
-        <span className="text-body-sm text-text">{displayName}</span>
-      </span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="inline-flex min-h-11 items-center gap-md rounded-full px-sm text-body-sm text-text"
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-raised text-label-sm text-text"
+            >
+              {initialsOf(displayName)}
+            </span>
+            <span className="hidden sm:inline">{displayName}</span>
+            <ChevronDown aria-hidden="true" className="size-4 text-text-muted" />
+            <span className="sr-only">Open account menu</span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="min-w-56">
+          <DropdownMenuLabel>
+            <span className="block text-body-sm text-text">{displayName}</span>
+            <span className="block text-label-sm text-text-muted">Program owner</span>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link href={ACCOUNT_SETTINGS_PATH}>Account settings</Link>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <LogoutMenuItem />
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 }
@@ -100,21 +129,17 @@ export function OwnerWorkspace({
           }
           nav={
             <SiteNav aria-label="Primary">
-              {HEADER_LINKS.map((link) => (
+              {HEADER_LINKS.map((link) =>
                 navigationLocked ? (
-                  <SiteNavItem
-                    aria-disabled="true"
-                    className="pointer-events-none"
-                    key={link.href}
-                  >
+                  <SiteNavItem aria-disabled="true" className="pointer-events-none" key={link.href}>
                     {link.label}
                   </SiteNavItem>
                 ) : (
                   <SiteNavItem asChild key={link.href}>
                     <Link href={link.href}>{link.label}</Link>
                   </SiteNavItem>
-                )
-              ))}
+                ),
+              )}
               <SiteNavItem
                 aria-disabled="true"
                 className="pointer-events-none text-text-disabled"
@@ -128,29 +153,22 @@ export function OwnerWorkspace({
       }
       sidebar={
         <WorkspaceNav aria-label="Owner workspace" title="Owner workspace">
-          {SIDEBAR_LINKS.map((link) => (
+          {SIDEBAR_LINKS.map((link) =>
             navigationLocked ? (
-              <WorkspaceNavItem
-                active={activeHref === link.href}
-                disabled
-                key={link.href}
-              >
+              <WorkspaceNavItem active={activeHref === link.href} disabled key={link.href}>
                 {link.label}
               </WorkspaceNavItem>
             ) : (
               <WorkspaceNavItem asChild active={activeHref === link.href} key={link.href}>
                 <Link href={link.href}>{link.label}</Link>
               </WorkspaceNavItem>
-            )
-          ))}
+            ),
+          )}
           <WorkspaceNavItem disabled href={navigationLocked ? undefined : '#'}>
             Transactions · Future
           </WorkspaceNavItem>
           {navigationLocked ? (
-            <WorkspaceNavItem
-              active={activeHref === ACCOUNT_SETTINGS_PATH}
-              disabled
-            >
+            <WorkspaceNavItem active={activeHref === ACCOUNT_SETTINGS_PATH} disabled>
               Account settings
             </WorkspaceNavItem>
           ) : (
