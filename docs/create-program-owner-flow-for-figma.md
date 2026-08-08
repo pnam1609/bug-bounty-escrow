@@ -44,17 +44,17 @@ chỉ được rút bởi owner wallet đã được server bind từ owner acco
 
 ### Role matrix (canonical)
 
-| Capability | Platform admin / `BountyEscrowAdmin` | Program owner / bound owner wallet |
-| --- | --- | --- |
-| Deploy/register a program escrow | **Yes** (backend + Circle wallet) | No |
-| Collect program platform fee | **Yes** (`BountyEscrowAdmin`) | Pays fee |
-| Withdraw platform fees | **Yes**, only from `BountyEscrowAdmin` to the Circle deployment wallet resolved from `CIRCLE_DEPLOYMENT_WALLET_ID` | No |
-| Fund program escrow | Can support operationally, but not the owner funding path | **Yes**, direct Send/Bridge/Unified Balance |
-| Pause / close | Emergency support only, audited | **Yes**, normal authority |
-| Deactivate | **Yes**, admin-only emergency control | **No** |
-| Edit/extend timeline | Emergency support only, audited | **Yes**, normal authority |
-| Approve paid researcher reward | Emergency support only, audited | **Yes**, normal authority |
-| Withdraw remaining program funds | **Never** | **Yes**, only after close/unlock/outstanding checks |
+| Capability                       | Platform admin / `BountyEscrowAdmin`                                                                               | Program owner / bound owner wallet                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Deploy/register a program escrow | **Yes** (backend + Circle wallet)                                                                                  | No                                                  |
+| Collect program platform fee     | **Yes** (`BountyEscrowAdmin`)                                                                                      | Pays fee                                            |
+| Withdraw platform fees           | **Yes**, only from `BountyEscrowAdmin` to the Circle deployment wallet resolved from `CIRCLE_DEPLOYMENT_WALLET_ID` | No                                                  |
+| Fund program escrow              | Can support operationally, but not the owner funding path                                                          | **Yes**, direct Send/Bridge/Unified Balance         |
+| Pause / close                    | Emergency support only, audited                                                                                    | **Yes**, normal authority                           |
+| Deactivate                       | **Yes**, admin-only emergency control                                                                              | **No**                                              |
+| Edit/extend timeline             | Emergency support only, audited                                                                                    | **Yes**, normal authority                           |
+| Approve paid researcher reward   | Emergency support only, audited                                                                                    | **Yes**, normal authority                           |
+| Withdraw remaining program funds | **Never**                                                                                                          | **Yes**, only after close/unlock/outstanding checks |
 
 No delete operation exists for a program escrow. Deactivation is a durable soft state; on-chain
 close is one-way and does not grant the admin contract a withdrawal path.
@@ -65,12 +65,12 @@ Publish program là hành động kế tiếp sau flow này, không được g�
 
 ### Routes
 
-| Mục đích | Route |
-| --- | --- |
-| Danh sách program của owner | `/owner/programs` |
-| Tạo program | `/owner/programs/new` |
-| Edit draft sau khi tạo | `/owner/programs/:id/edit` |
-| Theo dõi funding | `/owner/programs/:id/edit`, CP-12 state được hydrate từ active funding intent |
+| Mục đích                    | Route                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| Danh sách program của owner | `/owner/programs`                                                             |
+| Tạo program                 | `/owner/programs/new`                                                         |
+| Edit draft sau khi tạo      | `/owner/programs/:id/edit`                                                    |
+| Theo dõi funding            | `/owner/programs/:id/edit`, CP-12 state được hydrate từ active funding intent |
 
 ### API
 
@@ -280,16 +280,16 @@ manual original-message recovery, tuyệt đối không chạy lại full bridge
 
 ### Program overview
 
-| Field | Bắt buộc | Validation |
-| --- | --- | --- |
-| Name | Có | Trimmed, 1–200 ký tự |
-| Slug | Có khi create | 1–120 ký tự, lowercase kebab-case: `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
-| Short summary | Có | Trimmed, 1–280 ký tự; dùng trong program card/header |
-| Description | Có | Trimmed, 1–20,000 ký tự; rich long-form overview |
-| Official website | Có | HTTPS URL hợp lệ |
-| Logo asset | Không | Private draft upload; PNG/JPEG/WebP/SVG, tối đa 2 MB |
-| Tags | Có | 1–10 giá trị normalized, mỗi tag tối đa 40 ký tự |
-| Deadline | Không | ISO date-time khi có giá trị |
+| Field            | Bắt buộc      | Validation                                                      |
+| ---------------- | ------------- | --------------------------------------------------------------- |
+| Name             | Có            | Trimmed, 1–200 ký tự                                            |
+| Slug             | Có khi create | 1–120 ký tự, lowercase kebab-case: `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
+| Short summary    | Có            | Trimmed, 1–280 ký tự; dùng trong program card/header            |
+| Description      | Có            | Trimmed, 1–20,000 ký tự; rich long-form overview                |
+| Official website | Có            | HTTPS URL hợp lệ                                                |
+| Logo asset       | Không         | Private draft upload; PNG/JPEG/WebP/SVG, tối đa 2 MB            |
+| Tags             | Có            | 1–10 giá trị normalized, mỗi tag tối đa 40 ký tự                |
+| Deadline         | Không         | ISO date-time khi có giá trị                                    |
 
 Slug có thể được gợi ý từ Name nhưng phải cho phép owner chỉnh sửa trước khi lưu.
 Slug là canonical public URL key: PostgreSQL enforce unique toàn hệ thống và không cho đổi sau khi
@@ -335,25 +335,25 @@ trên, không có nghĩa là `paid`.
 
 Program có thể có 0–20 resource links.
 
-| Field | Bắt buộc | Validation |
-| --- | --- | --- |
-| Resource type | Có | `documentation`, `repository`, `audit`, `website`, `other` |
-| Title | Có | Trimmed, 1–120 ký tự |
-| URL | Có | HTTPS URL hợp lệ |
-| Sort order | Có | Integer không âm |
+| Field         | Bắt buộc | Validation                                                 |
+| ------------- | -------- | ---------------------------------------------------------- |
+| Resource type | Có       | `documentation`, `repository`, `audit`, `website`, `other` |
+| Title         | Có       | Trimmed, 1–120 ký tự                                       |
+| URL           | Có       | HTTPS URL hợp lệ                                           |
+| Sort order    | Có       | Integer không âm                                           |
 
 ### Scope item
 
 Mỗi program phải có từ 1 đến 50 scope items.
 
-| Field | Bắt buộc | Validation |
-| --- | --- | --- |
-| Asset type | Có | MVP UI nhận `smart_contract` hoặc `website` |
-| Asset name | Có | Trimmed, tối đa 200 ký tự |
-| Asset URL | Không | URL hợp lệ |
-| Contract address | Không | EVM address hợp lệ |
-| Scope status | Có | In scope hoặc Out of scope; mặc định In scope |
-| Description | Không | Trimmed, tối đa 2,000 ký tự |
+| Field            | Bắt buộc | Validation                                    |
+| ---------------- | -------- | --------------------------------------------- |
+| Asset type       | Có       | MVP UI nhận `smart_contract` hoặc `website`   |
+| Asset name       | Có       | Trimmed, tối đa 200 ký tự                     |
+| Asset URL        | Không    | URL hợp lệ                                    |
+| Contract address | Không    | EVM address hợp lệ                            |
+| Scope status     | Có       | In scope hoặc Out of scope; mặc định In scope |
+| Description      | Không    | Trimmed, tối đa 2,000 ký tự                   |
 
 UI phải dùng structured fields. Không hiển thị JSON textarea cho người dùng cuối.
 
@@ -363,14 +363,14 @@ Domain enum hiện còn `api` và `mobile` để mở rộng sau MVP, nhưng Cre
 
 Impact catalog là dữ liệu owner cấu hình để researcher chọn trong Submit Bug. Mỗi asset type có in-scope asset phải có ít nhất một enabled impact.
 
-| Field | Bắt buộc | Validation |
-| --- | --- | --- |
-| Asset type | Có | Thuộc `ASSET_TYPES` và phải tồn tại trong scope của program |
-| Severity | Có | `critical`, `high`, `medium`, `low`, `informational` |
-| Title | Có | Trimmed, 1–300 ký tự |
-| Description | Không | Trimmed, tối đa 2,000 ký tự |
-| Enabled | Có | Boolean; mặc định `true` |
-| Sort order | Có | Integer không âm |
+| Field       | Bắt buộc | Validation                                                  |
+| ----------- | -------- | ----------------------------------------------------------- |
+| Asset type  | Có       | Thuộc `ASSET_TYPES` và phải tồn tại trong scope của program |
+| Severity    | Có       | `critical`, `high`, `medium`, `low`, `informational`        |
+| Title       | Có       | Trimmed, 1–300 ký tự                                        |
+| Description | Không    | Trimmed, tối đa 2,000 ký tự                                 |
+| Enabled     | Có       | Boolean; mặc định `true`                                    |
+| Sort order  | Có       | Integer không âm                                            |
 
 - Owner có thể dùng impact template hoặc thêm custom impact.
 - Không cho phép duplicate normalized title trong cùng `program + asset type`.
@@ -381,17 +381,17 @@ Impact catalog là dữ liệu owner cấu hình để researcher chọn trong S
 
 Mỗi asset type có in-scope asset phải có ít nhất 1 reward tier. Tier là duy nhất theo `program + asset type + severity`, không phải chỉ theo severity toàn program.
 
-| Field | Bắt buộc | Validation |
-| --- | --- | --- |
-| Asset type | Có | Thuộc asset type đang được dùng trong scope |
-| Severity | Có | Một severity chỉ xuất hiện một lần trong cùng asset type |
-| Calculation type | Có | `range`, `flat` hoặc `percentage` |
-| Minimum reward | Với `range` | Monetary amount không âm |
-| Maximum reward | Với `range` | Không nhỏ hơn minimum reward |
-| Flat amount | Với `flat` | Monetary amount lớn hơn 0 |
-| Percentage BPS | Với `percentage` | 1–10,000 basis points |
-| Maximum reward cap | Với `percentage` | Monetary amount lớn hơn 0 |
-| Calculation note | Không | Trimmed, tối đa 2,000 ký tự |
+| Field              | Bắt buộc         | Validation                                               |
+| ------------------ | ---------------- | -------------------------------------------------------- |
+| Asset type         | Có               | Thuộc asset type đang được dùng trong scope              |
+| Severity           | Có               | Một severity chỉ xuất hiện một lần trong cùng asset type |
+| Calculation type   | Có               | `range`, `flat` hoặc `percentage`                        |
+| Minimum reward     | Với `range`      | Monetary amount không âm                                 |
+| Maximum reward     | Với `range`      | Không nhỏ hơn minimum reward                             |
+| Flat amount        | Với `flat`       | Monetary amount lớn hơn 0                                |
+| Percentage BPS     | Với `percentage` | 1–10,000 basis points                                    |
+| Maximum reward cap | Với `percentage` | Monetary amount lớn hơn 0                                |
+| Calculation note   | Không            | Trimmed, tối đa 2,000 ký tự                              |
 
 Đơn vị hiển thị là `USDC`. Network `Arc` và payout token `USDC` là platform-fixed trong MVP, owner không chọn trong form.
 
@@ -404,15 +404,15 @@ và audit trail.
 
 ### Program rules and policies
 
-| Field | Bắt buộc | Validation / behavior |
-| --- | --- | --- |
-| PoC policy | Có | `required` hoặc `optional`; mặc định `required`; global toàn program trong MVP |
-| PoC policy note | Không | Trimmed, tối đa 2,000 ký tự |
-| Reward/eligibility policy | Có | Markdown, 1–20,000 ký tự |
-| Prohibited activities | Có | Platform defaults luôn tồn tại; owner có thể thêm 0–20 rules |
-| Testing restrictions | Không | Markdown, tối đa 10,000 ký tự |
-| Custom submission acknowledgment | Không | Trimmed, tối đa 1,000 ký tự |
-| Allow custom impact | Có | Boolean; mặc định `true` |
+| Field                            | Bắt buộc | Validation / behavior                                                          |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------ |
+| PoC policy                       | Có       | `required` hoặc `optional`; mặc định `required`; global toàn program trong MVP |
+| PoC policy note                  | Không    | Trimmed, tối đa 2,000 ký tự                                                    |
+| Reward/eligibility policy        | Có       | Markdown, 1–20,000 ký tự                                                       |
+| Prohibited activities            | Có       | Platform defaults luôn tồn tại; owner có thể thêm 0–20 rules                   |
+| Testing restrictions             | Không    | Markdown, tối đa 10,000 ký tự                                                  |
+| Custom submission acknowledgment | Không    | Trimmed, tối đa 1,000 ký tự                                                    |
+| Allow custom impact              | Có       | Boolean; mặc định `true`                                                       |
 
 Platform defaults gồm tối thiểu: không social engineering, không DoS, không automated high-volume traffic, không test mainnet/public deployment gây thiệt hại và không public unpatched vulnerability.
 
@@ -450,18 +450,18 @@ Các dữ liệu này không được đặt trong `programs` hoặc nested crea
 
 Target normalized storage tối thiểu:
 
-| Table/entity | Mục đích / constraint chính |
-| --- | --- |
-| `programs` | Identity, summary, overview, website, logo reference, deadline và policies cấp program |
-| `program_tags` | Unique `(program_id, normalized_tag)` |
-| `program_resources` | Resource type/title/url/sort order |
-| `program_scopes` | Structured eligible/excluded assets |
-| `program_impacts` | Impact catalog theo asset type và severity |
-| `program_reward_tiers` | Unique `(program_id, asset_type, severity)`; calculation-type checks |
-| `program_prohibited_activities` | Default/custom rule snapshots và sort order |
-| `deployment_fee_intents` | Server quote/payment evidence and deployment gate; owner client cannot write status |
-| `report_impacts` | Many-to-many giữa report và selected program impacts |
-| `report_disclosures` | Owner decision, visibility level, public summary/content và published timestamp |
+| Table/entity                    | Mục đích / constraint chính                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------- |
+| `programs`                      | Identity, summary, overview, website, logo reference, deadline và policies cấp program |
+| `program_tags`                  | Unique `(program_id, normalized_tag)`                                                  |
+| `program_resources`             | Resource type/title/url/sort order                                                     |
+| `program_scopes`                | Structured eligible/excluded assets                                                    |
+| `program_impacts`               | Impact catalog theo asset type và severity                                             |
+| `program_reward_tiers`          | Unique `(program_id, asset_type, severity)`; calculation-type checks                   |
+| `program_prohibited_activities` | Default/custom rule snapshots và sort order                                            |
+| `deployment_fee_intents`        | Server quote/payment evidence and deployment gate; owner client cannot write status    |
+| `report_impacts`                | Many-to-many giữa report và selected program impacts                                   |
+| `report_disclosures`            | Owner decision, visibility level, public summary/content và published timestamp        |
 
 Migration không được biến report content thành public mặc định. `report_disclosures` phải tách khỏi private `reports` để public query không vô tình select nội dung nhạy cảm.
 
@@ -490,8 +490,8 @@ production deployment đi qua Circle Contracts Smart Contract Platform:
 const result = await circleContracts.deployContract({
   idempotencyKey,
   name: circleSafeContractName,
-  description: "BountyEscrow program contract",
-  blockchain: "ARC-TESTNET",
+  description: 'BountyEscrow program contract',
+  blockchain: 'ARC-TESTNET',
   walletId: circleDeploymentWalletId,
   abiJson: JSON.stringify(versionedArtifact.abi),
   bytecode: versionedArtifact.bytecode,
@@ -502,7 +502,7 @@ const result = await circleContracts.deployContract({
     ARC_USDC_ADDRESS,
     refundUnlockAt,
   ],
-  fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+  fee: { type: 'level', config: { feeLevel: 'MEDIUM' } },
 });
 ```
 
@@ -527,10 +527,10 @@ Owner binding phải đến từ verified server owner/funding intent; không su
 Circle App Kit là lớp funding. Product không dùng Unified Balance cho mọi selection mà derive route
 deterministically từ số source/network owner chọn:
 
-| Selection đã normalize | `routeMode` | App Kit call | Funds path |
-| --- | --- | --- | --- |
-| Chỉ `Arc_Testnet` | `send` | `kit.send()` | Same-chain transfer trực tiếp từ owner wallet tới Arc escrow |
-| Chỉ một source ngoài Arc | `bridge` | `kit.bridge()` | CCTP bridge từ source tới Arc escrow |
+| Selection đã normalize        | `routeMode`       | App Kit call                                                                     | Funds path                                                                           |
+| ----------------------------- | ----------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Chỉ `Arc_Testnet`             | `send`            | `kit.send()`                                                                     | Same-chain transfer trực tiếp từ owner wallet tới Arc escrow                         |
+| Chỉ một source ngoài Arc      | `bridge`          | `kit.bridge()`                                                                   | CCTP bridge từ source tới Arc escrow                                                 |
 | Từ hai source/network trở lên | `unified_balance` | `kit.unifiedBalance.deposit()` cho từng source, rồi `kit.unifiedBalance.spend()` | Deposit vào Circle Gateway, chờ confirmed combined balance, rồi spend tới Arc escrow |
 
 Routing này bám theo Arc App Kit chính thức: [Send cùng
@@ -544,12 +544,12 @@ rules](https://docs.arc.io/app-kit/tutorials/unified-balance/select-source-block
 
 Product allowlist testnet được chốt đúng bốn lựa chọn trong source dropdown:
 
-| Vai trò | App Kit chain identifier | Network |
-| --- | --- | --- |
-| Source/destination | `Arc_Testnet` | Arc Testnet |
-| Source | `Base_Sepolia` | Base Sepolia |
-| Source | `Arbitrum_Sepolia` | Arbitrum Sepolia |
-| Source | `Ethereum_Sepolia` | Ethereum Sepolia |
+| Vai trò            | App Kit chain identifier | Network          |
+| ------------------ | ------------------------ | ---------------- |
+| Source/destination | `Arc_Testnet`            | Arc Testnet      |
+| Source             | `Base_Sepolia`           | Base Sepolia     |
+| Source             | `Arbitrum_Sepolia`       | Arbitrum Sepolia |
+| Source             | `Ethereum_Sepolia`       | Ethereum Sepolia |
 
 Từ “Erc” trong yêu cầu sản phẩm được chuẩn hóa thành **Ethereum Sepolia**. UI và API không dùng
 label mơ hồ `Erc` hoặc map nó sang Arc. Arc Testnet là lựa chọn source thứ tư đồng thời luôn là
@@ -571,6 +571,19 @@ Signer/custody được tách rõ:
 - Owner browser EOA dùng `@circle-fin/app-kit` với viem adapter để `send`, `bridge` hoặc
   deposit/spend Unified Balance theo routing table. UI luôn hiển thị route được derive, không cho
   owner chọn mode thủ công.
+- Wallet connect/account/disconnect UI dùng RainbowKit + Wagmi; không giữ lại
+  `WalletPickerDialog`, custom provider registry hoặc custom connect modal. RainbowKit modal dùng
+  dark/wide BBE theme và allowlist đúng MetaMask + OKX Wallet theo quyết định hiện tại. Wallet
+  không được cài vẫn do RainbowKit render trạng thái/download link; không tự dựng card hoặc link
+  tải trong CP-11. `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` là public connector metadata (không
+  phải secret) và phải được cấu hình ở local/production để modal hoạt động ổn định.
+- RainbowKit/Wagmi connector là boundary duy nhất để lấy account, chain và EIP-1193 provider.
+  Provider được bridge vào `createViemAdapterFromProvider` rồi mới truyền cho Circle App Kit;
+  Circle App Kit vẫn thực thi Send/Bridge/Unified Balance và không được tự mở connect modal hoặc
+  gọi `eth_requestAccounts` lần hai. Trước mỗi fee/funding/owner signature phải re-read account
+  - chain; disconnected, changed-account hoặc unsupported-chain phải fail closed và không gọi App
+    Kit. Disconnect chỉ xóa browser wallet session/readiness tạm thời, không logout Supabase và
+    không xóa durable funding evidence.
 - Route Unified Balance dùng explicit allocation theo từng source row; SDK automatic allocation
   không được phép âm thầm thay selection owner đã review.
 - Sau `RewardApproved`, `payReward(reportKey)` nên permissionless vì recipient/amount đã bị khóa;
@@ -587,11 +600,12 @@ Signer/custody được tách rõ:
 
 Package/adapter boundary:
 
-| Runtime | Packages | Trách nhiệm |
-| --- | --- | --- |
-| NestJS backend | `@circle-fin/smart-contract-platform`, `@circle-fin/developer-controlled-wallets` | Deploy custom bytecode, poll Circle IDs, execute permissionless funding sync và reconcile |
-| Next.js owner UI | `@circle-fin/app-kit`, `@circle-fin/adapter-viem-v2`, `viem` | Connect owner browser wallet, estimate và thực thi Send/Bridge hoặc deposit/get balance/spend Unified Balance |
-| Optional backend-custodied funding | `@circle-fin/app-kit`, `@circle-fin/adapter-circle-wallets` | Chỉ dùng nếu source funds thuộc Circle Developer entity; không thể ký thay external owner wallet |
+| Runtime                            | Packages                                                                          | Trách nhiệm                                                                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| NestJS backend                     | `@circle-fin/smart-contract-platform`, `@circle-fin/developer-controlled-wallets` | Deploy custom bytecode, poll Circle IDs, execute permissionless funding sync và reconcile                                        |
+| Next.js owner UI                   | `@rainbow-me/rainbowkit`, `wagmi`, `viem`                                         | RainbowKit connect/account/disconnect modal (MetaMask + OKX allowlist), connector state và chain/account guards                  |
+| Circle funding adapter             | `@circle-fin/app-kit`, `@circle-fin/adapter-viem-v2`                              | Bridge RainbowKit connector's EIP-1193 provider, estimate và thực thi Send/Bridge hoặc deposit/get balance/spend Unified Balance |
+| Optional backend-custodied funding | `@circle-fin/app-kit`, `@circle-fin/adapter-circle-wallets`                       | Chỉ dùng nếu source funds thuộc Circle Developer entity; không thể ký thay external owner wallet                                 |
 
 Không đưa Circle Entity Secret vào Next.js public/runtime bundle. Nếu owner dùng external browser
 wallet thì App Kit signing phải chạy qua browser provider; backend Node library chỉ chuẩn bị intent
@@ -599,23 +613,23 @@ và verify, không có quyền ký thay.
 
 ### Network, USDC và amount policy
 
-| Network | App Kit ID / Circle ID | Gas token | Funding role |
-| --- | --- | --- | --- |
-| Arc Testnet | `Arc_Testnet` / `ARC-TESTNET` | Native USDC | Send source, Unified Balance source, fixed destination |
-| Base Sepolia | `Base_Sepolia` / `BASE-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
-| Arbitrum Sepolia | `Arbitrum_Sepolia` / `ARB-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
-| Ethereum Sepolia | `Ethereum_Sepolia` / `ETH-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source |
+| Network          | App Kit ID / Circle ID             | Gas token   | Funding role                                           |
+| ---------------- | ---------------------------------- | ----------- | ------------------------------------------------------ |
+| Arc Testnet      | `Arc_Testnet` / `ARC-TESTNET`      | Native USDC | Send source, Unified Balance source, fixed destination |
+| Base Sepolia     | `Base_Sepolia` / `BASE-SEPOLIA`    | Testnet ETH | Bridge or Unified Balance source                       |
+| Arbitrum Sepolia | `Arbitrum_Sepolia` / `ARB-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source                       |
+| Ethereum Sepolia | `Ethereum_Sepolia` / `ETH-SEPOLIA` | Testnet ETH | Bridge or Unified Balance source                       |
 
 Arc deployment constants:
 
-| Thuộc tính | Target MVP |
-| --- | --- |
-| Chain ID | `5042002` |
-| RPC baseline | `https://rpc.testnet.arc.io` |
-| Explorer | `https://testnet.arcscan.app` |
-| Circle deployment blockchain | `ARC-TESTNET` |
-| Canonical Arc USDC contract | `0x3600000000000000000000000000000000000000` |
-| USDC token decimals | `6`; vẫn đọc/verify bằng `decimals()` |
+| Thuộc tính                   | Target MVP                                   |
+| ---------------------------- | -------------------------------------------- |
+| Chain ID                     | `5042002`                                    |
+| RPC baseline                 | `https://rpc.testnet.arc.io`                 |
+| Explorer                     | `https://testnet.arcscan.app`                |
+| Circle deployment blockchain | `ARC-TESTNET`                                |
+| Canonical Arc USDC contract  | `0x3600000000000000000000000000000000000000` |
+| USDC token decimals          | `6`; vẫn đọc/verify bằng `decimals()`        |
 
 Native USDC và ERC-20 USDC trên Arc dùng chung một underlying balance nhưng có hai precision khác
 nhau. Đây không có nghĩa BountyEscrow là ERC-20: contract chỉ tham chiếu canonical USDC bằng
@@ -707,21 +721,21 @@ khớp destination amount.
 
 Contract chỉ giữ dữ liệu cần để enforce escrow invariant. Không mirror toàn bộ Program database.
 
-| On-chain state | Kiểu gợi ý | Lý do |
-| --- | --- | --- |
-| `programKey` | immutable `bytes32` | Domain-separated hash của canonical program UUID; bind contract với program |
-| `token` | immutable `IERC20` | Khóa escrow vào canonical Arc USDC ERC-20 |
-| Escrow controller | immutable `bountyEscrowAdmin` | `BountyEscrowAdmin` registers/deactivates/pauses/closes and provides audited emergency support; it cannot withdraw program funds |
-| Program owner authority | immutable/bound `programOwner` | Server binds the verified owner/funding intent; normal authority for pause, close, timeline and reward approval; never deactivate |
-| Reward approval authority | Program owner, emergency admin support | Owner decision is audited in database; `BountyEscrowAdmin` can execute only as an explicit emergency exception |
-| `refundUnlockAt` | `uint64` hoặc `uint256` | Server-derived bằng chính xác `program.deadline`; client không được nhập/override; thiếu deadline thì deploy fail closed |
-| `programOwner` / remaining recipient | immutable or explicit audited owner binding | Đích nhận phần dư program sau close/unlock/outstanding checks; không phải admin treasury |
-| `closed` | `bool` | Lifecycle on-chain tối thiểu; không mirror mọi status của app |
-| `totalFunded` | `uint256` | Lifetime USDC inflow đã reconcile, gồm Send/Bridge/Unified Balance direct credits |
-| `totalPaid` | `uint256` | Audit accounting và invariant |
-| `totalWithdrawn` | `uint256` | Audit phần dư program đã withdraw bởi bound owner sau khi program kết thúc |
-| `totalApprovedOutstanding` | `uint256` | Không approve vượt available balance và không withdraw reward đã reserve |
-| `rewards[reportKey]` | mapping | Snapshot recipient, amount, approved content hash và `Approved/Paid` |
+| On-chain state                       | Kiểu gợi ý                                  | Lý do                                                                                                                             |
+| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `programKey`                         | immutable `bytes32`                         | Domain-separated hash của canonical program UUID; bind contract với program                                                       |
+| `token`                              | immutable `IERC20`                          | Khóa escrow vào canonical Arc USDC ERC-20                                                                                         |
+| Escrow controller                    | immutable `bountyEscrowAdmin`               | `BountyEscrowAdmin` registers/deactivates/pauses/closes and provides audited emergency support; it cannot withdraw program funds  |
+| Program owner authority              | immutable/bound `programOwner`              | Server binds the verified owner/funding intent; normal authority for pause, close, timeline and reward approval; never deactivate |
+| Reward approval authority            | Program owner, emergency admin support      | Owner decision is audited in database; `BountyEscrowAdmin` can execute only as an explicit emergency exception                    |
+| `refundUnlockAt`                     | `uint64` hoặc `uint256`                     | Server-derived bằng chính xác `program.deadline`; client không được nhập/override; thiếu deadline thì deploy fail closed          |
+| `programOwner` / remaining recipient | immutable or explicit audited owner binding | Đích nhận phần dư program sau close/unlock/outstanding checks; không phải admin treasury                                          |
+| `closed`                             | `bool`                                      | Lifecycle on-chain tối thiểu; không mirror mọi status của app                                                                     |
+| `totalFunded`                        | `uint256`                                   | Lifetime USDC inflow đã reconcile, gồm Send/Bridge/Unified Balance direct credits                                                 |
+| `totalPaid`                          | `uint256`                                   | Audit accounting và invariant                                                                                                     |
+| `totalWithdrawn`                     | `uint256`                                   | Audit phần dư program đã withdraw bởi bound owner sau khi program kết thúc                                                        |
+| `totalApprovedOutstanding`           | `uint256`                                   | Không approve vượt available balance và không withdraw reward đã reserve                                                          |
+| `rewards[reportKey]`                 | mapping                                     | Snapshot recipient, amount, approved content hash và `Approved/Paid`                                                              |
 
 Canonical keys phải được tạo duy nhất ở backend/shared package:
 
@@ -788,7 +802,7 @@ riêng, có event và không được áp dụng sau payout.
    from `msg.sender` or an unverified browser wallet. The normal reward approver is program owner;
    emergency-admin support is explicit, policy-gated and audited.
 3. `availableBalance()` dựa trên `token.balanceOf(address(this)) -
-   totalApprovedOutstanding`, không dựa trên App Kit payload hoặc database snapshot.
+totalApprovedOutstanding`, không dựa trên App Kit payload hoặc database snapshot.
 4. Send, Bridge và Unified Balance đều có thể chuyển USDC trực tiếp tới escrow mà không gọi
    contract. Hàm
    `syncExternalFunding()` permissionless tính:
@@ -802,6 +816,7 @@ riêng, có event và không được áp dụng sau payout.
 
    Chỉ emit/increment khi `newlyObserved > 0`; gọi lại không được double-count. Backend gọi sync
    sau khi destination transfer final và serialize một reconciliation per escrow.
+
 5. Reward chỉ được approve khi:
    - caller là bound program owner (normal path), hoặc `BountyEscrowAdmin` emergency execution wallet
      được backend policy cho phép (không phải reviewer hoặc delegated approver);
@@ -831,13 +846,13 @@ riêng, có event và không được áp dụng sau payout.
     hoặc withdrawn trước receipt success.
 13. Không dùng `SELFDESTRUCT`, native sweep hoặc wrapped-USDC logic.
 14. Recipient của `withdrawRemaining(expectedAmount)` là immutable/bound `programOwner`, không lấy
-   địa chỉ hoặc amount tùy ý từ browser input. `expectedAmount` lấy từ server-verified withdrawal
-   intent snapshot theo 6-decimal canonical USDC; contract require live balance ít nhất bằng
-   snapshot rồi chỉ chuyển đúng snapshot. Late USDC vượt snapshot ở lại escrow cho scan + intent
-   mới. Effect cập nhật trước interaction và cùng intent/transaction không thể double-withdraw.
+    địa chỉ hoặc amount tùy ý từ browser input. `expectedAmount` lấy từ server-verified withdrawal
+    intent snapshot theo 6-decimal canonical USDC; contract require live balance ít nhất bằng
+    snapshot rồi chỉ chuyển đúng snapshot. Late USDC vượt snapshot ở lại escrow cho scan + intent
+    mới. Effect cập nhật trước interaction và cùng intent/transaction không thể double-withdraw.
 15. `BountyEscrowAdmin.withdrawPlatformFees(amount, adminTreasury)` chỉ chuyển fee token đang nằm
-   trong admin contract tới allowlisted admin treasury. Không có admin-controller method nào có thể
-   chuyển token từ một program escrow; không `sweep`, delegatecall hoặc arbitrary recipient path.
+    trong admin contract tới allowlisted admin treasury. Không có admin-controller method nào có thể
+    chuyển token từ một program escrow; không `sweep`, delegatecall hoặc arbitrary recipient path.
 
 `syncExternalFunding()` chỉ ghi nhận tổng inflow; không chứng minh source chain hoặc depositor. Các
 App Kit route, send/bridge/deposit/spend identifiers, source allocation và phí nằm ở database. Một
@@ -989,19 +1004,19 @@ hoặc source deposit đã confirmed.
 Program/product data vẫn là source of truth trong PostgreSQL. Chain records là evidence và
 financial enforcement:
 
-| Storage | Fields target |
-| --- | --- |
-| `programs` | Product status, policies và derived pool snapshot |
-| `bounty_escrow_admin` | Single `BountyEscrowAdmin` address, fee token/configuration, allowlisted admin treasury and deployment/registration evidence |
-| `escrow_contracts` | `program_id`, `program_key`, `chain_id`, `contract_address`, `contract_version`, ABI/bytecode checksum, `token_address`, `token_decimals`, `bounty_escrow_admin_address`, verified `program_owner_address`, `refund_unlock_at`, Circle `contract_id`, Circle `transaction_id`, deployment wallet ID reference, deploy idempotency key, deployment tx/block/status, `last_synced_block` |
-| `deployment_fee_intents` | `program_id`, quote/version, amount base units, token/chain, immutable `BountyEscrowAdmin` recipient, status (`quoted`/`awaiting_payment`/`payment_submitted`/`paid`/`waived`/`expired`/`failed`), payment tx/log evidence, expiry/paid timestamps, creator, idempotency key and failure code |
-| `funding_intents` | `program_id`, derived `route_mode`, CP-11 phase (`review`/`collecting_deposits`/`ready_for_destination`), gross amount/base units, server-validated App Kit fee snapshot/reserve/quoted-at/expires-at, exact four-chain allowlist, requested sources/allocations, destination chain/address, durable operation status, expiry, creator, idempotency key, optional `replaces_intent_id`/`replaced_by_intent_id` |
-| `funding_operations` | Funding intent + route, send/bridge/deposit/spend tx hashes, optional `traceId`/`transferId`, returned steps/allocations, source chain/address, requested/deposited/allocated amounts, source deposit state (`awaiting_signature`/`submission_uncertain`/`submitted`/`onchain_verified`/`gateway_finalized`/`confirmed`/`failed`), exact source receipt + canonical USDC `Transfer` + GatewayWallet `Deposited` identities, signed `gateway.deposit.finalized` reference, exact fee base units, exact destination receipt/log-derived `net_received_base_units`, optional pre/post canonical Arc USDC telemetry và timestamps; client/provider payload chỉ lưu bounded reference, không làm authority |
-| `funding_confirmation_artifacts` | Canonical CP-13 snapshot: funding intent/version, escrow artifact version/checksum, canonical Arc USDC address/decimals, exact destination tx/log evidence, gross/fee/net base units, pre-sync and post-sync lifetime `totalFunded` threshold/evidence, total paid/withdrawn/outstanding/available values, optional live-balance telemetry và reconciliation timestamp |
-| `withdrawal_intents` | Program/escrow, Arc chain, locked program-owner recipient, amount base units, close/withdraw tx hashes, status, idempotency key, optional replacement linkage, failure code và reconciliation timestamps |
-| `escrow_transactions` | `program_id`, optional `report_id`/funding intent, escrow ID, Arc chain ID, tx hash, log index, type (`deployment`, `funding_sync`, `payout`, `withdraw_remaining`), status, token, net amount, from/to, block number/hash, failure code, timestamps |
-| `reports` / `report_reviews` | Private report, final review, reward calculation snapshot, content-commitment salt/version và settlement state |
-| `audit_logs` | Actor, API decision, intent creation, receipt reconciliation; không chứa report body/private key |
+| Storage                          | Fields target                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `programs`                       | Product status, policies và derived pool snapshot                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `bounty_escrow_admin`            | Single `BountyEscrowAdmin` address, fee token/configuration, allowlisted admin treasury and deployment/registration evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `escrow_contracts`               | `program_id`, `program_key`, `chain_id`, `contract_address`, `contract_version`, ABI/bytecode checksum, `token_address`, `token_decimals`, `bounty_escrow_admin_address`, verified `program_owner_address`, `refund_unlock_at`, Circle `contract_id`, Circle `transaction_id`, deployment wallet ID reference, deploy idempotency key, deployment tx/block/status, `last_synced_block`                                                                                                                                                                                                                                                                                                                |
+| `deployment_fee_intents`         | `program_id`, quote/version, amount base units, token/chain, immutable `BountyEscrowAdmin` recipient, status (`quoted`/`awaiting_payment`/`payment_submitted`/`paid`/`waived`/`expired`/`failed`), payment tx/log evidence, expiry/paid timestamps, creator, idempotency key and failure code                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `funding_intents`                | `program_id`, derived `route_mode`, CP-11 phase (`review`/`collecting_deposits`/`ready_for_destination`), gross amount/base units, server-validated App Kit fee snapshot/reserve/quoted-at/expires-at, exact four-chain allowlist, requested sources/allocations, destination chain/address, durable operation status, expiry, creator, idempotency key, optional `replaces_intent_id`/`replaced_by_intent_id`                                                                                                                                                                                                                                                                                        |
+| `funding_operations`             | Funding intent + route, send/bridge/deposit/spend tx hashes, optional `traceId`/`transferId`, returned steps/allocations, source chain/address, requested/deposited/allocated amounts, source deposit state (`awaiting_signature`/`submission_uncertain`/`submitted`/`onchain_verified`/`gateway_finalized`/`confirmed`/`failed`), exact source receipt + canonical USDC `Transfer` + GatewayWallet `Deposited` identities, signed `gateway.deposit.finalized` reference, exact fee base units, exact destination receipt/log-derived `net_received_base_units`, optional pre/post canonical Arc USDC telemetry và timestamps; client/provider payload chỉ lưu bounded reference, không làm authority |
+| `funding_confirmation_artifacts` | Canonical CP-13 snapshot: funding intent/version, escrow artifact version/checksum, canonical Arc USDC address/decimals, exact destination tx/log evidence, gross/fee/net base units, pre-sync and post-sync lifetime `totalFunded` threshold/evidence, total paid/withdrawn/outstanding/available values, optional live-balance telemetry và reconciliation timestamp                                                                                                                                                                                                                                                                                                                                |
+| `withdrawal_intents`             | Program/escrow, Arc chain, locked program-owner recipient, amount base units, close/withdraw tx hashes, status, idempotency key, optional replacement linkage, failure code và reconciliation timestamps                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `escrow_transactions`            | `program_id`, optional `report_id`/funding intent, escrow ID, Arc chain ID, tx hash, log index, type (`deployment`, `funding_sync`, `payout`, `withdraw_remaining`), status, token, net amount, from/to, block number/hash, failure code, timestamps                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `reports` / `report_reviews`     | Private report, final review, reward calculation snapshot, content-commitment salt/version và settlement state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `audit_logs`                     | Actor, API decision, intent creation, receipt reconciliation; không chứa report body/private key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Schema hiện tại chưa có Circle IDs, artifact checksum, funding intent hoặc App Kit operation
 projection; real Arc milestone phải migration trước khi thay mock deploy/fund. Không lưu raw Entity
@@ -1061,7 +1076,7 @@ sequenceDiagram
   API->>Admin: registerProgram(programKey, escrow, programOwner)
   API->>DB: Persist verified escrow/admin evidence and owner binding
 
-  Owner->>Web: CP-11 connect/change wallet for direct funding
+  Owner->>Web: CP-11 open RainbowKit Connect/Disconnect for direct funding
   Owner->>Web: Add rows: network + amount
   Note over Web: Ethereum / Arbitrum / Base / Arc testnets only
   alt Only Arc_Testnet selected
@@ -1303,37 +1318,37 @@ flowchart LR
 
 ## 7. Screen inventory
 
-| ID | Screen | Route/state | Mục đích |
-| --- | --- | --- | --- |
-| CP-00 | Owner programs entry | `/owner/programs` | CTA mở flow |
-| CP-01 | Overview | `/owner/programs/new`, step 1 | Nhập thông tin tổng quan |
-| CP-01V | Overview validation | Client state | Hiển thị field errors |
-| CP-02 | Scope | Step 2 | Quản lý scope items |
-| CP-02A | Scope editor | Dialog/drawer state | Add hoặc edit một scope item |
-| CP-02V | Scope validation | Client state | Scope thiếu hoặc field không hợp lệ |
-| CP-02I | Impacts | Step 3 | Cấu hình impact catalog theo asset type |
-| CP-02IV | Impact validation | Client state | Thiếu coverage hoặc duplicate impact |
-| CP-03 | Rewards | Step 4 | Quản lý reward tiers theo asset type |
-| CP-03V | Reward validation | Client state | Duplicate severity hoặc reward range sai |
-| CP-03R | Rules | Step 5 | Cấu hình PoC, eligibility và prohibited activities |
-| CP-03RV | Rules validation | Client state | Policy bắt buộc thiếu hoặc không hợp lệ |
-| CP-04 | Review | Step 6 | Kiểm tra payload trước khi submit |
-| CP-05 | Saving | Mutation pending | Chờ server xác nhận |
-| CP-06 | Draft created | `/owner/programs/:id/edit` | Xác nhận draft và next actions |
-| CP-07 | Save error | Mutation error | Retry giữ nguyên payload |
-| CP-08 | Discard changes | Confirmation dialog | Ngăn mất dữ liệu ngoài ý muốn |
-| CP-09 | Wrong role | Safe forbidden | Bảo vệ owner-only route |
-| CP-10 | Deployment fee | Quote/payment state | Owner xem quote và thanh toán phí tới BountyEscrowAdmin |
-| CP-10A | Review Circle deployment | Pre-deploy review | Review admin contract, owner binding, artifact, token, program key và refund lock |
-| CP-10B | Circle deployment pending | Backend operation pending | Chờ Circle Contracts và verify `EscrowInitialized` trên Arc |
-| CP-10C | Deployment recovery | API/reverted/timeout | Pre-submit retry dùng same key; deterministic revert dùng linked replacement deployment intent/key |
-| CP-10E | Deployment recovery | API/reverted/timeout | Hash-first reconciliation; retry không tạo duplicate |
-| CP-11 | Fund rewards workspace | Single page + inline states | Derive route; Send/Bridge single Submit, Unified first Submit khóa intent rồi deposit tuần tự và second Submit khi confirmed đủ |
-| CP-12 | Funding pending | Funding operation state dưới `/owner/programs/:id/edit` | Durable route-specific progress và recovery, verify escrow và DB reconciliation |
-| CP-13 | Rewards funded | Funding success | Canonical escrow artifact/Arc USDC, exact accounting, pool readiness và publish handoff |
-| EW-01 | Escrow management | Owner program management, post-program | Kiểm tra điều kiện withdraw phần dư |
-| EW-02 | Withdraw remaining | Confirmation/progress dialog | Program owner ký Arc transaction; admin chỉ emergency support (không withdraw) và verify receipt/event |
-| EW-03 | Remaining funds withdrawn | Management success state | Xác nhận amount/recipient/Arc evidence |
+| ID      | Screen                    | Route/state                                             | Mục đích                                                                                                                        |
+| ------- | ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| CP-00   | Owner programs entry      | `/owner/programs`                                       | CTA mở flow                                                                                                                     |
+| CP-01   | Overview                  | `/owner/programs/new`, step 1                           | Nhập thông tin tổng quan                                                                                                        |
+| CP-01V  | Overview validation       | Client state                                            | Hiển thị field errors                                                                                                           |
+| CP-02   | Scope                     | Step 2                                                  | Quản lý scope items                                                                                                             |
+| CP-02A  | Scope editor              | Dialog/drawer state                                     | Add hoặc edit một scope item                                                                                                    |
+| CP-02V  | Scope validation          | Client state                                            | Scope thiếu hoặc field không hợp lệ                                                                                             |
+| CP-02I  | Impacts                   | Step 3                                                  | Cấu hình impact catalog theo asset type                                                                                         |
+| CP-02IV | Impact validation         | Client state                                            | Thiếu coverage hoặc duplicate impact                                                                                            |
+| CP-03   | Rewards                   | Step 4                                                  | Quản lý reward tiers theo asset type                                                                                            |
+| CP-03V  | Reward validation         | Client state                                            | Duplicate severity hoặc reward range sai                                                                                        |
+| CP-03R  | Rules                     | Step 5                                                  | Cấu hình PoC, eligibility và prohibited activities                                                                              |
+| CP-03RV | Rules validation          | Client state                                            | Policy bắt buộc thiếu hoặc không hợp lệ                                                                                         |
+| CP-04   | Review                    | Step 6                                                  | Kiểm tra payload trước khi submit                                                                                               |
+| CP-05   | Saving                    | Mutation pending                                        | Chờ server xác nhận                                                                                                             |
+| CP-06   | Draft created             | `/owner/programs/:id/edit`                              | Xác nhận draft và next actions                                                                                                  |
+| CP-07   | Save error                | Mutation error                                          | Retry giữ nguyên payload                                                                                                        |
+| CP-08   | Discard changes           | Confirmation dialog                                     | Ngăn mất dữ liệu ngoài ý muốn                                                                                                   |
+| CP-09   | Wrong role                | Safe forbidden                                          | Bảo vệ owner-only route                                                                                                         |
+| CP-10   | Deployment fee            | Quote/payment state                                     | Owner xem quote và thanh toán phí tới BountyEscrowAdmin                                                                         |
+| CP-10A  | Review Circle deployment  | Pre-deploy review                                       | Review admin contract, owner binding, artifact, token, program key và refund lock                                               |
+| CP-10B  | Circle deployment pending | Backend operation pending                               | Chờ Circle Contracts và verify `EscrowInitialized` trên Arc                                                                     |
+| CP-10C  | Deployment recovery       | API/reverted/timeout                                    | Pre-submit retry dùng same key; deterministic revert dùng linked replacement deployment intent/key                              |
+| CP-10E  | Deployment recovery       | API/reverted/timeout                                    | Hash-first reconciliation; retry không tạo duplicate                                                                            |
+| CP-11   | Fund rewards workspace    | Single page + inline states                             | Derive route; Send/Bridge single Submit, Unified first Submit khóa intent rồi deposit tuần tự và second Submit khi confirmed đủ |
+| CP-12   | Funding pending           | Funding operation state dưới `/owner/programs/:id/edit` | Durable route-specific progress và recovery, verify escrow và DB reconciliation                                                 |
+| CP-13   | Rewards funded            | Funding success                                         | Canonical escrow artifact/Arc USDC, exact accounting, pool readiness và publish handoff                                         |
+| EW-01   | Escrow management         | Owner program management, post-program                  | Kiểm tra điều kiện withdraw phần dư                                                                                             |
+| EW-02   | Withdraw remaining        | Confirmation/progress dialog                            | Program owner ký Arc transaction; admin chỉ emergency support (không withdraw) và verify receipt/event                          |
+| EW-03   | Remaining funds withdrawn | Management success state                                | Xác nhận amount/recipient/Arc evidence                                                                                          |
 
 ## 8. Chi tiết màn hình
 
@@ -1822,8 +1837,9 @@ The backend deployment wallet deploys this escrow on Arc Testnet and registers i
 fee, later escrow funding and program-owner controls, never as the Circle deployment origin.
 ```
 
-- Dùng connector hiện có (`wagmi` + `viem`) để owner xem quote và thực hiện direct fee payment tới
-  server-verified `BountyEscrowAdmin` recipient. Payment transaction hash chỉ là lookup hint; backend verify exact
+- Dùng RainbowKit/Wagmi connector (`wagmi` + `viem`) để owner xem quote và thực hiện direct fee
+  payment tới server-verified `BountyEscrowAdmin` recipient. RainbowKit là connect/account/disconnect
+  UI duy nhất; Circle App Kit/viem adapter chỉ nhận provider sau boundary bridge. Payment transaction hash chỉ là lookup hint; backend verify exact
   token/amount/recipient/receipt trước khi mở deploy.
 - Trước khi xin chữ ký fee, client đọc chain hiện tại của wallet. Nếu wallet chưa có Arc Testnet,
   UI phải thông báo rõ và gửi `wallet_addEthereumChain` với chain ID `5042002`, RPC và explorer
@@ -1948,8 +1964,16 @@ Phân biệt:
 - Heading: `Fund rewards`.
 - Đây là workspace chung để chọn source/network, nhập amount và review funding route. Không tạo
   page mới hoặc standalone CP-11A.
-- Wallet area luôn có `Connect wallet`; sau khi kết nối hiển thị shortened address và
-  `Change wallet`. CP-10 wallet có thể được reuse nhưng CP-11 vẫn phải xử lý disconnected/reload.
+- Wallet area luôn dùng RainbowKit `ConnectButton`/modal; khi disconnected hiển thị `Connect
+wallet`, khi connected RainbowKit quản lý shortened address và `Disconnect`. CP-10 wallet có
+  thể được reuse nhưng CP-11 vẫn phải xử lý disconnected/reload. Không render
+  `WalletPickerDialog` hoặc custom provider list trong CP-11.
+- RainbowKit modal dùng dark/wide BBE theme và wallet allowlist đúng MetaMask + OKX Wallet. Khi
+  một wallet chưa cài, RainbowKit hiển thị trạng thái unavailable và download link của chính
+  connector; CP-11 không tự điều hướng hoặc dựng link tải riêng. RainbowKit/Wagmi account + chain
+  state được bridge sang Circle App Kit's EIP-1193 viem adapter. Trước mỗi wallet boundary, account
+  và chain phải khớp locked intent; disconnect/account change/unsupported chain không mở App Kit
+  call và phải hiển thị recovery action.
 - Nếu account đổi sau khi funding intent đã tạo, pause flow, không tự remap send/bridge/deposit/
   spend sang address mới.
 - Hiển thị current confirmed escrow pool, `Max single bounty`, destination `Arc Testnet` và verified
@@ -2018,7 +2042,7 @@ Phân biệt:
   - Gross funding amount.
   - Route-specific App Kit/Gateway/gas fee estimate.
   - Với Unified Balance: mỗi selected-domain gateway-finalized balance phải cover spend allocation
-    + fresh validated App Kit provider/gas fee allocation; aggregate chỉ là summary.
+    - fresh validated App Kit provider/gas fee allocation; aggregate chỉ là summary.
   - Estimated net received.
   - Destination `Arc Testnet`.
   - Locked recipient = verified escrow address.
@@ -2105,10 +2129,10 @@ Các App Kit calls target:
 ```typescript
 // routeMode=send
 await kit.send({
-  from: { adapter: viemAdapter, chain: "Arc_Testnet" },
+  from: { adapter: viemAdapter, chain: 'Arc_Testnet' },
   to: verifiedEscrowAddress,
   amount: grossAmount,
-  token: "USDC",
+  token: 'USDC',
 });
 
 // routeMode=bridge
@@ -2116,21 +2140,21 @@ await kit.bridge({
   from: { adapter: viemAdapter, chain: selectedNonArcSource },
   to: {
     adapter: viemAdapter,
-    chain: "Arc_Testnet",
+    chain: 'Arc_Testnet',
     recipientAddress: verifiedEscrowAddress,
   },
   amount: grossAmount,
-  token: "USDC",
+  token: 'USDC',
 });
 
 // routeMode=unified_balance
 await kit.unifiedBalance.spend({
   amount: grossAmount,
-  token: "USDC",
+  token: 'USDC',
   from: { adapter: viemAdapter, allocations: explicitConfirmedAllocations },
   to: {
     adapter: viemAdapter,
-    chain: "Arc_Testnet",
+    chain: 'Arc_Testnet',
     recipientAddress: verifiedEscrowAddress,
   },
 });
@@ -2266,7 +2290,7 @@ EW là branch riêng trong owner program management, không phải bước tiế
   retry dùng cùng provider idempotency key; owner UI chỉ poll trạng thái và không attach hash hoặc
   re-sign transaction đã có hash.
 - Progress: `Closing escrow` → `Withdrawing remaining USDC to owner wallet` → `Verifying
-  RemainingFundsWithdrawn` → `Reconciling database`.
+RemainingFundsWithdrawn` → `Reconciling database`.
 - Close/reload resume từ durable provider transaction ID/hash của withdrawal intent. Khi close hoặc
   withdraw hash đã tồn tại, UI chỉ poll/reconcile và tuyệt đối không yêu cầu owner re-sign transaction đó.
 - Revert do outstanding/unlock/auth giữ tiền nguyên vẹn, đánh dấu withdrawal intent `failed` và
@@ -2306,7 +2330,8 @@ EW là branch riêng trong owner program management, không phải bước tiế
 12. Owner đổi wallet trước khi trả fee/fund → fee quote/payment evidence vẫn phải bind đúng payer;
     constructor admin authority không phụ thuộc browser wallet.
 13. Circle deploy request timeout → giữ Circle IDs/idempotency key → poll/recover, không deploy duplicate.
-14. CP-11 disconnected → Connect wallet → exact four-network dropdown và source rows xuất hiện.
+14. CP-11 disconnected → RainbowKit Connect wallet → MetaMask/OKX modal and exact four-network
+    source dropdown appear; Disconnect clears only browser funding session and keeps app auth.
 15. Chỉ Arc Testnet → route preview `Send on Arc`; không có Gateway deposit → CP-12 ký Send.
 16. Chỉ Base/Arbitrum/Ethereum Sepolia → route preview `Bridge to Arc`; không có Gateway deposit →
     CP-12 map approve/burn/attestation/mint của Bridge.
@@ -2399,30 +2424,30 @@ EW là branch riêng trong owner program management, không phải bước tiế
 
 Ưu tiên dùng instance và semantic Variables trong `BBE Design System`.
 
-| Figma pattern | shadcn/Tailwind mapping |
-| --- | --- |
-| Primary/Secondary/Ghost action | `Button` variants |
-| Program form sections | `Card`, `CardHeader`, `CardContent`, `CardFooter` |
-| Name, slug, amount | `Input` |
-| Description | `Textarea` |
-| Tags | `Combobox` + removable `Badge` |
-| Logo | File input/dropzone + image preview |
-| Resources/custom rules | Repeatable field rows |
-| Asset type, severity | `Select` |
-| Impact enable/custom-impact policy | `Checkbox` / `Switch` |
-| In/Out scope | `RadioGroup` hoặc segmented control |
-| Draft/status | `Badge` |
-| Stepper | Semantic list + progress indicator |
-| Validation summary | `Alert` destructive |
-| Scope editor | `Dialog` desktop |
-| Discard changes | `AlertDialog` |
-| Impact and reward summary | `Tabs`, `Checkbox`, `Table` |
-| Saving | Disabled Button + spinner/progress |
-| Wallet connect/network switch | `wagmi` + viem App Kit adapter UI, `Button`, four-option source `Select`, `Alert` |
-| Contract/token/tx evidence | Address row + copy `Button` + external-link action |
-| App Kit funding | Repeatable network + amount rows, derived Send/Bridge/Unified Balance badge, per-row gas/optional deposit status và fee/net summary; existing CP-12 Funding pending dùng `Card`/`Progress`/`Alert` |
-| Remaining-funds withdrawal | Eligibility `Alert`, locked recipient row, confirmation/progress `Dialog` |
-| Arc finality | Two-state pending/final progress; không dùng multi-confirmation meter |
+| Figma pattern                      | shadcn/Tailwind mapping                                                                                                                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Primary/Secondary/Ghost action     | `Button` variants                                                                                                                                                                                  |
+| Program form sections              | `Card`, `CardHeader`, `CardContent`, `CardFooter`                                                                                                                                                  |
+| Name, slug, amount                 | `Input`                                                                                                                                                                                            |
+| Description                        | `Textarea`                                                                                                                                                                                         |
+| Tags                               | `Combobox` + removable `Badge`                                                                                                                                                                     |
+| Logo                               | File input/dropzone + image preview                                                                                                                                                                |
+| Resources/custom rules             | Repeatable field rows                                                                                                                                                                              |
+| Asset type, severity               | `Select`                                                                                                                                                                                           |
+| Impact enable/custom-impact policy | `Checkbox` / `Switch`                                                                                                                                                                              |
+| In/Out scope                       | `RadioGroup` hoặc segmented control                                                                                                                                                                |
+| Draft/status                       | `Badge`                                                                                                                                                                                            |
+| Stepper                            | Semantic list + progress indicator                                                                                                                                                                 |
+| Validation summary                 | `Alert` destructive                                                                                                                                                                                |
+| Scope editor                       | `Dialog` desktop                                                                                                                                                                                   |
+| Discard changes                    | `AlertDialog`                                                                                                                                                                                      |
+| Impact and reward summary          | `Tabs`, `Checkbox`, `Table`                                                                                                                                                                        |
+| Saving                             | Disabled Button + spinner/progress                                                                                                                                                                 |
+| Wallet connect/network switch      | RainbowKit + `wagmi` + `viem` provider bridge, four-option source `Select`, `Alert`                                                                                                                |
+| Contract/token/tx evidence         | Address row + copy `Button` + external-link action                                                                                                                                                 |
+| App Kit funding                    | Repeatable network + amount rows, derived Send/Bridge/Unified Balance badge, per-row gas/optional deposit status và fee/net summary; existing CP-12 Funding pending dùng `Card`/`Progress`/`Alert` |
+| Remaining-funds withdrawal         | Eligibility `Alert`, locked recipient row, confirmation/progress `Dialog`                                                                                                                          |
+| Arc finality                       | Two-state pending/final progress; không dùng multi-confirmation meter                                                                                                                              |
 
 Layout rules:
 
@@ -2472,8 +2497,10 @@ Layout rules:
   `Arc_Testnet`; label UI tương ứng là Ethereum Sepolia, Arbitrum Sepolia, Base Sepolia, Arc Testnet.
 - Server derive và khóa route từ normalized unique sources: chỉ Arc → Send; chỉ một non-Arc →
   Bridge; từ hai source/network trở lên → Unified Balance. Client không có manual route selector.
-- CP-11 có Connect/change wallet, repeatable network + amount rows, không duplicate source, amount
-  decimal string/base units 6 decimals và wallet prompts tuần tự khi route yêu cầu.
+- CP-11 dùng RainbowKit Connect/Disconnect modal (không có custom wallet chooser), repeatable
+  network + amount rows, không duplicate source, amount decimal string/base units 6 decimals và
+  wallet prompts tuần tự khi route yêu cầu. RainbowKit connector provider được bridge vào Circle
+  App Kit; UI không gọi Circle credentials hoặc tự tạo `eth_requestAccounts` ngoài RainbowKit.
 - Network value có official logo trước small accessible label và đủ vertical gap tới
   balance/gas/amount content; style áp dụng nhất quán cho tất cả source rows/states.
 - Explicit source amounts phải bằng gross amount. Send/Bridge Submit dựa trên source balance +

@@ -12,10 +12,7 @@ import {
 } from '@bug-bounty-escrow/domain';
 import { z } from 'zod';
 
-import {
-  DEFAULT_PAGE_NUMBER,
-  DEFAULT_PAGE_SIZE,
-} from '../constants/pagination.js';
+import { DEFAULT_PAGE_NUMBER, DEFAULT_PAGE_SIZE } from '../constants/pagination.js';
 import {
   paginationLimitSchema,
   paginationPageSchema,
@@ -396,7 +393,9 @@ function enumListQuerySchema<T extends readonly [string, ...string[]]>(values: T
         }
 
         const list = Array.isArray(raw) ? raw : String(raw).split(',');
-        const cleaned = list.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0);
+        const cleaned = list
+          .map((entry) => String(entry).trim())
+          .filter((entry) => entry.length > 0);
 
         return cleaned.length === 0 ? undefined : cleaned;
       },
@@ -622,6 +621,8 @@ export const programSchema = programSummarySchema
     ownerId: uuidSchema,
     description: z.string(),
     websiteUrl: z.string().optional(),
+    /** Canonical confirmed escrow address; populated from escrow_contracts only. */
+    escrowAddress: evmAddressSchema.optional(),
     contractAddress: z.string().optional(),
     createdAt: isoDateTimeSchema,
     scopes: z.array(programScopeSchema),

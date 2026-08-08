@@ -45,6 +45,7 @@ import {
   Stepper,
 } from '@bug-bounty-escrow/ui';
 import { ArcTestnet } from '@circle-fin/app-kit/chains';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, LoaderCircle } from 'lucide-react';
 import {
@@ -63,9 +64,7 @@ import {
   canRetryBridgeResult,
   CircleBridgeIncompleteError,
   CircleUnifiedBalanceManualRecoveryError,
-  connectCircleWallet,
-  discoverEvmWallets,
-  type DiscoveredEvmWallet,
+  connectCircleWalletFromProvider,
   type CircleWalletSession,
 } from './circle-funding-executor';
 import { GuidancePanel, WorkspaceHeading } from './owner-workspace';
@@ -119,9 +118,11 @@ import { CREATE_PROGRAM_STEPS } from './program-wizard';
 import { formatUsdc, shortenAddress } from './program-draft';
 import { buildProgramReadiness, type ProgramReadinessItem } from './program-readiness-model';
 import { FormCard, StepLayout, SummaryRow, WizardShell } from './wizard-parts';
+import { RainbowKitFundingButton } from './rainbowkit-funding-button';
 import { apiRequest, ApiClientError } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { useAuth } from '@/providers/auth-provider';
+import { useAccount, useDisconnect } from 'wagmi';
 
 const ERC20_APPROVE_ABI = [
   {
@@ -577,7 +578,11 @@ function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
   );
 }
 
-function escrowSummary(program: Program, chainLabel: string): ReactNode {
+function escrowSummary(
+  program: Program,
+  chainLabel: string,
+  canonicalEscrowAddress = program.escrowAddress,
+): ReactNode {
   return (
     <>
       <SummaryRow label="Network" value={chainLabel} />
@@ -585,9 +590,9 @@ function escrowSummary(program: Program, chainLabel: string): ReactNode {
       <SummaryRow
         label="Escrow contract"
         value={
-          program.contractAddress === undefined
+          canonicalEscrowAddress === undefined
             ? 'Not deployed'
-            : shortenAddress(program.contractAddress)
+            : shortenAddress(canonicalEscrowAddress)
         }
       />
     </>
@@ -611,6 +616,9 @@ export function ProgramLifecycle({
   showCreatedBanner,
 }: ProgramLifecycleProps) {
   const { session } = useAuth();
+  const { openConnectModal } = useConnectModal();
+  const { address: rainbowAddress, chainId: rainbowChainId, connector, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
   const client = useQueryClient();
   const router = useRouter();
 
@@ -624,6 +632,9 @@ export function ProgramLifecycle({
   const [deploymentFeeStage, setDeploymentFeeStage] = useState<DeploymentFeeStage>('idle');
   const deploymentFeeStageRef = useRef<DeploymentFeeStage>('idle');
   const [deploymentStatus, setDeploymentStatus] = useState<EscrowDeployment['status']>();
+  // Keep the canonical deployment address available immediately after the durable endpoint
+  // confirms it, before the parent program query has refreshed its cache.
+  const [confirmedEscrowAddress, setConfirmedEscrowAddress] = useState(program.escrowAddress);
   const [grossAmount, setGrossAmount] = useState('');
   const [sources, setSources] = useState<readonly FundingSource[]>([
     { rowId: 'source-1', network: 'Arc_Testnet', amount: '' },
@@ -632,9 +643,6 @@ export function ProgramLifecycle({
   const [walletSession, setWalletSession] = useState<CircleWalletSession>();
   const [walletPending, setWalletPending] = useState(false);
   const [walletError, setWalletError] = useState<string>();
-  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
-  const [walletPickerLoading, setWalletPickerLoading] = useState(false);
-  const [walletChoices, setWalletChoices] = useState<readonly DiscoveredEvmWallet[]>([]);
   const [fundingSelection, setFundingSelection] = useState<ValidatedFundingSelection>();
   const [fundingPhase, setFundingPhase] = useState<FundingOperationPhase>('ready_to_sign');
   const [fundingWorking, setFundingWorking] = useState(false);
@@ -668,9 +676,99 @@ export function ProgramLifecycle({
   const [fundingConfirmationError, setFundingConfirmationError] = useState<string>();
   const [withdrawalIntent, setWithdrawalIntent] = useState<WithdrawalIntent>();
   const [formError, setFormError] = useState<Record<string, string>>({});
+  const walletWasConnected = useRef(false);
+  const walletIdentity = useRef<string | undefined>(undefined);
 
   const chainLabel = 'Arc Testnet';
-  const deployed = program.contractAddress !== undefined;
+  const escrowAddress = confirmedEscrowAddress ?? program.escrowAddress;
+  const deployed = escrowAddress !== undefined;
+
+  useEffect(() => {
+    setConfirmedEscrowAddress(program.escrowAddress);
+  }, [program.escrowAddress]);
+
+  function clearWalletTransientState(): void {
+    setWalletSession(undefined);
+    setWalletPending(false);
+    setWalletError(undefined);
+    setDeploymentFeePaymentHash(undefined);
+    setFundingReadiness(undefined);
+    setFundingSelection(undefined);
+    setFundingPhase('ready_to_sign');
+    setFundingResult(undefined);
+    setFundingPendingDismissed(false);
+    setFundingRecoveryHash('');
+    setConfirmedUnifiedBalance(undefined);
+    setPendingUnifiedBalance(undefined);
+    setDepositStatuses({});
+    setDepositTopUpAmounts({});
+    setDepositRecoveryHashes({});
+    setFundingError(undefined);
+    setFormError({});
+  }
+
+  // RainbowKit owns wallet discovery, account permissions and disconnect. This effect only
+  // bridges the already-connected connector provider into Circle App Kit's EIP-1193 adapter.
+  useEffect(() => {
+    let cancelled = false;
+    if (!isConnected || rainbowAddress === undefined || connector === undefined) {
+      if (walletWasConnected.current) clearWalletTransientState();
+      walletWasConnected.current = false;
+      walletIdentity.current = undefined;
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const nextIdentity = `${connector.id}:${rainbowAddress.toLowerCase()}`;
+    if (walletIdentity.current !== undefined && walletIdentity.current !== nextIdentity) {
+      clearWalletTransientState();
+    }
+    walletIdentity.current = nextIdentity;
+    walletWasConnected.current = true;
+    setWalletSession(undefined);
+    setWalletPending(true);
+    setWalletError(undefined);
+    void connector
+      .getProvider()
+      .then((provider) =>
+        connectCircleWalletFromProvider(provider as unknown as EIP1193Provider, rainbowAddress, {
+          id: connector.id,
+          name: connector.name,
+        }),
+      )
+      .then((connected) => {
+        if (cancelled) return;
+        setWalletSession(connected);
+        if (
+          verifiedFundingIntent !== undefined &&
+          verifiedFundingIntent.walletAddress.toLowerCase() !== connected.address.toLowerCase()
+        ) {
+          setWalletError(
+            `This intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
+          );
+          setFormError({
+            wallet: 'The connected wallet does not match the active funding intent.',
+          });
+        } else {
+          setFormError({});
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setWalletSession(undefined);
+        setWalletError(
+          error instanceof Error ? error.message : 'The wallet connection could not be prepared.',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setWalletPending(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connector, isConnected, rainbowAddress, rainbowChainId, verifiedFundingIntent]);
 
   useEffect(() => {
     if (session?.access_token === undefined || deployed) return;
@@ -723,6 +821,7 @@ export function ProgramLifecycle({
           return;
         }
         if (current.status === 'confirmed') {
+          setConfirmedEscrowAddress(current.contractAddress);
           const saved = await apiRequest(
             `/api/owner/programs/${program.id}`,
             programResponseSchema,
@@ -1068,6 +1167,7 @@ export function ProgramLifecycle({
         setDeployOpen(true);
         return;
       }
+      setConfirmedEscrowAddress(deployment.contractAddress);
       const response = await apiRequest(
         `/api/owner/programs/${program.id}`,
         programResponseSchema,
@@ -1133,13 +1233,13 @@ export function ProgramLifecycle({
     currentFundingValidation.selection !== undefined &&
     walletSession !== undefined &&
     walletMatchesVerifiedIntent &&
-    program.contractAddress !== undefined &&
+    escrowAddress !== undefined &&
     fundingReadiness !== undefined &&
     walletSession !== undefined &&
     currentFundingValidation.selection !== undefined &&
     isFundingReadinessCurrent(fundingReadiness, {
       walletAddress: walletSession.address,
-      escrowAddress: program.contractAddress,
+      escrowAddress,
       selection: currentFundingValidation.selection,
       quote: fundingReadiness.quote,
     }) &&
@@ -1157,75 +1257,21 @@ export function ProgramLifecycle({
     return amounts;
   }, {});
 
-  async function connectFundingWallet(selectedWallet?: DiscoveredEvmWallet) {
-    setWalletPending(true);
+  function chooseFundingWallet() {
     setWalletError(undefined);
-    try {
-      const connected = await connectCircleWallet(selectedWallet);
-      if (
-        walletSession !== undefined &&
-        walletSession.address.toLowerCase() !== connected.address.toLowerCase()
-      ) {
-        setDeploymentFeePaymentHash(undefined);
-        setFundingSelection(undefined);
-        setFundingResult(undefined);
-        setFundingPhase('ready_to_sign');
-        setDepositStatuses({});
-        setConfirmedUnifiedBalance(undefined);
-        setPendingUnifiedBalance(undefined);
-      }
-      setFundingReadiness(undefined);
-      setWalletSession(connected);
-      if (
-        verifiedFundingIntent !== undefined &&
-        verifiedFundingIntent.walletAddress.toLowerCase() !== connected.address.toLowerCase()
-      ) {
-        setWalletError(
-          `This intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
-        );
-        setFormError({
-          wallet: 'The connected wallet does not match the active funding intent.',
-        });
-      } else {
-        setFormError({});
-      }
-    } catch (error) {
-      setWalletError(
-        error instanceof Error ? error.message : 'The wallet connection was declined.',
-      );
-    } finally {
-      setWalletPending(false);
-    }
-  }
-
-  async function chooseFundingWallet() {
-    if (walletSession === undefined) {
-      await connectFundingWallet();
+    if (openConnectModal === undefined) {
+      setWalletError('The wallet connector is not available. Refresh and try again.');
       return;
     }
-
-    setWalletPickerLoading(true);
-    setWalletPickerOpen(true);
-    setWalletError(undefined);
-    try {
-      const wallets = await discoverEvmWallets();
-      setWalletChoices(wallets);
-      if (wallets.length === 0) {
-        setWalletError('No EVM browser wallet was detected. Install or unlock a wallet first.');
-      }
-    } catch (error) {
-      setWalletPickerOpen(false);
-      setWalletError(
-        error instanceof Error ? error.message : 'Installed wallets could not be discovered.',
-      );
-    } finally {
-      setWalletPickerLoading(false);
-    }
+    openConnectModal();
   }
 
-  function selectFundingWallet(wallet: DiscoveredEvmWallet) {
-    setWalletPickerOpen(false);
-    void connectFundingWallet(wallet);
+  function disconnectFundingWallet() {
+    // This only clears the funding signer held by this page. Supabase auth/session state remains
+    // untouched so disconnecting an EVM wallet never logs the user out of the application.
+    disconnect();
+    setWalletError(undefined);
+    clearWalletTransientState();
   }
 
   function updateGrossAmount(nextAmount: string) {
@@ -1658,7 +1704,7 @@ export function ProgramLifecycle({
     if (walletSession === undefined) {
       throw new Error('Connect the owner wallet first.');
     }
-    if (program.contractAddress === undefined) {
+    if (escrowAddress === undefined) {
       throw new Error('Deploy and verify the Arc escrow before estimating funding.');
     }
     if (quote === undefined) {
@@ -1694,12 +1740,11 @@ export function ProgramLifecycle({
     intent: VerifiedFundingIntent;
     quote: Awaited<ReturnType<CircleWalletSession['executor']['estimateFunding']>>;
   }> {
-    if (walletSession === undefined || program.contractAddress === undefined) {
+    if (walletSession === undefined || escrowAddress === undefined) {
       throw new Error('Connect the locked wallet and verify the Arc escrow before quoting.');
     }
     const quote =
-      suppliedQuote ??
-      (await walletSession.executor.estimateFunding(selection, program.contractAddress));
+      suppliedQuote ?? (await walletSession.executor.estimateFunding(selection, escrowAddress));
     const response = await apiRequest(
       `/api/programs/${program.id}/funding-intents/${intent.id}/quote`,
       fundingIntentResponseSchema,
@@ -1737,7 +1782,7 @@ export function ProgramLifecycle({
     if (!walletMatchesVerifiedIntent) {
       nextErrors['wallet'] = 'The connected wallet does not match the active funding intent.';
     }
-    if (program.contractAddress === undefined) {
+    if (escrowAddress === undefined) {
       nextErrors['escrow'] = 'Deploy and verify the program escrow before funding.';
     }
     setFormError(nextErrors);
@@ -1745,7 +1790,7 @@ export function ProgramLifecycle({
       Object.keys(nextErrors).length > 0 ||
       validation.selection === undefined ||
       walletSession === undefined ||
-      program.contractAddress === undefined
+      escrowAddress === undefined
     ) {
       setFundingReadiness(undefined);
       return;
@@ -1754,10 +1799,7 @@ export function ProgramLifecycle({
     setFundingWorking(true);
     setFundingError(undefined);
     try {
-      const quote = await walletSession.executor.estimateFunding(
-        selectedFunding,
-        program.contractAddress,
-      );
+      const quote = await walletSession.executor.estimateFunding(selectedFunding, escrowAddress);
       if (Date.parse(quote.expiresAt) <= Date.now()) {
         throw new Error('Circle returned an expired funding quote.');
       }
@@ -1810,7 +1852,7 @@ export function ProgramLifecycle({
         quote: checkedQuote,
         fingerprint: fundingReadinessFingerprint({
           walletAddress: walletSession.address,
-          escrowAddress: program.contractAddress,
+          escrowAddress,
           selection: selectedFunding,
           quote: checkedQuote,
         }),
@@ -1833,7 +1875,7 @@ export function ProgramLifecycle({
     if (!walletMatchesVerifiedIntent) {
       nextErrors['wallet'] = 'The connected wallet does not match the active funding intent.';
     }
-    if (program.contractAddress === undefined) {
+    if (escrowAddress === undefined) {
       nextErrors['escrow'] = 'Deploy and verify the program escrow before funding.';
     }
 
@@ -1841,11 +1883,11 @@ export function ProgramLifecycle({
     const readinessCurrent =
       fundingReadiness !== undefined &&
       walletSession !== undefined &&
-      program.contractAddress !== undefined &&
+      escrowAddress !== undefined &&
       validation.selection !== undefined &&
       isFundingReadinessCurrent(fundingReadiness, {
         walletAddress: walletSession.address,
-        escrowAddress: program.contractAddress,
+        escrowAddress,
         selection: validation.selection,
         quote: fundingReadiness.quote,
       });
@@ -2837,11 +2879,10 @@ export function ProgramLifecycle({
             error={fundingError}
             estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve ?? '0'}
             onBack={() => void leaveFundingConfirmation()}
-            onCloseWalletPicker={() => setWalletPickerOpen(false)}
             onConnectWallet={() => void chooseFundingWallet()}
+            onDisconnectWallet={disconnectFundingWallet}
             onContinue={() => void continueFundingOperation()}
             onRecoveryHashChange={setFundingRecoveryHash}
-            onSelectWallet={selectFundingWallet}
             phase={fundingPhase}
             result={fundingResult}
             recoveryHash={fundingRecoveryHash}
@@ -2849,10 +2890,7 @@ export function ProgramLifecycle({
             intent={verifiedFundingIntent}
             verifiedRecipient={verifiedFundingIntent?.recipientAddress}
             walletAddress={walletSession?.address}
-            walletChoices={walletChoices}
             walletMatchesIntent={walletMatchesVerifiedIntent}
-            walletPickerLoading={walletPickerLoading}
-            walletPickerOpen={walletPickerOpen}
             working={fundingWorking}
             executionAvailable={verifiedFundingIntent !== undefined}
           />
@@ -2879,7 +2917,9 @@ export function ProgramLifecycle({
           aside={
             <GuidancePanel eyebrow="Escrow summary" title={formatUsdc(program.totalPool)}>
               <p>Current reward pool</p>
-              <div className="flex flex-col">{escrowSummary(program, chainLabel)}</div>
+              <div className="flex flex-col">
+                {escrowSummary(program, chainLabel, escrowAddress)}
+              </div>
               <Callout variant="warning">
                 Funding does not publish the program. Pool credit waits for verified Arc USDC and
                 database reconciliation.
@@ -2911,8 +2951,8 @@ export function ProgramLifecycle({
             errors={formError}
             grossAmount={grossAmount}
             onAddSource={addFundingSource}
-            onCloseWalletPicker={() => setWalletPickerOpen(false)}
             onConnectWallet={() => void chooseFundingWallet()}
+            onDisconnectWallet={disconnectFundingWallet}
             onDepositSource={(source) => void depositUnifiedBalanceSource(source)}
             onDepositRecoveryHashChange={(rowId, value) =>
               setDepositRecoveryHashes((current) => ({ ...current, [rowId]: value }))
@@ -2930,13 +2970,9 @@ export function ProgramLifecycle({
             transactionsEnabled={verifiedFundingIntent !== undefined && walletMatchesVerifiedIntent}
             working={fundingWorking}
             walletAddress={walletSession?.address}
-            walletChoices={walletChoices}
             walletError={walletError}
             walletName={walletSession?.wallet.name}
             walletPending={walletPending}
-            walletPickerLoading={walletPickerLoading}
-            walletPickerOpen={walletPickerOpen}
-            onSelectWallet={selectFundingWallet}
           />
         </StepLayout>
       </WizardShell>
@@ -3151,7 +3187,7 @@ export function ProgramLifecycle({
             <p className="text-h2 text-text">{formatUsdc(program.totalPool)}</p>
             <div className="flex flex-col">
               <SummaryRow label="Remaining" value={formatUsdc(program.remainingPool)} />
-              {escrowSummary(program, chainLabel)}
+              {escrowSummary(program, chainLabel, escrowAddress)}
             </div>
             <p className="text-label-sm uppercase text-text-muted">Next action</p>
             <p className="text-body-sm text-primary">
@@ -3281,15 +3317,7 @@ export function ProgramLifecycle({
                   }
                 />
                 {deploymentFeeReady ? null : walletSession === undefined ? (
-                  <Button
-                    className="w-fit"
-                    loading={walletPending}
-                    onClick={() => void connectFundingWallet()}
-                    size="md"
-                    variant="secondary"
-                  >
-                    Connect wallet to pay
-                  </Button>
+                  <RainbowKitFundingButton className="w-fit" />
                 ) : (
                   <Button
                     className="w-fit"

@@ -4,12 +4,6 @@ import type { FundingConfirmationArtifact, Program } from '@bug-bounty-escrow/sh
 import {
   Button,
   Callout,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Field,
   Input,
   Select,
@@ -39,7 +33,7 @@ import {
 } from './program-funding-flow';
 import { fieldId, formatUsdc, shortenAddress } from './program-draft';
 import { AffixedField, FormCard, SummaryRow } from './wizard-parts';
-import type { DiscoveredEvmWallet } from './circle-funding-executor';
+import { RainbowKitFundingButton } from './rainbowkit-funding-button';
 
 export type SourceDepositStatus =
   | 'not_started'
@@ -51,78 +45,6 @@ export type SourceDepositStatus =
   | 'top_up_required'
   | 'recovery_required';
 
-export interface WalletPickerDialogProps {
-  readonly open: boolean;
-  readonly loading: boolean;
-  readonly wallets: readonly DiscoveredEvmWallet[];
-  readonly onOpenChange: (open: boolean) => void;
-  readonly onSelectWallet: (wallet: DiscoveredEvmWallet) => void;
-}
-
-/**
- * Wallet choice is intentionally explicit for Change wallet. Calling eth_requestAccounts again
- * on the currently selected provider does not let a user switch between installed extensions.
- */
-export function WalletPickerDialog({
-  loading,
-  onOpenChange,
-  onSelectWallet,
-  open,
-  wallets,
-}: WalletPickerDialogProps) {
-  return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>Choose a wallet</DialogTitle>
-          <DialogDescription>
-            Select the wallet that should sign this funding operation.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div aria-live="polite" className="flex flex-col gap-sm">
-          {loading ? (
-            <p className="text-body-sm text-text-muted">Looking for installed wallets…</p>
-          ) : wallets.length === 0 ? (
-            <p className="text-body-sm text-text-muted">
-              No EVM wallet was detected. Install or unlock a browser wallet, then try again.
-            </p>
-          ) : (
-            wallets.map((wallet) => (
-              <Button
-                className="w-full justify-start"
-                key={wallet.id}
-                onClick={() => onSelectWallet(wallet)}
-                size="lg"
-                variant="secondary"
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex size-7 items-center justify-center rounded-full bg-ambient text-label-sm text-primary"
-                >
-                  {wallet.name.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="flex min-w-0 flex-col items-start">
-                  <span>{wallet.name}</span>
-                  {wallet.rdns === undefined ? null : (
-                    <span className="text-label-sm text-text-muted">{wallet.rdns}</span>
-                  )}
-                </span>
-              </Button>
-            ))
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button onClick={() => onOpenChange(false)} size="lg" variant="ghost">
-            Cancel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export interface FundingAllocationsProps {
   readonly program: Program;
   readonly grossAmount: string;
@@ -132,11 +54,6 @@ export interface FundingAllocationsProps {
   readonly walletName: string | undefined;
   readonly walletPending: boolean;
   readonly walletError: string | undefined;
-  readonly walletPickerOpen?: boolean;
-  readonly walletPickerLoading?: boolean;
-  readonly walletChoices?: readonly DiscoveredEvmWallet[];
-  readonly onCloseWalletPicker?: () => void;
-  readonly onSelectWallet?: (wallet: DiscoveredEvmWallet) => void;
   readonly depositStatuses: Readonly<Record<string, SourceDepositStatus>>;
   readonly depositRequiredAmounts: Readonly<Record<string, string>>;
   readonly depositRecoveryHashes: Readonly<Record<string, string>>;
@@ -148,6 +65,7 @@ export interface FundingAllocationsProps {
   readonly readinessChecked: boolean;
   readonly working: boolean;
   readonly onConnectWallet: () => void;
+  readonly onDisconnectWallet?: () => void;
   readonly onGrossAmountChange: (value: string) => void;
   readonly onSourceChange: (rowId: string, patch: Partial<FundingSource>) => void;
   readonly onAddSource: () => void;
@@ -172,6 +90,7 @@ export function FundingAllocations({
   grossAmount,
   onAddSource,
   onConnectWallet,
+  onDisconnectWallet,
   onDepositSource,
   onDepositRecoveryHashChange,
   onGrossAmountChange,
@@ -188,14 +107,9 @@ export function FundingAllocations({
   working,
   walletAddress,
   walletError,
-  walletName,
-  walletPending,
-  walletChoices = [],
-  walletPickerLoading = false,
-  walletPickerOpen = false,
-  onCloseWalletPicker,
-  onSelectWallet,
 }: FundingAllocationsProps) {
+  void onConnectWallet;
+  void onDisconnectWallet;
   const routeMode = deriveFundingRoute(sources);
   const selectedNetworks = new Set(sources.map((source) => source.network));
   const isUnified = routeMode === 'unified_balance';
@@ -216,23 +130,14 @@ export function FundingAllocations({
             </span>
             <span className="flex min-w-0 flex-col gap-xs">
               <span className="text-label-sm font-semibold uppercase text-text-muted">
-                {walletAddress === undefined ? 'Wallet disconnected' : (walletName ?? 'EVM wallet')}
+                Funding wallet
               </span>
               <span className="truncate text-body-sm text-text">
-                {walletAddress === undefined
-                  ? 'Connect to review source balances and sign.'
-                  : shortenAddress(walletAddress)}
+                RainbowKit manages the connected account and wallet permissions.
               </span>
             </span>
           </span>
-          <Button
-            loading={walletPending}
-            onClick={onConnectWallet}
-            size="lg"
-            variant={walletAddress === undefined ? 'primary' : 'secondary'}
-          >
-            {walletAddress === undefined ? 'Connect wallet' : 'Change wallet'}
-          </Button>
+          <RainbowKitFundingButton className="w-full sm:w-auto" />
         </div>
         {walletError === undefined ? null : (
           <Callout title="Wallet connection failed" variant="danger">
@@ -240,16 +145,6 @@ export function FundingAllocations({
           </Callout>
         )}
       </FormCard>
-
-      {onCloseWalletPicker === undefined || onSelectWallet === undefined ? null : (
-        <WalletPickerDialog
-          loading={walletPickerLoading}
-          onOpenChange={(open) => (open ? undefined : onCloseWalletPicker())}
-          onSelectWallet={onSelectWallet}
-          open={walletPickerOpen}
-          wallets={walletChoices}
-        />
-      )}
 
       <FormCard
         description="Choose exact testnet sources. The route is derived automatically."
@@ -519,9 +414,9 @@ export function FundingAllocations({
           <SummaryRow
             label="Candidate escrow"
             value={
-              program.contractAddress === undefined
+              program.escrowAddress === undefined
                 ? 'Escrow not deployed'
-                : shortenAddress(program.contractAddress)
+                : shortenAddress(program.escrowAddress)
             }
           />
           <SummaryRow label="Recipient verification" value="Required before signing" />
@@ -571,11 +466,7 @@ export interface FundingPendingProps {
   readonly recoveryHash: string;
   readonly onBack: () => void;
   readonly onConnectWallet: () => void;
-  readonly walletPickerOpen?: boolean;
-  readonly walletPickerLoading?: boolean;
-  readonly walletChoices?: readonly DiscoveredEvmWallet[];
-  readonly onCloseWalletPicker?: () => void;
-  readonly onSelectWallet?: (wallet: DiscoveredEvmWallet) => void;
+  readonly onDisconnectWallet?: () => void;
   readonly onContinue: () => void;
   readonly onRecoveryHashChange: (value: string) => void;
 }
@@ -587,6 +478,7 @@ export function FundingPending({
   intent,
   onBack,
   onConnectWallet,
+  onDisconnectWallet,
   onContinue,
   onRecoveryHashChange,
   phase,
@@ -597,12 +489,9 @@ export function FundingPending({
   walletAddress,
   walletMatchesIntent,
   working,
-  walletChoices = [],
-  walletPickerLoading = false,
-  walletPickerOpen = false,
-  onCloseWalletPicker,
-  onSelectWallet,
 }: FundingPendingProps) {
+  void onConnectWallet;
+  void onDisconnectWallet;
   const operationSubmitted = !canStartDestinationOperation(phase);
   const recoveryAction = fundingRecoveryAction(phase);
   const progress = routeProgress(selection.routeMode, phase, intent.recovery?.steps ?? []);
@@ -764,14 +653,7 @@ export function FundingPending({
             Back
           </Button>
           {walletAddress === undefined || !walletMatchesIntent ? (
-            <Button
-              className="w-full sm:w-auto"
-              loading={working}
-              onClick={onConnectWallet}
-              size="lg"
-            >
-              {walletAddress === undefined ? 'Connect locked wallet' : 'Change wallet'}
-            </Button>
+            <RainbowKitFundingButton className="w-full sm:w-auto" />
           ) : (
             <Button
               className="w-full sm:w-auto"
@@ -787,16 +669,6 @@ export function FundingPending({
           )}
         </div>
       </FormCard>
-
-      {onCloseWalletPicker === undefined || onSelectWallet === undefined ? null : (
-        <WalletPickerDialog
-          loading={walletPickerLoading}
-          onOpenChange={(open) => (open ? undefined : onCloseWalletPicker())}
-          onSelectWallet={onSelectWallet}
-          open={walletPickerOpen}
-          wallets={walletChoices}
-        />
-      )}
     </div>
   );
 }

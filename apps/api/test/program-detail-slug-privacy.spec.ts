@@ -122,6 +122,55 @@ describe('program detail slug privacy', () => {
     });
   });
 
+  it('projects only a confirmed canonical escrow address for owner funding gates', async () => {
+    const canonicalAddress = '0x2222222222222222222222222222222222222222';
+    const source = row(null);
+    const { repository } = repositoryFor({
+      ...source,
+      // The legacy programs.contract_address remains null; funding must use this projection.
+      escrow_contracts: [
+        {
+          chain_id: 5_042_002,
+          deployment_status: 'confirmed',
+          contract_address: canonicalAddress,
+          token_address: '0x3600000000000000000000000000000000000000',
+          contract_version: '1.1.0',
+        },
+      ],
+    });
+
+    await expect(
+      repository.findOwned(PROGRAM_ID, {
+        userId: OWNER_ID,
+        email: 'owner@example.test',
+        role: 'owner',
+      }),
+    ).resolves.toMatchObject({ escrowAddress: canonicalAddress });
+  });
+
+  it('does not project pending or wrong-chain escrow rows as fundable', async () => {
+    const source = row(null);
+    const { repository } = repositoryFor({
+      ...source,
+      escrow_contracts: [
+        {
+          chain_id: 5_042_003,
+          deployment_status: 'pending',
+          contract_address: '0x3333333333333333333333333333333333333333',
+          token_address: '0x3600000000000000000000000000000000000000',
+          contract_version: '1.1.0',
+        },
+      ],
+    });
+
+    const detail = await repository.findOwned(PROGRAM_ID, {
+      userId: OWNER_ID,
+      email: 'owner@example.test',
+      role: 'owner',
+    });
+    expect(detail).not.toHaveProperty('escrowAddress');
+  });
+
   it('checks reviewer assignment with the resolved program id, not the slug', async () => {
     const { repository, reviewerProgramEq } = repositoryFor(row(null), true);
     const reviewer: RequestPrincipal = {
@@ -130,7 +179,9 @@ describe('program detail slug privacy', () => {
       role: 'reviewer',
     };
 
-    await expect(repository.findAccessibleBySlug('aegis-protocol', reviewer)).resolves.toMatchObject({
+    await expect(
+      repository.findAccessibleBySlug('aegis-protocol', reviewer),
+    ).resolves.toMatchObject({
       id: PROGRAM_ID,
       slug: 'aegis-protocol',
     });

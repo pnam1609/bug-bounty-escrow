@@ -86,8 +86,8 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
   const authoringComplete =
     detailsComplete && scopeComplete && impactsComplete && rewardsComplete && rulesComplete;
 
-  const contractAddress = program.contractAddress?.trim() ?? '';
-  const deployed = contractAddress !== '';
+  const escrowAddress = program.escrowAddress?.trim() ?? '';
+  const deployed = escrowAddress !== '';
   const availableBaseUnits = parseUsdcBaseUnits(program.remainingPool);
   const maxBountyBaseUnits = parseUsdcBaseUnits(program.maxBounty);
   const funded =
@@ -137,7 +137,7 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
     {
       complete: deployed,
       detail: deployed
-        ? shortenAddress(contractAddress)
+        ? shortenAddress(escrowAddress)
         : 'Deploy a program-specific escrow contract',
       id: 'escrow-contract',
       status: deployed ? 'Complete' : 'Not deployed',

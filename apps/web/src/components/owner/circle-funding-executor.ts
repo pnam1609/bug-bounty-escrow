@@ -43,6 +43,8 @@ export interface DiscoveredEvmWallet {
   readonly provider: EIP1193Provider;
 }
 
+export type SupportedFundingWalletType = 'metamask' | 'okx';
+
 type LegacyInjectedProvider = EIP1193Provider & {
   readonly isRainbow?: boolean;
   readonly providers?: readonly LegacyInjectedProvider[];
@@ -171,9 +173,33 @@ export function isRainbowWallet(wallet: Pick<DiscoveredEvmWallet, 'name' | 'rdns
   );
 }
 
+/**
+ * The funding flow deliberately exposes only the two wallet connectors we support in the MVP.
+ * Other EIP-6963 providers may remain discoverable for low-level integrations, but they must not
+ * appear in the funding wallet picker or be selected by the owner accidentally.
+ */
+export function supportedFundingWalletType(
+  wallet: Pick<DiscoveredEvmWallet, 'name' | 'rdns'>,
+): SupportedFundingWalletType | undefined {
+  const name = wallet.name.trim().toLowerCase();
+  const rdns = wallet.rdns?.trim().toLowerCase();
+  if (rdns === 'com.okex.wallet' || rdns === 'org.okx.wallet' || name.includes('okx')) {
+    return 'okx';
+  }
+  if (rdns === 'io.metamask' || name.includes('metamask')) return 'metamask';
+  return undefined;
+}
+
+export function isSupportedFundingWallet(
+  wallet: Pick<DiscoveredEvmWallet, 'name' | 'rdns'>,
+): boolean {
+  return supportedFundingWalletType(wallet) !== undefined;
+}
+
 export interface CircleWalletSession {
   readonly address: string;
   readonly wallet: DiscoveredEvmWallet;
+  readonly chainId?: number;
   readonly executor: CircleAppKitFundingExecutor;
 }
 
@@ -206,12 +232,42 @@ export async function connectCircleWallet(
     throw new Error('The wallet did not return a valid EVM account.');
   }
 
-  const adapter = await createCircleViemAdapter(wallet.provider);
+  return connectCircleWalletFromProvider(wallet.provider, accounts[0], wallet);
+}
 
+/**
+ * Creates the Circle execution session from a Wagmi/RainbowKit connector provider. RainbowKit
+ * already owns the account permission prompt, so this bridge only reads the selected account and
+ * chain and never calls `eth_requestAccounts` a second time.
+ */
+export async function connectCircleWalletFromProvider(
+  provider: EIP1193Provider,
+  address: string,
+  wallet: Pick<DiscoveredEvmWallet, 'id' | 'name' | 'icon' | 'rdns'> = {
+    id: 'rainbowkit',
+    name: 'EVM wallet',
+  },
+): Promise<CircleWalletSession> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    throw new Error('RainbowKit did not return a valid EVM account.');
+  }
+  const chainResult = await provider.request({ method: 'eth_chainId', params: undefined });
+  if (typeof chainResult !== 'string' || !/^0x[0-9a-fA-F]+$/u.test(chainResult)) {
+    throw new Error('The connected wallet did not return a valid chain.');
+  }
+  const chainId = Number.parseInt(chainResult, 16);
+  if (!SUPPORTED_CHAINS.some((chain) => chain.chainId === chainId)) {
+    throw new Error(
+      'The connected wallet is on an unsupported testnet. Switch networks before funding.',
+    );
+  }
+  const discoveredWallet: DiscoveredEvmWallet = { ...wallet, provider };
+  const adapter = await createCircleViemAdapter(provider);
   return {
-    address: accounts[0],
-    wallet,
-    executor: new CircleAppKitFundingExecutor(adapter, wallet.provider, accounts[0]),
+    address,
+    wallet: discoveredWallet,
+    chainId,
+    executor: new CircleAppKitFundingExecutor(adapter, provider, address),
   };
 }
 

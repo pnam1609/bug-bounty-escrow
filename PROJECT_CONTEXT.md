@@ -28,6 +28,7 @@ Operationally, `BountyEscrowAdmin.adminWallet` is the address returned by the co
 variable. The backend uses that signer to register each Circle-deployed program escrow and
 execute audited emergency support calls. The controller's fee withdrawal destination is this
 same immutable on-chain address and must never be substituted for a program owner wallet.
+
 - Security researcher gửi vulnerability report.
 - Reviewer kiểm tra và xác nhận report.
 - Khi report được chấp nhận, smart contract thanh toán USDC trực tiếp cho researcher.
@@ -268,6 +269,35 @@ CI: GitHub Actions
 Deployment: Vercel (web) + container platform (API) + Supabase
 ```
 
+### Wallet connection and Circle App Kit boundary
+
+The owner browser wallet UX is provided by RainbowKit on top of Wagmi. The product must not
+maintain a parallel `WalletPickerDialog`, provider-discovery registry, or custom connect/account
+modal. RainbowKit owns the connect modal, account display, disconnect action, installed-wallet
+detection and unavailable-wallet download links. The current product allowlist remains exactly
+MetaMask and OKX Wallet; this is a RainbowKit wallet configuration, not a second UI implementation.
+RainbowKit's dark/wide theme is used so the modal remains consistent with the BBE dark design
+system. If the allowlist is expanded later, it is a configuration/ticket change and not a custom
+wallet component.
+The public WalletConnect project id is supplied as `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` for
+RainbowKit's connector metadata; it is not a signing secret. Production and local deployments
+must configure the same public id before enabling the wallet modal.
+
+Wagmi/RainbowKit is the wallet-state and connector layer; Circle App Kit remains the funding
+execution layer. After RainbowKit connects, the selected Wagmi connector's EIP-1193 provider is
+bridged into the existing Circle viem adapter (`createViemAdapterFromProvider`) and passed to App
+Kit for Send, Bridge and Unified Balance. Circle App Kit does not own the connect modal and its
+browser adapter must not call a second `eth_requestAccounts` flow. No Circle API key, Entity Secret,
+Developer-Controlled Wallet ID or other backend credential is exposed to the browser.
+
+The bridge boundary is fail-closed: re-read the active Wagmi account and chain immediately before
+every fee payment, deposit, Send, Bridge, spend or owner-management signature; if the connector is
+disconnected, the account differs from the locked funding intent, or the chain is outside the
+allowlist, do not call Circle App Kit and show a recoverable error. RainbowKit disconnect clears
+the browser wallet session and wallet-bound transient readiness only; it never logs the user out of
+Supabase or clears durable server evidence. A reconnect must rehydrate the same server intent and
+must never replay a transaction with an existing hash.
+
 NestJS là backend duy nhất chứa application services, business logic và database access.
 
 Next.js chỉ phụ trách frontend. Không đặt business logic trong Route Handlers hoặc Server Actions.
@@ -463,13 +493,7 @@ bug-bounty-escrow/
 
 ```ts
 type ProgramStatus =
-  | 'draft'
-  | 'awaiting_funding'
-  | 'active'
-  | 'paused'
-  | 'deactivated'
-  | 'expired'
-  | 'closed';
+  'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed';
 
 // Lifecycle mà người xem ẩn danh nhìn thấy. draft/awaiting_funding/paused/deactivated
 // không có biểu diễn public nào.

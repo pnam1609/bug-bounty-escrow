@@ -8,6 +8,7 @@ vi.mock('@circle-fin/adapter-viem-v2', () => ({
 
 import {
   connectCircleWallet,
+  connectCircleWalletFromProvider,
   discoverEvmWallets,
   isRainbowWallet,
 } from '@/components/owner/circle-funding-executor';
@@ -99,12 +100,14 @@ describe('Rainbow wallet connector', () => {
     const metaMaskProvider = {
       request: vi.fn(async ({ method }: { method: string }) => {
         if (method === 'eth_requestAccounts') return ['0x1111111111111111111111111111111111111111'];
+        if (method === 'eth_chainId') return '0x4cef52';
         return [];
       }),
     };
     const rainbowProvider = {
       request: vi.fn(async ({ method }: { method: string }) => {
         if (method === 'eth_requestAccounts') return ['0x2222222222222222222222222222222222222222'];
+        if (method === 'eth_chainId') return '0x4cef52';
         return [];
       }),
     };
@@ -133,6 +136,7 @@ describe('Rainbow wallet connector', () => {
       isRainbow: true,
       request: vi.fn(async ({ method }: { method: string }) => {
         if (method === 'eth_requestAccounts') return ['0x3333333333333333333333333333333333333333'];
+        if (method === 'eth_chainId') return '0x4cef52';
         return [];
       }),
     };
@@ -148,5 +152,21 @@ describe('Rainbow wallet connector', () => {
       method: 'eth_requestAccounts',
       params: undefined,
     });
+  });
+
+  it('fails closed before creating a Circle adapter on an unsupported chain', async () => {
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) =>
+        method === 'eth_chainId' ? '0x1' : [],
+      ),
+    };
+
+    await expect(
+      connectCircleWalletFromProvider(
+        provider as never,
+        '0x4444444444444444444444444444444444444444',
+      ),
+    ).rejects.toThrow('unsupported testnet');
+    expect(createViemAdapterFromProvider).not.toHaveBeenCalled();
   });
 });

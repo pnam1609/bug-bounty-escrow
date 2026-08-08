@@ -1,9 +1,46 @@
 import type { Program } from '@bug-bounty-escrow/shared';
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
+const rainbowState = vi.hoisted(() => ({ connected: false }));
+
+vi.mock('@rainbow-me/rainbowkit', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@rainbow-me/rainbowkit')>();
+  return {
+    ...original,
+    ConnectButton: {
+      Custom: ({
+        children,
+      }: {
+        readonly children: (props: {
+          readonly account: { readonly address: string; readonly displayName: string } | undefined;
+          readonly chain: { readonly unsupported?: boolean } | undefined;
+          readonly mounted: true;
+          readonly openAccountModal: () => void;
+          readonly openChainModal: () => void;
+          readonly openConnectModal: () => void;
+        }) => ReactNode;
+      }) =>
+        children({
+          account: rainbowState.connected
+            ? {
+                address: WALLET,
+                displayName: '0x1111…1111',
+              }
+            : undefined,
+          chain: rainbowState.connected ? { unsupported: false } : undefined,
+          mounted: true,
+          openAccountModal: vi.fn(),
+          openChainModal: vi.fn(),
+          openConnectModal: vi.fn(),
+        }),
+    },
+  };
+});
+
 import { FundingAllocations, FundingPending } from '@/components/owner/program-funding-views';
+import { RainbowKitFundingButton } from '@/components/owner/rainbowkit-funding-button';
 import type {
   FundingSource,
   ValidatedFundingSelection,
@@ -90,6 +127,7 @@ function program(): Program {
     createdAt: '2026-07-29T00:00:00.000Z',
     updatedAt: '2026-07-29T00:00:00.000Z',
     contractAddress: ESCROW,
+    escrowAddress: ESCROW,
     scopes: [],
     impacts: [],
     rewardTiers: [],
@@ -105,6 +143,60 @@ function program(): Program {
 }
 
 describe('CP-11 and CP-12 funding views', () => {
+  it('delegates wallet connect and disconnect UI to RainbowKit', () => {
+    rainbowState.connected = false;
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources: [{ rowId: 'arc', network: 'Arc_Testnet', amount: '10' }],
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'MetaMask',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: {},
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        confirmedUnifiedBalance: undefined,
+        pendingUnifiedBalance: undefined,
+        estimatedFeeReserve: undefined,
+        transactionsEnabled: false,
+        canSubmit: false,
+        readinessChecked: false,
+        working: false,
+        onConnectWallet: vi.fn(),
+        onDisconnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain('data-rainbow-state="disconnected"');
+    expect(html).toContain('bg-primary');
+    expect(html).not.toContain('Change wallet');
+    expect(html).not.toContain('Choose a wallet');
+  });
+
+  it('uses BBE surface and border tokens for the connected RainbowKit account button', () => {
+    rainbowState.connected = true;
+    const html = renderToStaticMarkup(createElement(RainbowKitFundingButton));
+
+    expect(html).toContain('data-rainbow-state="connected"');
+    expect(html).toContain('data-wallet-address="0x1111111111111111111111111111111111111111"');
+    expect(html).toContain('bg-ambient');
+    expect(html).toContain('border-border-brand');
+    rainbowState.connected = false;
+  });
+
   it('hydrates canonical CP-12 evidence while disconnected without prompting a wallet', () => {
     const connect = vi.fn();
     const html = renderToStaticMarkup(
@@ -130,7 +222,7 @@ describe('CP-11 and CP-12 funding views', () => {
 
     expect(connect).not.toHaveBeenCalled();
     expect(html).toContain('Reconnect the locked funding wallet');
-    expect(html).toContain('Connect locked wallet');
+    expect(html).toContain('data-rainbow-state="disconnected"');
     expect(html).toContain('Arc Testnet');
     expect(html).toContain('Base Sepolia');
     expect(html).toContain('9.75 USDC');

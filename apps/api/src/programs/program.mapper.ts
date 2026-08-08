@@ -1,3 +1,4 @@
+import { ARC_TESTNET_CHAIN_ID, ARC_TESTNET_USDC_ADDRESS } from '@bug-bounty-escrow/shared';
 import type {
   Program,
   ProgramSummary,
@@ -34,6 +35,7 @@ export const PROGRAM_DETAIL_PROJECTION = [
   'description',
   'website_url',
   'contract_address',
+  'escrow_contracts(chain_id,deployment_status,contract_address,token_address,contract_version)',
   'created_at',
   'poc_policy',
   'poc_policy_note',
@@ -78,6 +80,13 @@ export interface ProgramDetailRow extends ProgramSummaryRow {
   readonly description: string;
   readonly website_url: string | null;
   readonly contract_address: string | null;
+  readonly escrow_contracts?: Array<{
+    readonly chain_id: number | string;
+    readonly deployment_status: string;
+    readonly contract_address: string | null;
+    readonly token_address: string | null;
+    readonly contract_version: string | null;
+  }>;
   readonly created_at: string;
   readonly poc_policy: Program['rules']['pocPolicy'];
   readonly poc_policy_note: string | null;
@@ -188,12 +197,23 @@ export function mapProgramDetail(row: ProgramDetailRow, options: MapOptions): Pr
   const liveScopes = (row.program_scopes ?? []).filter(
     (scope) => scope.is_in_scope && scope.archived_at === null,
   );
+  const canonicalEscrow = (row.escrow_contracts ?? []).find(
+    (escrow) =>
+      Number(escrow.chain_id) === ARC_TESTNET_CHAIN_ID &&
+      escrow.deployment_status === 'confirmed' &&
+      escrow.contract_version === '1.1.0' &&
+      escrow.token_address?.toLowerCase() === ARC_TESTNET_USDC_ADDRESS.toLowerCase() &&
+      escrow.contract_address !== null,
+  );
 
   return {
     ...mapProgramSummary(row, options),
     ownerId: row.owner_id,
     description: row.description,
     ...(row.website_url === null ? {} : { websiteUrl: row.website_url }),
+    ...(canonicalEscrow?.contract_address === undefined || canonicalEscrow.contract_address === null
+      ? {}
+      : { escrowAddress: canonicalEscrow.contract_address }),
     ...(row.contract_address === null ? {} : { contractAddress: row.contract_address }),
     createdAt: row.created_at,
     scopes: [...(row.program_scopes ?? [])]

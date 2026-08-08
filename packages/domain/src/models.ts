@@ -36,6 +36,8 @@ export interface BountyProgram {
   totalPaid?: string;
   totalPaidVisibility: TotalPaidVisibility;
   maxBounty: string;
+  /** Canonical confirmed escrow address from escrow_contracts. */
+  escrowAddress?: string;
   contractAddress?: string;
   deadline?: string;
   publishedAt?: string;

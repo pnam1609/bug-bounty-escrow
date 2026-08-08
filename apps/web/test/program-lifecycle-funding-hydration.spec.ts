@@ -10,9 +10,8 @@ interface FundingAllocationsProbeProps {
   readonly canSubmit: boolean;
   readonly readinessChecked: boolean;
   readonly onConnectWallet: () => void;
-  readonly walletPickerOpen?: boolean;
-  readonly walletChoices?: readonly { readonly id: string; readonly name: string }[];
-  readonly onSelectWallet?: (wallet: unknown) => void;
+  readonly onDisconnectWallet: () => void;
+  readonly walletAddress?: string;
   readonly onGrossAmountChange: (value: string) => void;
   readonly onSourceChange: (rowId: string, patch: Readonly<Record<string, string>>) => void;
   readonly onAddSource: () => void;
@@ -20,33 +19,116 @@ interface FundingAllocationsProbeProps {
   readonly onSubmit: () => void;
 }
 
+interface FundingPendingProbeProps {
+  readonly phase: string;
+  readonly walletAddress?: string;
+  readonly walletMatchesIntent: boolean;
+  readonly onConnectWallet: () => void;
+  readonly onContinue: () => void;
+  readonly onBack: () => void;
+  readonly error?: string;
+}
+
 const mocks = vi.hoisted(() => ({
   connectCircleWallet: vi.fn(),
-  discoverEvmWallets: vi.fn(),
+  connectCircleWalletFromProvider: vi.fn(),
+  openConnectModal: vi.fn(),
+  disconnect: vi.fn(),
+  setRainbowAccount: undefined as
+    | ((account: {
+        readonly address: string | undefined;
+        readonly chainId: number | undefined;
+        readonly connector:
+          | { readonly id: string; readonly name: string; getProvider: () => Promise<unknown> }
+          | undefined;
+        readonly isConnected: boolean;
+      }) => void)
+    | undefined,
+  rainbowAccount: {
+    address: undefined as string | undefined,
+    chainId: 5_042_002 as number | undefined,
+    connector: undefined as
+      | { readonly id: string; readonly name: string; getProvider: () => Promise<unknown> }
+      | undefined,
+    isConnected: false,
+  },
   fundingAllocations: vi.fn((props: FundingAllocationsProbeProps) =>
     createElement('div', {
       'data-testid': 'funding-allocations',
       'data-working': String(props.working),
     }),
   ),
-  fundingPending: vi.fn(
-    (props: {
-      readonly phase: string;
-      readonly walletAddress?: string;
-      readonly walletMatchesIntent: boolean;
-      readonly onConnectWallet: () => void;
-      readonly onContinue: () => void;
-      readonly onBack: () => void;
-      readonly error?: string;
-    }) =>
-      createElement('div', {
-        'data-testid': 'funding-pending',
-        'data-phase': props.phase,
-        'data-wallet': props.walletAddress ?? 'disconnected',
-        'data-wallet-matches': String(props.walletMatchesIntent),
-      }),
+  fundingPending: vi.fn((props: FundingPendingProbeProps) =>
+    createElement('div', {
+      'data-testid': 'funding-pending',
+      'data-phase': props.phase,
+      'data-wallet': props.walletAddress ?? 'disconnected',
+      'data-wallet-matches': String(props.walletMatchesIntent),
+    }),
   ),
 }));
+
+vi.mock('@rainbow-me/rainbowkit', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@rainbow-me/rainbowkit')>();
+  return {
+    ...original,
+    ConnectButton: {
+      Custom: ({
+        children,
+      }: {
+        readonly children: (props: Record<string, unknown>) => ReactNode;
+      }) =>
+        children({
+          account: undefined,
+          chain: undefined,
+          mounted: true,
+          openAccountModal: vi.fn(),
+          openChainModal: vi.fn(),
+          openConnectModal: vi.fn(),
+        }),
+    },
+    useConnectModal: () => ({
+      openConnectModal: () => {
+        mocks.openConnectModal();
+        mocks.setRainbowAccount?.({
+          address: WALLET,
+          chainId: 5_042_002,
+          connector: {
+            id: 'test-wallet',
+            name: 'Test wallet',
+            getProvider: async () => ({
+              request: async ({ method }: { readonly method: string }) =>
+                method === 'eth_chainId' ? '0x4cef52' : [],
+            }),
+          },
+          isConnected: true,
+        });
+      },
+    }),
+  };
+});
+
+vi.mock('wagmi', async () => {
+  const { useState } = await import('react');
+  return {
+    useAccount: () => {
+      const [account, setAccount] = useState(mocks.rainbowAccount);
+      mocks.setRainbowAccount = (next) => setAccount(next);
+      return account;
+    },
+    useDisconnect: () => ({
+      disconnect: () => {
+        mocks.disconnect();
+        mocks.setRainbowAccount?.({
+          address: undefined,
+          chainId: undefined,
+          connector: undefined,
+          isConnected: false,
+        });
+      },
+    }),
+  };
+});
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn() }),
@@ -79,7 +161,7 @@ vi.mock('@/components/owner/circle-funding-executor', async (importOriginal) => 
   return {
     ...original,
     connectCircleWallet: mocks.connectCircleWallet,
-    discoverEvmWallets: mocks.discoverEvmWallets,
+    connectCircleWalletFromProvider: mocks.connectCircleWalletFromProvider,
   };
 });
 
@@ -125,6 +207,7 @@ function program(): Program {
     createdAt: '2026-07-29T00:00:00.000Z',
     updatedAt: '2026-07-29T00:00:00.000Z',
     contractAddress: ESCROW,
+    escrowAddress: ESCROW,
     scopes: [],
     impacts: [],
     rewardTiers: [],
@@ -203,6 +286,16 @@ function latestFundingPendingProps() {
   const props = mocks.fundingPending.mock.lastCall?.[0];
   if (props === undefined) throw new Error('Funding pending was not rendered.');
   return props;
+}
+
+async function connectPendingWallet(): Promise<void> {
+  const pending = latestFundingPendingProps();
+  await act(async () => pending.onConnectWallet());
+}
+
+async function connectAllocationWallet(): Promise<void> {
+  const allocations = latestFundingAllocationsProps();
+  await act(async () => allocations.onConnectWallet());
 }
 
 async function renderLifecycle(
@@ -290,20 +383,24 @@ beforeEach(() => {
   process.env['NEXT_PUBLIC_ARC_CHAIN_ID'] = '5042002';
   process.env['NEXT_PUBLIC_USDC_ADDRESS'] = '0x3333333333333333333333333333333333333333';
   mocks.connectCircleWallet.mockReset();
-  mocks.discoverEvmWallets.mockReset();
+  mocks.connectCircleWalletFromProvider.mockReset();
+  mocks.connectCircleWalletFromProvider.mockImplementation(() => mocks.connectCircleWallet());
+  mocks.openConnectModal.mockReset();
+  mocks.disconnect.mockReset();
+  mocks.rainbowAccount = {
+    address: undefined,
+    chainId: 5_042_002,
+    connector: undefined,
+    isConnected: false,
+  };
+  mocks.setRainbowAccount = undefined;
   mocks.fundingAllocations.mockClear();
   mocks.fundingPending.mockClear();
 });
 
 describe('ProgramLifecycle durable CP-12 hydration', () => {
-  it('opens the provider chooser for Change wallet and connects the selected provider', async () => {
+  it('opens RainbowKit and clears the Circle session on disconnect', async () => {
     const walletA = {
-      id: 'rainbow',
-      name: 'Rainbow',
-      rdns: 'me.rainbow',
-      provider: {},
-    };
-    const walletB = {
       id: 'metamask',
       name: 'MetaMask',
       rdns: 'io.metamask',
@@ -314,7 +411,6 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
       wallet: walletA,
       executor: {},
     });
-    mocks.discoverEvmWallets.mockResolvedValue([walletA, walletB]);
 
     const renderer = await renderLifecycle(async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;
@@ -350,19 +446,19 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
 
     let allocations = latestFundingAllocationsProps();
     await act(async () => allocations.onConnectWallet());
-    expect(mocks.connectCircleWallet).toHaveBeenCalledOnce();
-
     allocations = latestFundingAllocationsProps();
+    expect(mocks.openConnectModal).toHaveBeenCalledOnce();
+    expect(allocations.walletAddress).toBe(WALLET);
+
+    await act(async () => allocations.onDisconnectWallet());
+    allocations = latestFundingAllocationsProps();
+    expect(mocks.disconnect).toHaveBeenCalledOnce();
+    expect(allocations.walletAddress).toBeUndefined();
+
     await act(async () => allocations.onConnectWallet());
     allocations = latestFundingAllocationsProps();
-    expect(mocks.discoverEvmWallets).toHaveBeenCalledOnce();
-    expect(allocations.walletPickerOpen).toBe(true);
-    expect(allocations.walletChoices?.map((wallet) => wallet.id)).toEqual(['rainbow', 'metamask']);
-
-    await act(async () => allocations.onSelectWallet?.(walletB));
-    allocations = latestFundingAllocationsProps();
-    expect(mocks.connectCircleWallet).toHaveBeenNthCalledWith(2, walletB);
-    expect(allocations.walletPickerOpen).toBe(false);
+    expect(mocks.openConnectModal).toHaveBeenCalledTimes(2);
+    expect(allocations.walletAddress).toBe(WALLET);
 
     await act(async () => renderer.unmount());
   });
@@ -462,7 +558,7 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     });
 
     let pending = latestFundingPendingProps();
-    await act(async () => pending.onConnectWallet());
+    await connectPendingWallet();
     pending = latestFundingPendingProps();
     expect(mocks.connectCircleWallet).toHaveBeenCalledOnce();
     expect(pending.walletAddress).toBe(WALLET);
@@ -636,7 +732,7 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
       throw new Error(`Unexpected lifecycle request: ${String(input)}`);
     });
     let pending = latestFundingPendingProps();
-    await act(async () => pending.onConnectWallet());
+    await connectPendingWallet();
     pending = latestFundingPendingProps();
     await act(async () => pending.onContinue());
     expect(execute).not.toHaveBeenCalled();
@@ -797,7 +893,7 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     });
 
     let pending = latestFundingPendingProps();
-    await act(async () => pending.onConnectWallet());
+    await connectPendingWallet();
     pending = latestFundingPendingProps();
     await act(async () => pending.onContinue());
     expect(
@@ -944,7 +1040,7 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
       },
     );
 
-    await act(async () => latestFundingPendingProps().onConnectWallet());
+    await connectPendingWallet();
     await act(async () => latestFundingPendingProps().onContinue());
     expect(execute).not.toHaveBeenCalled();
     expect(recoveryTelemetryBody).toMatchObject({
@@ -1196,7 +1292,8 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     await act(async () => fundButton.props['onClick']());
 
     let allocationsProps = latestFundingAllocationsProps();
-    await act(async () => allocationsProps.onConnectWallet());
+    await connectAllocationWallet();
+    allocationsProps = latestFundingAllocationsProps();
     await act(async () => {
       allocationsProps.onGrossAmountChange('10');
       allocationsProps.onSourceChange('source-1', {

@@ -95,6 +95,16 @@ describe('CP-10 draft readiness model', () => {
     ]);
   });
 
+  it('does not treat the legacy program contract field as a confirmed escrow', () => {
+    const legacyOnly: Program = {
+      ...savedDraft(),
+      contractAddress: '0x1111111111111111111111111111111111111111',
+    };
+
+    const escrow = buildProgramReadiness(legacyOnly).find(({ id }) => id === 'escrow-contract');
+    expect(escrow).toMatchObject({ complete: false, status: 'Not deployed' });
+  });
+
   it('requires impact and reward coverage for every in-scope asset type', () => {
     const draft = savedDraft();
     const withWebsiteScope: Program = {
@@ -126,7 +136,7 @@ describe('CP-10 draft readiness model', () => {
       const program: Program = {
         ...savedDraft(),
         ...(deadline === undefined ? { deadline: undefined } : { deadline }),
-        contractAddress: '0x1111111111111111111111111111111111111111',
+        escrowAddress: '0x1111111111111111111111111111111111111111',
         totalPool: '50000',
         remainingPool: '50000',
       };
@@ -140,7 +150,7 @@ describe('CP-10 draft readiness model', () => {
     const draft = savedDraft();
     const prepared: Program = {
       ...draft,
-      contractAddress: '0x1111111111111111111111111111111111111111',
+      escrowAddress: '0x1111111111111111111111111111111111111111',
       totalPool: '185000',
       remainingPool: '185000',
     };
@@ -156,7 +166,7 @@ describe('CP-10 draft readiness model', () => {
   it('does not advertise publish readiness when available collateral is below max bounty', () => {
     const undercollateralized: Program = {
       ...savedDraft(),
-      contractAddress: '0x1111111111111111111111111111111111111111',
+      escrowAddress: '0x1111111111111111111111111111111111111111',
       totalPool: '185000',
       reservedPool: '150000',
       remainingPool: '35000',
