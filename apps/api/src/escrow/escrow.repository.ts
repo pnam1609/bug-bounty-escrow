@@ -1064,7 +1064,9 @@ export class EscrowRepository
   public async findActiveFundingIntent(programId: string): Promise<FundingIntentRow | null> {
     const result = await this.client
       .from('funding_intents')
-      .select('*,funding_confirmation_artifacts(*)')
+      // Include operation rows so an expired intent with an irreversible operation can still be
+      // recovered. An expired intent with no evidence must not be hydrated as active.
+      .select('*,funding_confirmation_artifacts(*),funding_operations(id)')
       .eq('program_id', programId)
       .in('status', [
         'ready_to_sign',
@@ -1079,7 +1081,15 @@ export class EscrowRepository
       .maybeSingle();
     if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
     const row = result.data as FundingIntentRow | null;
-    return row === null ? null : this.attachBoundedFundingOperations(row);
+    if (
+      row === null ||
+      (new Date(row.expires_at) <= new Date() &&
+        row.destination_transaction_hash === null &&
+        (row.funding_operations?.length ?? 0) === 0)
+    ) {
+      return null;
+    }
+    return this.attachBoundedFundingOperations(row);
   }
 
   public async findFundingIntentRow(

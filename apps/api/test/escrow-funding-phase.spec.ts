@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { FundingIntentRow } from '../src/escrow/escrow.repository.js';
@@ -110,6 +110,32 @@ function serviceFixture(
 }
 
 describe('durable Unified Balance destination handoff', () => {
+  it('does not hydrate an expired evidence-free intent as active', async () => {
+    const expired = {
+      ...fundingRow(),
+      expires_at: '2020-01-01T00:00:00.000Z',
+      destination_transaction_hash: null,
+      funding_operations: [],
+    };
+    const repository = {
+      isProgramOwner: vi.fn().mockResolvedValue(true),
+      findActiveFundingIntent: vi.fn().mockResolvedValue(expired),
+      toFundingIntent: vi.fn(),
+    };
+    const service = new EscrowService(
+      repository as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(service.getActiveFundingIntent(principal, PROGRAM_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(repository.toFundingIntent).not.toHaveBeenCalled();
+  });
+
   it('prepares the destination only after every selected Gateway domain is sufficient', async () => {
     const fixture = serviceFixture(fundingRow());
 

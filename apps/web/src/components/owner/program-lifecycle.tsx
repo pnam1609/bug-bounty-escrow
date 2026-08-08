@@ -533,6 +533,17 @@ function sourceDepositStatusFromApi(
   return 'not_started';
 }
 
+function isExpiredEvidenceFreeFundingIntent(intent: VerifiedFundingIntent): boolean {
+  const expiresAt = intent.expiresAt === undefined ? Number.NaN : Date.parse(intent.expiresAt);
+  return (
+    Number.isFinite(expiresAt) &&
+    expiresAt <= Date.now() &&
+    intent.destinationTransactionHash === undefined &&
+    intent.sourceDeposits.length === 0 &&
+    intent.recovery === undefined
+  );
+}
+
 class DeploymentSupportRequiredError extends Error {
   constructor() {
     super(
@@ -1691,15 +1702,24 @@ export function ProgramLifecycle({
     quote?: FundingReadinessSnapshot['quote'],
   ): Promise<VerifiedFundingIntent> {
     if (verifiedFundingIntent !== undefined) {
-      if (
-        walletSession === undefined ||
-        verifiedFundingIntent.walletAddress.toLowerCase() !== walletSession.address.toLowerCase()
-      ) {
-        throw new Error(
-          `This funding intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
-        );
+      if (isExpiredEvidenceFreeFundingIntent(verifiedFundingIntent)) {
+        // The active-intent endpoint no longer hydrates this state after a reload. This guard
+        // also handles a tab that remains open past the intent TTL without discarding any
+        // intent that already owns a transaction or recovery evidence.
+        setVerifiedFundingIntent(undefined);
+        setFundingPhase('ready_to_sign');
+        fundingIdempotencyKey.current = undefined;
+      } else {
+        if (
+          walletSession === undefined ||
+          verifiedFundingIntent.walletAddress.toLowerCase() !== walletSession.address.toLowerCase()
+        ) {
+          throw new Error(
+            `This funding intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
+          );
+        }
+        return verifiedFundingIntent;
       }
-      return verifiedFundingIntent;
     }
     if (walletSession === undefined) {
       throw new Error('Connect the owner wallet first.');

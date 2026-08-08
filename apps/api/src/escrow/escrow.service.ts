@@ -478,7 +478,14 @@ export class EscrowService {
   ): Promise<FundingIntent> {
     await this.requireOwner(principal, programId);
     const row = await this.repository.findActiveFundingIntent(programId);
-    if (row === null) throw new NotFoundException();
+    if (
+      row === null ||
+      (new Date(row.expires_at) <= new Date() &&
+        row.destination_transaction_hash === null &&
+        (row.funding_operations?.length ?? 0) === 0)
+    ) {
+      throw new NotFoundException();
+    }
     return this.repository.toFundingIntent(row);
   }
 
