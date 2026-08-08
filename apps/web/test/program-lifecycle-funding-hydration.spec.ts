@@ -10,6 +10,9 @@ interface FundingAllocationsProbeProps {
   readonly canSubmit: boolean;
   readonly readinessChecked: boolean;
   readonly onConnectWallet: () => void;
+  readonly walletPickerOpen?: boolean;
+  readonly walletChoices?: readonly { readonly id: string; readonly name: string }[];
+  readonly onSelectWallet?: (wallet: unknown) => void;
   readonly onGrossAmountChange: (value: string) => void;
   readonly onSourceChange: (rowId: string, patch: Readonly<Record<string, string>>) => void;
   readonly onAddSource: () => void;
@@ -19,6 +22,7 @@ interface FundingAllocationsProbeProps {
 
 const mocks = vi.hoisted(() => ({
   connectCircleWallet: vi.fn(),
+  discoverEvmWallets: vi.fn(),
   fundingAllocations: vi.fn((props: FundingAllocationsProbeProps) =>
     createElement('div', {
       'data-testid': 'funding-allocations',
@@ -72,7 +76,11 @@ vi.mock('@/providers/auth-provider', () => ({
 vi.mock('@/components/owner/circle-funding-executor', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('@/components/owner/circle-funding-executor')>();
-  return { ...original, connectCircleWallet: mocks.connectCircleWallet };
+  return {
+    ...original,
+    connectCircleWallet: mocks.connectCircleWallet,
+    discoverEvmWallets: mocks.discoverEvmWallets,
+  };
 });
 
 vi.mock('@/components/owner/program-funding-views', async (importOriginal) => {
@@ -282,11 +290,83 @@ beforeEach(() => {
   process.env['NEXT_PUBLIC_ARC_CHAIN_ID'] = '5042002';
   process.env['NEXT_PUBLIC_USDC_ADDRESS'] = '0x3333333333333333333333333333333333333333';
   mocks.connectCircleWallet.mockReset();
+  mocks.discoverEvmWallets.mockReset();
   mocks.fundingAllocations.mockClear();
   mocks.fundingPending.mockClear();
 });
 
 describe('ProgramLifecycle durable CP-12 hydration', () => {
+  it('opens the provider chooser for Change wallet and connects the selected provider', async () => {
+    const walletA = {
+      id: 'rainbow',
+      name: 'Rainbow',
+      rdns: 'me.rainbow',
+      provider: {},
+    };
+    const walletB = {
+      id: 'metamask',
+      name: 'MetaMask',
+      rdns: 'io.metamask',
+      provider: {},
+    };
+    mocks.connectCircleWallet.mockResolvedValue({
+      address: WALLET,
+      wallet: walletA,
+      executor: {},
+    });
+    mocks.discoverEvmWallets.mockResolvedValue([walletA, walletB]);
+
+    const renderer = await renderLifecycle(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents/active`)) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: { code: 'not_found', message: 'No active funding intent.' },
+          }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (path.endsWith(`/api/programs/${PROGRAM_ID}/withdrawal-intents/active`)) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: { code: 'not_found', message: 'No active withdrawal.' },
+          }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected lifecycle request: ${String(input)}`);
+    });
+
+    const fundButton = renderer.root
+      .findAll(
+        (node) =>
+          node.props['children'] === 'Fund rewards' && typeof node.props['onClick'] === 'function',
+      )
+      .at(-1);
+    if (fundButton === undefined) throw new Error('Fund rewards action was not rendered.');
+    await act(async () => fundButton.props['onClick']());
+
+    let allocations = latestFundingAllocationsProps();
+    await act(async () => allocations.onConnectWallet());
+    expect(mocks.connectCircleWallet).toHaveBeenCalledOnce();
+
+    allocations = latestFundingAllocationsProps();
+    await act(async () => allocations.onConnectWallet());
+    allocations = latestFundingAllocationsProps();
+    expect(mocks.discoverEvmWallets).toHaveBeenCalledOnce();
+    expect(allocations.walletPickerOpen).toBe(true);
+    expect(allocations.walletChoices?.map((wallet) => wallet.id)).toEqual(['rainbow', 'metamask']);
+
+    await act(async () => allocations.onSelectWallet?.(walletB));
+    allocations = latestFundingAllocationsProps();
+    expect(mocks.connectCircleWallet).toHaveBeenNthCalledWith(2, walletB);
+    expect(allocations.walletPickerOpen).toBe(false);
+
+    await act(async () => renderer.unmount());
+  });
+
   it('releases an explicit rejected Send and reloads the same signature attempt', async () => {
     const storage = new Map<string, string>();
     vi.stubGlobal('window', {

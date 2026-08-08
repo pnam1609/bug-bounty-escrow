@@ -45,6 +45,7 @@ export interface DiscoveredEvmWallet {
 
 type LegacyInjectedProvider = EIP1193Provider & {
   readonly isRainbow?: boolean;
+  readonly providers?: readonly LegacyInjectedProvider[];
 };
 
 interface Eip6963ProviderDetail {
@@ -55,6 +56,48 @@ interface Eip6963ProviderDetail {
     readonly uuid: string;
   };
   readonly provider: EIP1193Provider;
+}
+
+const EIP6963_ANNOUNCE_EVENT = 'eip6963:announceProvider';
+const EIP6963_REQUEST_EVENT = 'eip6963:requestProvider';
+const discoveredProviderRegistry = new Map<string, DiscoveredEvmWallet>();
+let registeredProviderWindow: Window | undefined;
+
+function registerEip6963Provider(event: Event): void {
+  const detail = (event as CustomEvent<Partial<Eip6963ProviderDetail>>).detail;
+  const info = detail?.info;
+  if (
+    detail?.provider === undefined ||
+    info === undefined ||
+    typeof info.uuid !== 'string' ||
+    typeof info.name !== 'string' ||
+    typeof info.rdns !== 'string' ||
+    typeof info.icon !== 'string'
+  ) {
+    return;
+  }
+  discoveredProviderRegistry.set(info.uuid, {
+    id: info.uuid,
+    name: info.name,
+    icon: info.icon,
+    rdns: info.rdns,
+    provider: detail.provider,
+  });
+}
+
+function ensureEip6963Registry(target: Window): void {
+  if (registeredProviderWindow === target) return;
+  registeredProviderWindow?.removeEventListener(EIP6963_ANNOUNCE_EVENT, registerEip6963Provider);
+  discoveredProviderRegistry.clear();
+  registeredProviderWindow = target;
+  target.addEventListener(EIP6963_ANNOUNCE_EVENT, registerEip6963Provider);
+  // Wallets normally announce on page load, but requesting again makes the registry work when the
+  // extension was installed or enabled after the page loaded. This event never requests accounts.
+  target.dispatchEvent(new Event(EIP6963_REQUEST_EVENT));
+}
+
+if (typeof window !== 'undefined') {
+  ensureEip6963Registry(window);
 }
 
 export type UnifiedBalanceSnapshot = UnifiedBalanceReadinessSnapshot;
@@ -84,32 +127,32 @@ export interface BridgeRecoveryTelemetry {
 export async function discoverEvmWallets(): Promise<readonly DiscoveredEvmWallet[]> {
   if (typeof window === 'undefined') return [];
 
-  const discovered = new Map<string, DiscoveredEvmWallet>();
-  const listener = (event: Event) => {
-    const detail = (event as CustomEvent<Eip6963ProviderDetail>).detail;
-    if (detail?.provider === undefined || detail.info === undefined) return;
-    discovered.set(detail.info.uuid, {
-      id: detail.info.uuid,
-      name: detail.info.name,
-      icon: detail.info.icon,
-      rdns: detail.info.rdns,
-      provider: detail.provider,
-    });
-  };
+  ensureEip6963Registry(window);
 
-  window.addEventListener('eip6963:announceProvider', listener);
-  window.dispatchEvent(new Event('eip6963:requestProvider'));
-  await new Promise((resolve) => window.setTimeout(resolve, 120));
-  window.removeEventListener('eip6963:announceProvider', listener);
+  // Only yield to a microtask. Waiting on a timer here loses the browser's transient user
+  // activation, and Rainbow/other wallets can then reject `eth_requestAccounts` without opening
+  // their approval popup. EIP-6963 announcements are synchronous in compliant extensions; the
+  // module-level registry also captures providers that announced during page load.
+  await Promise.resolve();
 
+  const discovered = new Map(discoveredProviderRegistry);
   const legacy = (window as Window & { ethereum?: LegacyInjectedProvider }).ethereum;
-  if (legacy !== undefined && discovered.size === 0) {
-    const isRainbow = legacy.isRainbow === true;
-    discovered.set('legacy-injected', {
-      id: 'legacy-injected',
+  const legacyProviders =
+    legacy?.providers !== undefined && legacy.providers.length > 0 ? legacy.providers : [legacy];
+  for (const provider of legacyProviders) {
+    if (
+      provider === undefined ||
+      [...discovered.values()].some((wallet) => wallet.provider === provider)
+    ) {
+      continue;
+    }
+    const isRainbow = provider.isRainbow === true;
+    const id = isRainbow ? 'legacy-rainbow' : `legacy-injected-${discovered.size}`;
+    discovered.set(id, {
+      id,
       name: isRainbow ? 'Rainbow' : 'Browser wallet',
       ...(isRainbow ? { rdns: 'me.rainbow' } : {}),
-      provider: legacy,
+      provider,
     });
   }
   return [...discovered.values()];

@@ -64,6 +64,8 @@ import {
   CircleBridgeIncompleteError,
   CircleUnifiedBalanceManualRecoveryError,
   connectCircleWallet,
+  discoverEvmWallets,
+  type DiscoveredEvmWallet,
   type CircleWalletSession,
 } from './circle-funding-executor';
 import { GuidancePanel, WorkspaceHeading } from './owner-workspace';
@@ -551,7 +553,11 @@ function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
       <Icon
         aria-hidden="true"
         className={`size-5 shrink-0 ${
-          deploying ? 'animate-spin text-escrow' : item.complete ? 'text-escrow' : 'text-text-disabled'
+          deploying
+            ? 'animate-spin text-escrow'
+            : item.complete
+              ? 'text-escrow'
+              : 'text-text-disabled'
         }`}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-xs sm:flex-row sm:items-start sm:justify-between sm:gap-lg">
@@ -626,6 +632,9 @@ export function ProgramLifecycle({
   const [walletSession, setWalletSession] = useState<CircleWalletSession>();
   const [walletPending, setWalletPending] = useState(false);
   const [walletError, setWalletError] = useState<string>();
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
+  const [walletPickerLoading, setWalletPickerLoading] = useState(false);
+  const [walletChoices, setWalletChoices] = useState<readonly DiscoveredEvmWallet[]>([]);
   const [fundingSelection, setFundingSelection] = useState<ValidatedFundingSelection>();
   const [fundingPhase, setFundingPhase] = useState<FundingOperationPhase>('ready_to_sign');
   const [fundingWorking, setFundingWorking] = useState(false);
@@ -1148,11 +1157,11 @@ export function ProgramLifecycle({
     return amounts;
   }, {});
 
-  async function connectFundingWallet() {
+  async function connectFundingWallet(selectedWallet?: DiscoveredEvmWallet) {
     setWalletPending(true);
     setWalletError(undefined);
     try {
-      const connected = await connectCircleWallet();
+      const connected = await connectCircleWallet(selectedWallet);
       if (
         walletSession !== undefined &&
         walletSession.address.toLowerCase() !== connected.address.toLowerCase()
@@ -1187,6 +1196,36 @@ export function ProgramLifecycle({
     } finally {
       setWalletPending(false);
     }
+  }
+
+  async function chooseFundingWallet() {
+    if (walletSession === undefined) {
+      await connectFundingWallet();
+      return;
+    }
+
+    setWalletPickerLoading(true);
+    setWalletPickerOpen(true);
+    setWalletError(undefined);
+    try {
+      const wallets = await discoverEvmWallets();
+      setWalletChoices(wallets);
+      if (wallets.length === 0) {
+        setWalletError('No EVM browser wallet was detected. Install or unlock a wallet first.');
+      }
+    } catch (error) {
+      setWalletPickerOpen(false);
+      setWalletError(
+        error instanceof Error ? error.message : 'Installed wallets could not be discovered.',
+      );
+    } finally {
+      setWalletPickerLoading(false);
+    }
+  }
+
+  function selectFundingWallet(wallet: DiscoveredEvmWallet) {
+    setWalletPickerOpen(false);
+    void connectFundingWallet(wallet);
   }
 
   function updateGrossAmount(nextAmount: string) {
@@ -2798,9 +2837,11 @@ export function ProgramLifecycle({
             error={fundingError}
             estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve ?? '0'}
             onBack={() => void leaveFundingConfirmation()}
-            onConnectWallet={() => void connectFundingWallet()}
+            onCloseWalletPicker={() => setWalletPickerOpen(false)}
+            onConnectWallet={() => void chooseFundingWallet()}
             onContinue={() => void continueFundingOperation()}
             onRecoveryHashChange={setFundingRecoveryHash}
+            onSelectWallet={selectFundingWallet}
             phase={fundingPhase}
             result={fundingResult}
             recoveryHash={fundingRecoveryHash}
@@ -2808,7 +2849,10 @@ export function ProgramLifecycle({
             intent={verifiedFundingIntent}
             verifiedRecipient={verifiedFundingIntent?.recipientAddress}
             walletAddress={walletSession?.address}
+            walletChoices={walletChoices}
             walletMatchesIntent={walletMatchesVerifiedIntent}
+            walletPickerLoading={walletPickerLoading}
+            walletPickerOpen={walletPickerOpen}
             working={fundingWorking}
             executionAvailable={verifiedFundingIntent !== undefined}
           />
@@ -2867,7 +2911,8 @@ export function ProgramLifecycle({
             errors={formError}
             grossAmount={grossAmount}
             onAddSource={addFundingSource}
-            onConnectWallet={() => void connectFundingWallet()}
+            onCloseWalletPicker={() => setWalletPickerOpen(false)}
+            onConnectWallet={() => void chooseFundingWallet()}
             onDepositSource={(source) => void depositUnifiedBalanceSource(source)}
             onDepositRecoveryHashChange={(rowId, value) =>
               setDepositRecoveryHashes((current) => ({ ...current, [rowId]: value }))
@@ -2885,9 +2930,13 @@ export function ProgramLifecycle({
             transactionsEnabled={verifiedFundingIntent !== undefined && walletMatchesVerifiedIntent}
             working={fundingWorking}
             walletAddress={walletSession?.address}
+            walletChoices={walletChoices}
             walletError={walletError}
             walletName={walletSession?.wallet.name}
             walletPending={walletPending}
+            walletPickerLoading={walletPickerLoading}
+            walletPickerOpen={walletPickerOpen}
+            onSelectWallet={selectFundingWallet}
           />
         </StepLayout>
       </WizardShell>
@@ -3059,8 +3108,8 @@ export function ProgramLifecycle({
               </div>
               <Callout variant="warning">
                 Closing and withdrawing are privileged platform-admin operations. The backend
-                submits and verifies both Arc transactions; this page never asks the program
-                owner to connect or sign a contract-owner wallet.
+                submits and verifies both Arc transactions; this page never asks the program owner
+                to connect or sign a contract-owner wallet.
               </Callout>
             </FormCard>
           ) : null}

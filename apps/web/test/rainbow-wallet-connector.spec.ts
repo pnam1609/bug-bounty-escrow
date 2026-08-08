@@ -54,6 +54,31 @@ function installEip6963Providers(
   vi.stubGlobal('window', fakeWindow);
 }
 
+function installLegacyProvider(provider: Provider & { isRainbow?: boolean }) {
+  const listeners = new Map<string, Set<(event: Event) => void>>();
+  const fakeWindow = {
+    addEventListener(type: string, listener: (event: Event) => void) {
+      const current = listeners.get(type) ?? new Set<(event: Event) => void>();
+      current.add(listener);
+      listeners.set(type, current);
+    },
+    removeEventListener(type: string, listener: (event: Event) => void) {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatchEvent() {
+      return true;
+    },
+    get ethereum() {
+      return provider;
+    },
+    setTimeout() {
+      throw new Error('discoverEvmWallets must not wait on a timer before requesting accounts');
+    },
+  } as unknown as Window;
+
+  vi.stubGlobal('window', fakeWindow);
+}
+
 describe('Rainbow wallet connector', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -101,5 +126,27 @@ describe('Rainbow wallet connector', () => {
     });
     expect(metaMaskProvider.request).not.toHaveBeenCalled();
     expect(createViemAdapterFromProvider).toHaveBeenCalledOnce();
+  });
+
+  it('uses the legacy Rainbow injection without losing the click user-activation window', async () => {
+    const rainbowProvider = {
+      isRainbow: true,
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_requestAccounts') return ['0x3333333333333333333333333333333333333333'];
+        return [];
+      }),
+    };
+    installLegacyProvider(rainbowProvider);
+
+    const wallets = await discoverEvmWallets();
+    expect(wallets).toHaveLength(1);
+    expect(wallets[0]).toMatchObject({ name: 'Rainbow', rdns: 'me.rainbow' });
+
+    const session = await connectCircleWallet();
+    expect(session.address).toBe('0x3333333333333333333333333333333333333333');
+    expect(rainbowProvider.request).toHaveBeenCalledWith({
+      method: 'eth_requestAccounts',
+      params: undefined,
+    });
   });
 });
