@@ -298,6 +298,29 @@ the browser wallet session and wallet-bound transient readiness only; it never l
 Supabase or clears durable server evidence. A reconnect must rehydrate the same server intent and
 must never replay a transaction with an existing hash.
 
+### Funding intent lifecycle and expiry
+
+`funding_intent` is a short-lived server funding session, not the program itself. Saving a program as
+`draft` does not create or start an intent, so an owner may leave a draft for days and begin funding
+later. An intent is created only after the owner starts CP-11 funding and the server has a valid
+wallet, source allocation and bounded quote to lock. It records the owner wallet, escrow, route,
+source amounts, fee allocation, quote snapshot and idempotency key.
+
+- The intent TTL is bounded to 30 minutes and the quote has its own expiry. These limits protect
+  against replaying stale prices, balances, routes or wallet bindings; they do not expire the draft
+  program.
+- `GET /funding-intents/active` is read-only and returns only a usable intent. An expired intent with
+  no destination transaction or funding operation evidence is not active. The UI keeps the form
+  values, refreshes the quote, and creates a new intent with a new idempotency key on the next
+  explicit readiness/submit action; it must not create rows merely because the page was refreshed.
+- The old evidence-free intent is retained for audit and may be cancelled by the atomic create path;
+  it is never reused. An expired intent that already has source/deposit/operation or destination
+  evidence is recoverable and must not be replaced automatically, otherwise the same transfer could
+  be attributed twice.
+- A new intent is allowed only while the program remains fundable (`draft` or `awaiting_funding`),
+  has a confirmed escrow and satisfies the owner/deployment gates. Program `expired`/`closed` is a
+  separate lifecycle state and must reject new funding intents.
+
 NestJS là backend duy nhất chứa application services, business logic và database access.
 
 Next.js chỉ phụ trách frontend. Không đặt business logic trong Route Handlers hoặc Server Actions.

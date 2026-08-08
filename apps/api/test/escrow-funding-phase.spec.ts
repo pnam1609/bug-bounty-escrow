@@ -109,7 +109,91 @@ function serviceFixture(
   return { arc, gatewaySubscriptions, repository, service };
 }
 
+const fundingIntentInput = {
+  idempotencyKey: '31000000-0000-4000-8000-000000000006',
+  walletAddress: WALLET,
+  grossAmount: '10',
+  estimatedFeeReserve: '0.1',
+  feeAllocations: [
+    {
+      network: 'Arc_Testnet' as const,
+      amount: '0.1',
+      components: components('Arc_Testnet', '100000').map((component) => ({
+        network: component.network,
+        type: component.type,
+        token: component.token,
+        amount: component.amountBaseUnits === '100000' ? '0.1' : '0',
+      })),
+    },
+  ],
+  sources: [{ network: 'Arc_Testnet' as const, amount: '10' }],
+  quoteQuotedAt: '2099-07-29T00:00:00.000Z',
+  quoteExpiresAt: '2099-07-29T00:30:00.000Z',
+};
+
+function createFundingIntentService(
+  programStatus: 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'expired' | 'closed',
+) {
+  const row = fundingRow();
+  const repository = {
+    isProgramOwner: vi.fn().mockResolvedValue(true),
+    getProgramStatus: vi.fn().mockResolvedValue(programStatus),
+    findConfirmedEscrow: vi.fn().mockResolvedValue({
+      id: ESCROW_ID,
+      program_id: PROGRAM_ID,
+      contract_address: ESCROW,
+      token_address: '0x3600000000000000000000000000000000000000',
+      owner_wallet: WALLET,
+    }),
+    createFundingIntent: vi.fn().mockResolvedValue(row),
+    toFundingIntent: vi.fn().mockReturnValue({ id: row.id }),
+  };
+  const arc = {
+    getCanonicalUsdcBalance: vi.fn().mockResolvedValue(0n),
+    getEscrowTotalFunded: vi.fn().mockResolvedValue(0n),
+  };
+  const service = new EscrowService(
+    repository as never,
+    {} as never,
+    arc as never,
+    {} as never,
+    {} as never,
+  );
+  return { arc, repository, service };
+}
+
 describe('durable Unified Balance destination handoff', () => {
+  it.each(['draft', 'awaiting_funding'] as const)(
+    'allows a %s program to create its first intent only when funding starts',
+    async (programStatus) => {
+      const fixture = createFundingIntentService(programStatus);
+
+      await expect(
+        fixture.service.createFundingIntent(principal, PROGRAM_ID, fundingIntentInput),
+      ).resolves.toEqual({ id: INTENT_ID });
+
+      expect(fixture.repository.createFundingIntent).toHaveBeenCalledOnce();
+      expect(fixture.arc.getCanonicalUsdcBalance).toHaveBeenCalledOnce();
+      expect(fixture.arc.getEscrowTotalFunded).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['active', 'paused', 'expired', 'closed'] as const)(
+    'rejects a %s program before provider reads or intent creation',
+    async (programStatus) => {
+      const fixture = createFundingIntentService(programStatus);
+
+      await expect(
+        fixture.service.createFundingIntent(principal, PROGRAM_ID, fundingIntentInput),
+      ).rejects.toThrow('program_funding_not_available');
+
+      expect(fixture.repository.findConfirmedEscrow).not.toHaveBeenCalled();
+      expect(fixture.repository.createFundingIntent).not.toHaveBeenCalled();
+      expect(fixture.arc.getCanonicalUsdcBalance).not.toHaveBeenCalled();
+      expect(fixture.arc.getEscrowTotalFunded).not.toHaveBeenCalled();
+    },
+  );
+
   it('does not hydrate an expired evidence-free intent as active', async () => {
     const expired = {
       ...fundingRow(),
@@ -135,6 +219,36 @@ describe('durable Unified Balance destination handoff', () => {
     );
     expect(repository.toFundingIntent).not.toHaveBeenCalled();
   });
+
+  it.each(['destination', 'operation'] as const)(
+    'keeps an expired intent with %s evidence available for recovery',
+    async (evidence) => {
+      const expired = {
+        ...fundingRow(),
+        expires_at: '2020-01-01T00:00:00.000Z',
+        ...(evidence === 'destination'
+          ? { destination_transaction_hash: `0x${'c'.repeat(64)}` }
+          : { funding_operations: [{ id: '31000000-0000-4000-8000-000000000007' }] }),
+      };
+      const repository = {
+        isProgramOwner: vi.fn().mockResolvedValue(true),
+        findActiveFundingIntent: vi.fn().mockResolvedValue(expired),
+        toFundingIntent: vi.fn().mockReturnValue({ id: INTENT_ID }),
+      };
+      const service = new EscrowService(
+        repository as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      await expect(service.getActiveFundingIntent(principal, PROGRAM_ID)).resolves.toEqual({
+        id: INTENT_ID,
+      });
+      expect(repository.toFundingIntent).toHaveBeenCalledWith(expired);
+    },
+  );
 
   it('prepares the destination only after every selected Gateway domain is sufficient', async () => {
     const fixture = serviceFixture(fundingRow());

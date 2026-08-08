@@ -751,12 +751,17 @@ export function ProgramLifecycle({
       .then((connected) => {
         if (cancelled) return;
         setWalletSession(connected);
-        if (
+        const lockedIntent =
           verifiedFundingIntent !== undefined &&
-          verifiedFundingIntent.walletAddress.toLowerCase() !== connected.address.toLowerCase()
+          !isExpiredEvidenceFreeFundingIntent(verifiedFundingIntent)
+            ? verifiedFundingIntent
+            : undefined;
+        if (
+          lockedIntent !== undefined &&
+          lockedIntent.walletAddress.toLowerCase() !== connected.address.toLowerCase()
         ) {
           setWalletError(
-            `This intent is locked to ${shortenAddress(verifiedFundingIntent.walletAddress)}. Connect that wallet to continue.`,
+            `This intent is locked to ${shortenAddress(lockedIntent.walletAddress)}. Connect that wallet to continue.`,
           );
           setFormError({
             wallet: 'The connected wallet does not match the active funding intent.',
@@ -878,10 +883,15 @@ export function ProgramLifecycle({
   }, [fundingReadiness]);
   const funded = Number(program.totalPool) > 0;
   const withdrawalAvailable = isWithdrawalPanelAvailable(program.status, withdrawalIntent);
+  const activeFundingIntent =
+    verifiedFundingIntent !== undefined &&
+    !isExpiredEvidenceFreeFundingIntent(verifiedFundingIntent)
+      ? verifiedFundingIntent
+      : undefined;
   const walletMatchesVerifiedIntent =
     walletSession === undefined ||
-    verifiedFundingIntent === undefined ||
-    walletSession.address.toLowerCase() === verifiedFundingIntent.walletAddress.toLowerCase();
+    activeFundingIntent === undefined ||
+    walletSession.address.toLowerCase() === activeFundingIntent.walletAddress.toLowerCase();
 
   useEffect(() => {
     if (session?.access_token === undefined || !deployed) return;
@@ -894,6 +904,17 @@ export function ProgramLifecycle({
       .then(async (response) => {
         if (cancelled) return;
         const intent = response.data;
+        const hydratedIntent = verifiedIntentFromApi(intent);
+        if (isExpiredEvidenceFreeFundingIntent(hydratedIntent)) {
+          // Keep a stale server session out of the editable form. The owner can
+          // retain the draft and explicitly submit a fresh funding plan later.
+          setVerifiedFundingIntent(undefined);
+          setFundingSelection(undefined);
+          setFundingReadiness(undefined);
+          setFundingPhase('ready_to_sign');
+          setFundingPendingDismissed(false);
+          return;
+        }
         const intentSources = fundingSourcesFromApi(intent);
         const validation = validateFundingSelection(intent.grossAmount, intentSources);
         if (validation.selection === undefined) return;
@@ -1286,7 +1307,7 @@ export function ProgramLifecycle({
   }
 
   function updateGrossAmount(nextAmount: string) {
-    if (verifiedFundingIntent !== undefined) {
+    if (activeFundingIntent !== undefined) {
       setFundingError('This funding plan is locked. Resume or finish the active intent.');
       return;
     }
@@ -1305,7 +1326,7 @@ export function ProgramLifecycle({
   }
 
   function updateFundingSource(rowId: string, patch: Partial<FundingSource>) {
-    if (verifiedFundingIntent !== undefined) {
+    if (activeFundingIntent !== undefined) {
       setFundingError('This funding plan is locked. Resume or finish the active intent.');
       return;
     }
@@ -1319,7 +1340,7 @@ export function ProgramLifecycle({
   }
 
   function addFundingSource() {
-    if (verifiedFundingIntent !== undefined) {
+    if (activeFundingIntent !== undefined) {
       setFundingError('This funding plan is locked. Resume or finish the active intent.');
       return;
     }
@@ -1337,7 +1358,7 @@ export function ProgramLifecycle({
   }
 
   function removeFundingSource(rowId: string) {
-    if (verifiedFundingIntent !== undefined) {
+    if (activeFundingIntent !== undefined) {
       setFundingError('This funding plan is locked. Resume or finish the active intent.');
       return;
     }
@@ -1819,14 +1840,26 @@ export function ProgramLifecycle({
     setFundingWorking(true);
     setFundingError(undefined);
     try {
+      // A tab can outlive the server intent TTL. Do not refresh a quote on an
+      // evidence-free expired intent: clear it and let the explicit Submit
+      // create a new intent with a fresh idempotency key.
+      const expiredEvidenceFreeIntent =
+        verifiedFundingIntent !== undefined &&
+        isExpiredEvidenceFreeFundingIntent(verifiedFundingIntent);
+      if (expiredEvidenceFreeIntent) {
+        setVerifiedFundingIntent(undefined);
+        setFundingPhase('ready_to_sign');
+        fundingIdempotencyKey.current = undefined;
+      }
+      const currentFundingIntent = expiredEvidenceFreeIntent ? undefined : verifiedFundingIntent;
       const quote = await walletSession.executor.estimateFunding(selectedFunding, escrowAddress);
       if (Date.parse(quote.expiresAt) <= Date.now()) {
         throw new Error('Circle returned an expired funding quote.');
       }
       let checkedQuote = quote;
-      if (verifiedFundingIntent !== undefined) {
+      if (currentFundingIntent !== undefined) {
         const refreshed = await refreshServerFundingQuote(
-          verifiedFundingIntent,
+          currentFundingIntent,
           selectedFunding,
           quote,
         );
@@ -1922,7 +1955,7 @@ export function ProgramLifecycle({
       return;
     }
     const selection = validation.selection;
-    const hadVerifiedIntentBeforeSubmit = verifiedFundingIntent !== undefined;
+    const hadVerifiedIntentBeforeSubmit = activeFundingIntent !== undefined;
     const readinessQuote = fundingReadiness!.quote;
 
     setFundingWorking(true);
@@ -2856,10 +2889,10 @@ export function ProgramLifecycle({
 
   /* CP-12 — Funding pending remains inside the existing owner edit route. */
   if (
-    verifiedFundingIntent !== undefined &&
+    activeFundingIntent !== undefined &&
     fundingSelection !== undefined &&
     shouldRenderFundingPending(
-      verifiedFundingIntent,
+      activeFundingIntent,
       fundingSelection,
       fundingPhase,
       fundingPendingDismissed,
@@ -2897,7 +2930,7 @@ export function ProgramLifecycle({
         >
           <FundingPending
             error={fundingError}
-            estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve ?? '0'}
+            estimatedFeeReserve={activeFundingIntent?.estimatedFeeReserve ?? '0'}
             onBack={() => void leaveFundingConfirmation()}
             onConnectWallet={() => void chooseFundingWallet()}
             onDisconnectWallet={disconnectFundingWallet}
@@ -2907,12 +2940,12 @@ export function ProgramLifecycle({
             result={fundingResult}
             recoveryHash={fundingRecoveryHash}
             selection={fundingSelection}
-            intent={verifiedFundingIntent}
-            verifiedRecipient={verifiedFundingIntent?.recipientAddress}
+            intent={activeFundingIntent}
+            verifiedRecipient={activeFundingIntent?.recipientAddress}
             walletAddress={walletSession?.address}
             walletMatchesIntent={walletMatchesVerifiedIntent}
             working={fundingWorking}
-            executionAvailable={verifiedFundingIntent !== undefined}
+            executionAvailable={activeFundingIntent !== undefined}
           />
         </StepLayout>
       </WizardShell>
@@ -2965,7 +2998,7 @@ export function ProgramLifecycle({
             depositRequiredAmounts={depositRequiredAmounts}
             depositRecoveryHashes={depositRecoveryHashes}
             depositStatuses={depositStatuses}
-            estimatedFeeReserve={verifiedFundingIntent?.estimatedFeeReserve}
+            estimatedFeeReserve={activeFundingIntent?.estimatedFeeReserve}
             canSubmit={canSubmitFundingPlan}
             readinessChecked={fundingReadiness !== undefined}
             errors={formError}
@@ -2987,7 +3020,7 @@ export function ProgramLifecycle({
             pendingUnifiedBalance={pendingUnifiedBalance}
             program={program}
             sources={sources}
-            transactionsEnabled={verifiedFundingIntent !== undefined && walletMatchesVerifiedIntent}
+            transactionsEnabled={activeFundingIntent !== undefined && walletMatchesVerifiedIntent}
             working={fundingWorking}
             walletAddress={walletSession?.address}
             walletError={walletError}

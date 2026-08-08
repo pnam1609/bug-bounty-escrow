@@ -253,6 +253,24 @@ state. Reload, deep link tới edit route hoặc Browser Back không được t�
 intent hay destination transfer mới. Mỗi program/escrow chỉ có một funding intent active; operation
 đã submitted chỉ được resume/poll/reconcile theo evidence đã lưu.
 
+`funding intent` là phiên funding tạm thời, không phải draft program. Owner có thể lưu draft hôm nay
+và bắt đầu funding vào ngày khác mà không bị ràng buộc bởi TTL của intent. Intent chỉ được tạo khi
+owner đã bắt đầu CP-11, có wallet/source allocation hợp lệ và server đã quote/bound route. TTL intent
+hiện là 30 phút; quote cũng có expiry riêng để không dùng lại giá, balance, route hoặc wallet binding
+đã cũ.
+
+- `GET /funding-intents/active` chỉ đọc và không tự tạo intent khi reload. Intent đã quá hạn mà chưa
+  có destination transaction hoặc funding operation evidence phải bị coi là không active.
+- Ở lần `Check readiness`/`Submit funding plan` tiếp theo, backend phải tạo intent mới cùng
+  idempotency key mới sau khi refresh quote; UI giữ lại các giá trị form nhưng không reuse intent ID
+  cũ. Intent cũ evidence-free được giữ/cancel cho audit, không xóa vật lý.
+- Nếu intent đã có source deposit, operation, transaction hash hoặc recovery evidence thì không được
+  tự động thay thế. Phải resume/reconcile intent cũ để tránh double-send, double-deposit hoặc sai
+  attribution. Add funds/late funding sau terminal intent mới tạo intent/key mới.
+- Đây là expiry của funding session, không phải expiry của program. Program `expired`/`closed` không
+  được tạo intent mới; program còn fundable (`draft`/`awaiting_funding`) mới được phép tạo intent và
+  vẫn phải qua confirmed escrow/deployment gates.
+
 CP-11 cũng hydrate cùng active intent khi Unified Balance đang ở
 `collecting_deposits | awaiting_confirmed_balance`. `Submit` đầu tiên của route này tạo và khóa
 intent nhưng không navigate; source deposits sau đó luôn bind vào intent đã khóa. Chỉ `Submit` thứ

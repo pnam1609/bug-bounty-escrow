@@ -418,6 +418,18 @@ export class EscrowService {
     input: CreateFundingIntentRequest,
   ): Promise<FundingIntent> {
     await this.requireOwner(principal, programId);
+    // A funding intent is only valid while the program is still in its
+    // fundable lifecycle. Keep this check before any Arc/provider reads so an
+    // ended program cannot trigger balance queries before the atomic DB guard
+    // rejects the request. The database RPC repeats the check under its
+    // transaction lock to close the status-change race.
+    const programStatus = await this.repository.getProgramStatus(programId);
+    if (programStatus === 'expired' || programStatus === 'closed') {
+      throw new ConflictException('program_funding_not_available');
+    }
+    if (programStatus !== 'draft' && programStatus !== 'awaiting_funding') {
+      throw new ConflictException('program_funding_not_available');
+    }
     const escrow = await this.repository.findConfirmedEscrow(programId);
     if (
       escrow === null ||

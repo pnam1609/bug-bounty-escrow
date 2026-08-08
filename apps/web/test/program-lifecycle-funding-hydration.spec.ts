@@ -253,8 +253,8 @@ function intent(
         { network, type: 'forwarder' as const, token: 'USDC' as const, amount: '0' },
       ],
     })),
-    quoteQuotedAt: '2026-07-29T00:00:00.000Z',
-    quoteExpiresAt: '2026-07-29T01:00:00.000Z',
+    quoteQuotedAt: '2099-07-29T00:00:00.000Z',
+    quoteExpiresAt: '2099-07-29T01:00:00.000Z',
     sources,
     sourceDeposits: [],
     fundingPhase,
@@ -262,7 +262,7 @@ function intent(
     recipientAddress: ESCROW,
     recipientVerified: true,
     status,
-    expiresAt: '2026-07-29T01:30:00.000Z',
+    expiresAt: '2099-07-29T01:30:00.000Z',
     ...([
       'destination_submitted',
       'delivery_pending',
@@ -1334,6 +1334,133 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     expect(executor.getUnifiedBalance).toHaveBeenCalledTimes(1);
     expect(executor.estimateFunding).toHaveBeenCalledTimes(2);
 
+    await act(async () => renderer.unmount());
+  });
+
+  it('replaces an expired evidence-free intent on the next explicit submit', async () => {
+    const expiredIntent = {
+      ...intent('send', 'ready_to_sign', 'ready_for_destination'),
+      expiresAt: '2020-01-01T00:00:00.000Z',
+      quoteExpiresAt: '2020-01-01T00:30:00.000Z',
+    };
+    const freshIntent = {
+      ...intent('send', 'ready_to_sign', 'ready_for_destination'),
+      expiresAt: '2099-07-29T01:30:00.000Z',
+      quoteQuotedAt: '2026-08-09T00:00:00.000Z',
+      quoteExpiresAt: '2099-07-29T00:30:00.000Z',
+    };
+    const quote = {
+      estimatedFeeReserve: '0',
+      estimatedFeeReserveBaseUnits: 0n,
+      estimatedFeeReserveByNetwork: { Arc_Testnet: '0' },
+      feeAllocations: [
+        {
+          network: 'Arc_Testnet' as const,
+          amount: '0',
+          components: [
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'provider' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'gas' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'kit' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+            {
+              network: 'Arc_Testnet' as const,
+              type: 'forwarder' as const,
+              token: 'USDC' as const,
+              amount: '0',
+            },
+          ],
+        },
+      ],
+      quotedAt: '2026-08-09T00:00:00.000Z',
+      expiresAt: '2099-07-29T00:30:00.000Z',
+    };
+    const executor = { estimateFunding: vi.fn(async () => quote) };
+    mocks.connectCircleWallet.mockResolvedValue({
+      address: WALLET,
+      wallet: { id: 'test-wallet', name: 'Test wallet', provider: {} },
+      executor,
+    });
+    const endpointCalls: Array<{ path: string; method: string }> = [];
+    const renderer = await renderLifecycle(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        const path = new URL(url).pathname;
+        endpointCalls.push({ path, method: init?.method ?? 'GET' });
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents/active`)) {
+          return new Response(JSON.stringify({ success: true, data: expiredIntent }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/withdrawal-intents/active`)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: { code: 'not_found', message: 'No active withdrawal.' },
+            }),
+            { status: 404, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents`)) {
+          return new Response(JSON.stringify({ success: true, data: freshIntent }), {
+            status: 201,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`Unexpected lifecycle request: ${url}`);
+      },
+    );
+
+    const fundButton = renderer.root
+      .findAll(
+        (node) =>
+          node.props['children'] === 'Fund rewards' && typeof node.props['onClick'] === 'function',
+      )
+      .at(-1);
+    if (fundButton === undefined) throw new Error('Fund rewards action was not rendered.');
+    await act(async () => fundButton.props['onClick']());
+
+    let allocations = latestFundingAllocationsProps();
+    await act(async () => {
+      allocations.onGrossAmountChange('10');
+      allocations.onSourceChange('source-1', {
+        network: 'Arc_Testnet',
+        amount: '10',
+      });
+    });
+    allocations = latestFundingAllocationsProps();
+    await connectAllocationWallet();
+    allocations = latestFundingAllocationsProps();
+    await act(async () => allocations.onCheckReadiness());
+    allocations = latestFundingAllocationsProps();
+    expect(allocations.readinessChecked).toBe(true);
+    await act(async () => allocations.onSubmit());
+
+    expect(
+      endpointCalls.filter(
+        ({ path, method }) =>
+          path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents`) && method === 'POST',
+      ),
+    ).toHaveLength(1);
+    expect(
+      endpointCalls.some(({ path }) => path.endsWith(`/funding-intents/${INTENT_ID}/quote`)),
+    ).toBe(false);
+    expect(renderer.root.findByProps({ 'data-testid': 'funding-pending' })).toBeDefined();
+    expect(executor.estimateFunding).toHaveBeenCalledOnce();
     await act(async () => renderer.unmount());
   });
 });
