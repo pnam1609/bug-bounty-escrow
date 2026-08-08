@@ -116,11 +116,11 @@ export interface FundingConfirmationArtifactRow {
   token_decimals: 6;
   destination_transaction_hash: `0x${string}`;
   destination_log_index: number;
-  destination_block_number: string;
+  destination_block_number: string | number | bigint;
   destination_block_hash: `0x${string}`;
   sync_transaction_hash: `0x${string}`;
   sync_log_index: number | null;
-  sync_block_number: string;
+  sync_block_number: string | number | bigint;
   sync_block_hash: `0x${string}`;
   gross_amount_base_units: string;
   estimated_fee_reserve_base_units: string;
@@ -155,7 +155,7 @@ export interface SourceDepositOperationRow {
   transfer_id?: string | null;
   log_index?: number | null;
   transfer_log_index?: number | null;
-  block_number?: string | null;
+  block_number?: string | number | bigint | null;
   block_hash?: `0x${string}` | null;
   status?:
     | 'awaiting_signature'
@@ -170,7 +170,7 @@ export interface SourceDepositOperationRow {
   recovery_checked_at?: string | null;
   recovery_transaction_hash?: `0x${string}` | null;
   recovery_state?: 'pending' | 'success' | 'reverted' | null;
-  recovery_block_number?: string | null;
+  recovery_block_number?: string | number | bigint | null;
   recovery_block_hash?: `0x${string}` | null;
   unbound_transaction_hashes?: `0x${string}`[];
   funding_operation_recovery_checks?: FundingOperationRecoveryCheckRow[];
@@ -194,7 +194,7 @@ export interface FundingOperationRecoveryCheckRow {
   evidence_role: 'source' | 'destination';
   network: FundingNetworkId;
   state: 'pending' | 'success' | 'reverted';
-  block_number: string | null;
+  block_number: string | number | bigint | null;
   block_hash: `0x${string}` | null;
   checked_at: string;
 }
@@ -225,11 +225,22 @@ export interface EscrowDeploymentRow {
 }
 
 export interface DeploymentFeeQuoteRow {
-  id: string; program_id: string; chain_id: number; token_address: `0x${string}`;
-  recipient_address: `0x${string}`; amount_base_units: string; status: 'quoted'|'paid'|'expired'|'waived';
-  expires_at: string; payment_transaction_hash: `0x${string}`|null; payer_address: `0x${string}`|null;
-  payment_block_number: string|null; payment_block_hash: `0x${string}`|null; payment_log_index: number|null;
-  paid_at: string|null; created_at: string; updated_at: string;
+  id: string;
+  program_id: string;
+  chain_id: number;
+  token_address: `0x${string}`;
+  recipient_address: `0x${string}`;
+  amount_base_units: string;
+  status: 'quoted' | 'paid' | 'expired' | 'waived';
+  expires_at: string;
+  payment_transaction_hash: `0x${string}` | null;
+  payer_address: `0x${string}` | null;
+  payment_block_number: string | null;
+  payment_block_hash: `0x${string}` | null;
+  payment_log_index: number | null;
+  paid_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 export type DeploymentFeeQuoteProjection = ReturnType<typeof mapDeploymentFeeQuote>;
 
@@ -263,7 +274,7 @@ export interface RewardSettlementOperationRow {
   transaction_hash: `0x${string}` | null;
   event_log_index: number | null;
   transfer_log_index: number | null;
-  block_number: string | null;
+  block_number: string | number | bigint | null;
   block_hash: `0x${string}` | null;
   failure_code: string | null;
   created_at: string;
@@ -302,6 +313,16 @@ export interface RewardSettlementContextRow {
   content_hash: `0x${string}`;
 }
 
+function normalizeBlockNumber(value: string | number | bigint): string;
+function normalizeBlockNumber(
+  value: string | number | bigint | null | undefined,
+): string | undefined;
+function normalizeBlockNumber(
+  value: string | number | bigint | null | undefined,
+): string | undefined {
+  return value == null ? undefined : String(value);
+}
+
 function mapFundingIntent(row: FundingIntentRow): FundingIntent {
   const mapRecoveryChecks = (operation: SourceDepositOperationRow) =>
     [...(operation.funding_operation_recovery_checks ?? [])]
@@ -317,7 +338,9 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
         evidenceRole: check.evidence_role,
         network: check.network,
         state: check.state,
-        ...(check.block_number === null ? {} : { blockNumber: check.block_number }),
+        ...(normalizeBlockNumber(check.block_number) === undefined
+          ? {}
+          : { blockNumber: normalizeBlockNumber(check.block_number) }),
         ...(check.block_hash === null ? {} : { blockHash: check.block_hash }),
         checkedAt: check.checked_at,
       }));
@@ -395,9 +418,9 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
         ? {}
         : { recoveryTransactionHash: operation.recovery_transaction_hash }),
       ...(operation.recovery_state == null ? {} : { recoveryState: operation.recovery_state }),
-      ...(operation.recovery_block_number == null
+      ...(normalizeBlockNumber(operation.recovery_block_number) === undefined
         ? {}
-        : { recoveryBlockNumber: operation.recovery_block_number }),
+        : { recoveryBlockNumber: normalizeBlockNumber(operation.recovery_block_number) }),
       ...(operation.recovery_block_hash == null
         ? {}
         : { recoveryBlockHash: operation.recovery_block_hash }),
@@ -461,7 +484,9 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
         ...(operation.transfer_log_index === null
           ? {}
           : { transferLogIndex: operation.transfer_log_index }),
-        ...(operation.block_number === null ? {} : { blockNumber: operation.block_number }),
+        ...(normalizeBlockNumber(operation.block_number) === undefined
+          ? {}
+          : { blockNumber: normalizeBlockNumber(operation.block_number) }),
         ...(operation.block_hash === null ? {} : { blockHash: operation.block_hash }),
         ...(operation.failure_code === null ? {} : { failureCode: operation.failure_code }),
         ...(operation.recovery_checked_at == null
@@ -471,9 +496,9 @@ function mapFundingIntent(row: FundingIntentRow): FundingIntent {
           ? {}
           : { recoveryTransactionHash: operation.recovery_transaction_hash }),
         ...(operation.recovery_state == null ? {} : { recoveryState: operation.recovery_state }),
-        ...(operation.recovery_block_number == null
+        ...(normalizeBlockNumber(operation.recovery_block_number) === undefined
           ? {}
-          : { recoveryBlockNumber: operation.recovery_block_number }),
+          : { recoveryBlockNumber: normalizeBlockNumber(operation.recovery_block_number) }),
         ...(operation.recovery_block_hash == null
           ? {}
           : { recoveryBlockHash: operation.recovery_block_hash }),
@@ -549,11 +574,11 @@ function mapFundingConfirmationArtifact(
     tokenDecimals: row.token_decimals,
     destinationTransactionHash: row.destination_transaction_hash,
     destinationLogIndex: row.destination_log_index,
-    destinationBlockNumber: row.destination_block_number,
+    destinationBlockNumber: normalizeBlockNumber(row.destination_block_number),
     destinationBlockHash: row.destination_block_hash,
     syncTransactionHash: row.sync_transaction_hash,
     ...(row.sync_log_index === null ? {} : { syncLogIndex: row.sync_log_index }),
-    syncBlockNumber: row.sync_block_number,
+    syncBlockNumber: normalizeBlockNumber(row.sync_block_number),
     syncBlockHash: row.sync_block_hash,
     grossAmount: formatUsdcBaseUnits(BigInt(row.gross_amount_base_units)),
     estimatedFeeReserve: formatUsdcBaseUnits(BigInt(row.estimated_fee_reserve_base_units)),
@@ -611,7 +636,9 @@ function mapDeploymentFeeQuote(row: DeploymentFeeQuoteRow) {
     amount: formatUsdcBaseUnits(BigInt(row.amount_base_units)),
     status: row.status,
     expiresAt: row.expires_at,
-    ...(row.payment_transaction_hash === null ? {} : { paymentTransactionHash: row.payment_transaction_hash }),
+    ...(row.payment_transaction_hash === null
+      ? {}
+      : { paymentTransactionHash: row.payment_transaction_hash }),
     ...(row.paid_at === null ? {} : { paidAt: row.paid_at }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -686,7 +713,9 @@ function mapRewardSettlementIntent(row: RewardSettlementIntentRow): RewardSettle
         ...(operation.transfer_log_index === null
           ? {}
           : { transferLogIndex: operation.transfer_log_index }),
-        ...(operation.block_number === null ? {} : { blockNumber: operation.block_number }),
+        ...(normalizeBlockNumber(operation.block_number) === undefined
+          ? {}
+          : { blockNumber: normalizeBlockNumber(operation.block_number) }),
         ...(operation.block_hash === null ? {} : { blockHash: operation.block_hash }),
         ...(operation.failure_code === null ? {} : { failureCode: operation.failure_code }),
         createdAt: operation.created_at,
@@ -729,7 +758,9 @@ export class EscrowRepository
 
   public async getProgramStatus(
     programId: string,
-  ): Promise<'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed' | null> {
+  ): Promise<
+    'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed' | null
+  > {
     const result = await this.client
       .from('programs')
       .select('status')
@@ -739,7 +770,14 @@ export class EscrowRepository
     return (
       (
         result.data as {
-          status: 'draft' | 'awaiting_funding' | 'active' | 'paused' | 'deactivated' | 'expired' | 'closed';
+          status:
+            | 'draft'
+            | 'awaiting_funding'
+            | 'active'
+            | 'paused'
+            | 'deactivated'
+            | 'expired'
+            | 'closed';
         } | null
       )?.status ?? null
     );
@@ -851,25 +889,41 @@ export class EscrowRepository
   }
 
   public async createDeploymentFeeQuote(input: {
-    id: string; actorId: string; programId: string; chainId: number; tokenAddress: string;
-    recipientAddress: string; amountBaseUnits: bigint; expiresAt: string;
+    id: string;
+    actorId: string;
+    programId: string;
+    chainId: number;
+    tokenAddress: string;
+    recipientAddress: string;
+    amountBaseUnits: bigint;
+    expiresAt: string;
   }): Promise<DeploymentFeeQuoteRow> {
     const id = await this.executeAtomicRpc<string>('create_deployment_fee_quote_atomic', {
-      target_quote_id: input.id, actor_id: input.actorId, target_program_id: input.programId,
-      target_chain_id: input.chainId, target_token_address: input.tokenAddress.toLowerCase(),
-      target_recipient_address: input.recipientAddress.toLowerCase(), target_amount_base_units: input.amountBaseUnits.toString(),
+      target_quote_id: input.id,
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_chain_id: input.chainId,
+      target_token_address: input.tokenAddress.toLowerCase(),
+      target_recipient_address: input.recipientAddress.toLowerCase(),
+      target_amount_base_units: input.amountBaseUnits.toString(),
       target_expires_at: input.expiresAt,
     });
     return (await this.findDeploymentFeeQuoteById(id))!;
   }
 
   public async findDeploymentFeeQuoteById(id: string): Promise<DeploymentFeeQuoteRow | null> {
-    const result = await this.client.from('escrow_deployment_fee_quotes' as never).select('*').eq('id', id).maybeSingle();
+    const result = await this.client
+      .from('escrow_deployment_fee_quotes' as never)
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
     if (result.error !== null) this.unwrapResult(result as DatabaseResult<unknown>);
     return result.data as DeploymentFeeQuoteRow | null;
   }
 
-  public async findActiveDeploymentFeeQuote(programId: string): Promise<DeploymentFeeQuoteRow | null> {
+  public async findActiveDeploymentFeeQuote(
+    programId: string,
+  ): Promise<DeploymentFeeQuoteRow | null> {
     const result = await this.client
       .from('escrow_deployment_fee_quotes' as never)
       .select('*')
@@ -881,7 +935,8 @@ export class EscrowRepository
     const now = Date.now();
     return (
       rows.find(
-        (row) => row.status === 'paid' || row.status === 'waived' || Date.parse(row.expires_at) > now,
+        (row) =>
+          row.status === 'paid' || row.status === 'waived' || Date.parse(row.expires_at) > now,
       ) ?? null
     );
   }
@@ -891,30 +946,54 @@ export class EscrowRepository
   }
 
   public async markDeploymentFeePaid(input: {
-    quoteId: string; programId: string; payerAddress: string; transactionHash: string;
-    blockNumber: bigint; blockHash: string; logIndex: number;
+    quoteId: string;
+    programId: string;
+    payerAddress: string;
+    transactionHash: string;
+    blockNumber: bigint;
+    blockHash: string;
+    logIndex: number;
   }): Promise<DeploymentFeeQuoteRow> {
     await this.executeAtomicRpc<string>('mark_deployment_fee_paid_atomic', {
-      target_quote_id: input.quoteId, target_program_id: input.programId, target_payer_address: input.payerAddress.toLowerCase(),
-      target_payment_transaction_hash: input.transactionHash.toLowerCase(), target_payment_block_number: input.blockNumber.toString(),
-      target_payment_block_hash: input.blockHash.toLowerCase(), target_payment_log_index: input.logIndex,
+      target_quote_id: input.quoteId,
+      target_program_id: input.programId,
+      target_payer_address: input.payerAddress.toLowerCase(),
+      target_payment_transaction_hash: input.transactionHash.toLowerCase(),
+      target_payment_block_number: input.blockNumber.toString(),
+      target_payment_block_hash: input.blockHash.toLowerCase(),
+      target_payment_log_index: input.logIndex,
     });
     return (await this.findDeploymentFeeQuoteById(input.quoteId))!;
   }
 
   public async createServerDeploymentRecord(input: {
-    actorId: string; programId: string; programKey: string; platformAdminWallet: string;
+    actorId: string;
+    programId: string;
+    programKey: string;
+    platformAdminWallet: string;
     programOwnerWallet: string;
-    withdrawRecipient: string; refundUnlockAt: string; artifactChecksum: string; runtimeChecksum: string;
-    immutableReferences: unknown; idempotencyKey: string; requestHash: string; feeQuoteId: string;
+    withdrawRecipient: string;
+    refundUnlockAt: string;
+    artifactChecksum: string;
+    runtimeChecksum: string;
+    immutableReferences: unknown;
+    idempotencyKey: string;
+    requestHash: string;
+    feeQuoteId: string;
   }): Promise<EscrowDeploymentRow> {
     const id = await this.executeAtomicRpc<string>('create_escrow_deployment_server_atomic', {
-      actor_id: input.actorId, target_program_id: input.programId, target_program_key: input.programKey.toLowerCase(),
-      target_platform_admin_wallet: input.platformAdminWallet.toLowerCase(), target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
+      actor_id: input.actorId,
+      target_program_id: input.programId,
+      target_program_key: input.programKey.toLowerCase(),
+      target_platform_admin_wallet: input.platformAdminWallet.toLowerCase(),
+      target_withdraw_recipient: input.withdrawRecipient.toLowerCase(),
       target_program_owner_wallet: input.programOwnerWallet.toLowerCase(),
-      target_refund_unlock_at: input.refundUnlockAt, target_artifact_checksum: input.artifactChecksum.toLowerCase(),
-      target_runtime_checksum: input.runtimeChecksum.toLowerCase(), target_immutable_references: input.immutableReferences,
-      target_idempotency_key: input.idempotencyKey, target_request_hash: input.requestHash.toLowerCase(),
+      target_refund_unlock_at: input.refundUnlockAt,
+      target_artifact_checksum: input.artifactChecksum.toLowerCase(),
+      target_runtime_checksum: input.runtimeChecksum.toLowerCase(),
+      target_immutable_references: input.immutableReferences,
+      target_idempotency_key: input.idempotencyKey,
+      target_request_hash: input.requestHash.toLowerCase(),
       target_fee_quote_id: input.feeQuoteId,
     });
     const row = await this.findDeploymentById(id);

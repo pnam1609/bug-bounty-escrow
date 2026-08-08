@@ -1,4 +1,8 @@
-import { fundingIntentResponseSchema } from '@bug-bounty-escrow/shared';
+import {
+  FUNDING_NETWORK_CONFIG,
+  GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+  fundingIntentResponseSchema,
+} from '@bug-bounty-escrow/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { EscrowRepository, type FundingIntentRow } from '../src/escrow/escrow.repository.js';
@@ -93,6 +97,50 @@ function row(patch: Partial<FundingIntentRow> = {}): FundingIntentRow {
 
 describe('durable bridge recovery response', () => {
   const repository = new EscrowRepository({} as never);
+
+  it('normalizes numeric database block numbers in source deposits', () => {
+    const sourceDeposit = {
+      id: '31000000-0000-4000-8000-000000000099',
+      operation_type: 'deposit' as const,
+      attempt_no: 1,
+      source_chain: 'Base_Sepolia' as const,
+      source_chain_id: String(FUNDING_NETWORK_CONFIG.Base_Sepolia.chainId),
+      source_address: `0x${'a'.repeat(40)}` as `0x${string}`,
+      source_token_address: FUNDING_NETWORK_CONFIG.Base_Sepolia.tokenAddress,
+      gateway_wallet_address: GATEWAY_WALLET_EVM_TESTNET_ADDRESS,
+      requested_amount_base_units: '10000000',
+      pre_gateway_balance_base_units: '0',
+      status: 'gateway_finalized' as const,
+      transaction_hash: BURN_HASH,
+      log_index: 1,
+      transfer_log_index: 2,
+      block_number: 123456,
+      block_hash: `0x${'d'.repeat(64)}` as `0x${string}`,
+      recovery_checked_at: '2026-07-29T00:00:02.000Z',
+      recovery_transaction_hash: MINT_HASH,
+      recovery_state: 'success' as const,
+      recovery_block_number: 123457,
+      recovery_block_hash: `0x${'e'.repeat(64)}` as `0x${string}`,
+      provider_state: 'success' as const,
+      retryable: false,
+      submission_uncertain: false,
+      steps: [],
+      updated_at: '2026-07-29T00:01:00.000Z',
+      created_at: '2026-07-29T00:00:00.000Z',
+    };
+
+    const response = repository.toFundingIntent(
+      row({
+        funding_operations: [sourceDeposit],
+      }),
+    );
+
+    expect(response.sourceDeposits[0]).toMatchObject({
+      blockNumber: '123456',
+      recoveryBlockNumber: '123457',
+    });
+    expect(fundingIntentResponseSchema.parse({ success: true, data: response }).success).toBe(true);
+  });
 
   it('serializes source_submitted with bounded evidence and no destination hash', () => {
     const response = fundingIntentResponseSchema.parse({
