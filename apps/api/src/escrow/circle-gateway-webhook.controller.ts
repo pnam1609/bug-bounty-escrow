@@ -66,7 +66,10 @@ export class CircleGatewayWebhookController {
     await this.verifier.verify(request.rawBody, keyId, signature);
     const test = circleWebhookTestSchema.safeParse(body);
     if (test.success) {
-      if (this.config.CIRCLE_GATEWAY_WEBHOOKS_ENABLED) {
+      if (
+        this.config.CIRCLE_GATEWAY_WEBHOOKS_ENABLED &&
+        this.subscriptionLifecycle.isAllowlistedSubscription(test.data.subscriptionId)
+      ) {
         await this.subscriptionLifecycle.recordSignedTest(
           test.data.subscriptionId,
           test.data.notificationId,

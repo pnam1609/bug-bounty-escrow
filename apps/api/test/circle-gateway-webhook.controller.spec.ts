@@ -64,7 +64,10 @@ describe('CircleGatewayWebhookController', () => {
   it('accepts a verified webhooks.test callback without inserting a deposit event', async () => {
     const verifier = { verify: vi.fn().mockResolvedValue(undefined) };
     const escrow = { ingestGatewayDepositFinalized: vi.fn() };
-    const lifecycle = { recordSignedTest: vi.fn().mockResolvedValue(undefined) };
+    const lifecycle = {
+      isAllowlistedSubscription: vi.fn().mockReturnValue(true),
+      recordSignedTest: vi.fn().mockResolvedValue(undefined),
+    };
     const controller = new CircleGatewayWebhookController(
       verifier as never,
       escrow as never,
@@ -89,6 +92,37 @@ describe('CircleGatewayWebhookController', () => {
 
     expect(verifier.verify).toHaveBeenCalledWith(rawBody, 'key-id', 'signature');
     expect(lifecycle.recordSignedTest).toHaveBeenCalledWith(SUBSCRIPTION_ID, NOTIFICATION_ID);
+    expect(escrow.ingestGatewayDepositFinalized).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a signed test for another subscription without granting readiness', async () => {
+    const verifier = { verify: vi.fn().mockResolvedValue(undefined) };
+    const escrow = { ingestGatewayDepositFinalized: vi.fn() };
+    const lifecycle = {
+      isAllowlistedSubscription: vi.fn().mockReturnValue(false),
+      recordSignedTest: vi.fn(),
+    };
+    const controller = new CircleGatewayWebhookController(
+      verifier as never,
+      escrow as never,
+      lifecycle as never,
+      { CIRCLE_GATEWAY_WEBHOOKS_ENABLED: true } as never,
+    );
+
+    await expect(
+      controller.gateway(
+        { rawBody: Buffer.from('signed probe') } as never,
+        {
+          subscriptionId: '41000000-0000-4000-8000-000000000001',
+          notificationId: NOTIFICATION_ID,
+          notificationType: 'webhooks.test',
+        },
+        'key-id',
+        'signature',
+      ),
+    ).resolves.toEqual({ success: true });
+
+    expect(lifecycle.recordSignedTest).not.toHaveBeenCalled();
     expect(escrow.ingestGatewayDepositFinalized).not.toHaveBeenCalled();
   });
 

@@ -22,6 +22,30 @@ function lifecycleConfig(requestTimeoutMs = 1_000) {
 }
 
 describe('GatewaySubscriptionLifecycleService', () => {
+  it('accepts Circle UUIDs with different casing and stores canonical values', async () => {
+    const store = { recordSignedTest: vi.fn().mockResolvedValue(undefined) };
+    const service = new GatewaySubscriptionLifecycleService(
+      store as never,
+      {} as never,
+      lifecycleConfig() as never,
+      { info: vi.fn(), errorEvent: vi.fn() } as never,
+    );
+    const mixedCaseSubscriptionId = SUBSCRIPTION_ID.toUpperCase();
+    const mixedCaseNotificationId = '31000000-0000-4000-8000-00000000000A';
+
+    await expect(
+      service.recordSignedTest(` ${mixedCaseSubscriptionId} `, ` ${mixedCaseNotificationId} `),
+    ).resolves.toBeUndefined();
+
+    expect(store.recordSignedTest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscriptionId: SUBSCRIPTION_ID,
+        notificationId: mixedCaseNotificationId.toLowerCase(),
+        receivedAt: expect.any(String),
+      }),
+    );
+  });
+
   it('uses a durable claim and completes only after remote exact verification', async () => {
     const requestTimeoutMs = 15_000;
     const startedAt = Date.now();

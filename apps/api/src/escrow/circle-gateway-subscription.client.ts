@@ -175,9 +175,10 @@ export class CircleGatewaySubscriptionClient {
   }
 
   private assertConfiguredSubscription(subscriptionId: string): void {
+    const normalizedSubscriptionId = normalizeUuid(subscriptionId);
     if (
       this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS.length !== 1 ||
-      this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS[0] !== subscriptionId
+      this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS[0] !== normalizedSubscriptionId
     ) {
       throw new GatewaySubscriptionProviderError('gateway_subscription_not_allowlisted', false);
     }
@@ -189,7 +190,7 @@ export class CircleGatewaySubscriptionClient {
       this.config.WEB_APP_ORIGIN,
     ).toString();
     if (
-      subscription.id !== this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS[0] ||
+      normalizeUuid(subscription.id) !== this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS[0] ||
       subscription.environment !== 'TEST' ||
       subscription.endpoint !== expectedEndpoint
     ) {
@@ -277,4 +278,8 @@ function parseRetryAfter(value: string | null): number | undefined {
   const date = Date.parse(value);
   if (!Number.isFinite(date)) return undefined;
   return Math.max(0, date - Date.now());
+}
+
+function normalizeUuid(value: string): string {
+  return value.trim().toLowerCase();
 }

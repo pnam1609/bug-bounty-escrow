@@ -146,14 +146,28 @@ export class GatewaySubscriptionLifecycleService
   }
 
   public async recordSignedTest(subscriptionId: string, notificationId: string): Promise<void> {
-    if (!this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS.includes(subscriptionId)) {
+    const normalizedSubscriptionId = normalizeUuid(subscriptionId);
+    const normalizedNotificationId = normalizeUuid(notificationId);
+    if (!this.isAllowlistedSubscription(normalizedSubscriptionId)) {
       throw new ConflictException('gateway_subscription_not_allowlisted');
     }
     await this.store.recordSignedTest({
-      subscriptionId,
-      notificationId,
+      subscriptionId: normalizedSubscriptionId,
+      notificationId: normalizedNotificationId,
       receivedAt: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Circle's connection probe can send a signed test for a subscription that
+   * is not the app's configured stable subscription. It is safe to acknowledge
+   * that health-check without recording readiness; only the configured test
+   * notification can advance the durable Gateway gate.
+   */
+  public isAllowlistedSubscription(subscriptionId: string): boolean {
+    return this.config.CIRCLE_GATEWAY_WEBHOOK_SUBSCRIPTION_IDS.includes(
+      normalizeUuid(subscriptionId),
+    );
   }
 
   public async runMaintenance(): Promise<void> {
@@ -220,4 +234,8 @@ export class GatewaySubscriptionLifecycleService
   private sleep(milliseconds: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
+}
+
+function normalizeUuid(value: string): string {
+  return value.trim().toLowerCase();
 }
