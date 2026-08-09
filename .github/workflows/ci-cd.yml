@@ -89,10 +89,16 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker build \
+          quality_log="${RUNNER_TEMP}/bbe-quality-${GITHUB_SHA}.log"
+          if ! docker build \
+            --progress=plain \
             --target quality \
             --tag "${IMAGE_NAMESPACE}/bug-bounty-escrow-quality:${GITHUB_SHA}" \
-            .
+            . 2>&1 | tee "${quality_log}"; then
+            summary="$(tail -n 60 "${quality_log}" | tr '\n' ' ' | cut -c1-6000)"
+            echo "::error title=Verify source in Docker failed::${summary}"
+            exit 1
+          fi
 
       - name: Build production images on VPS
         shell: bash
