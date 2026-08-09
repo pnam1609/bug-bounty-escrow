@@ -1090,7 +1090,7 @@
                     "type": "array"
                   },
                   "shortSummary": {
-                    "maxLength": 280,
+                    "maxLength": 1000,
                     "minLength": 1,
                     "type": "string"
                   },
@@ -1463,7 +1463,7 @@
                     "type": "array"
                   },
                   "shortSummary": {
-                    "maxLength": 280,
+                    "maxLength": 1000,
                     "minLength": 1,
                     "type": "string"
                   },

@@ -527,8 +527,8 @@ type BountyProgram = {
   ownerId: string;
   name: string;
   slug: string;
-  shortSummary: string;
-  description: string;
+  shortSummary: string; // trimmed, 1–1,000 chars; shown on program cards and headers
+  description: string; // trimmed long-form overview, 1–20,000 chars
   websiteUrl?: string;
   logoUrl?: string;
   tags: string[];

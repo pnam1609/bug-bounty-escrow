@@ -48,6 +48,8 @@ const MAX_TAGS = 10;
 const MAX_RESOURCES = 20;
 const MAX_IMPACTS = 200;
 const MAX_CUSTOM_PROHIBITED_RULES = 20;
+/** Public summary copy is reused on cards and headers, so it may be longer than one sentence. */
+export const PROGRAM_SHORT_SUMMARY_MAX_LENGTH = 1_000;
 /** One tier per (asset type, severity) pair. */
 const MAX_REWARD_TIERS = PRODUCT_ENABLED_ASSET_TYPES.length * SEVERITIES.length;
 
@@ -288,7 +290,7 @@ export const createProgramRequestSchema = z
       .min(1)
       .max(120)
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    shortSummary: nonEmptyTrimmedTextSchema.max(280),
+    shortSummary: nonEmptyTrimmedTextSchema.max(PROGRAM_SHORT_SUMMARY_MAX_LENGTH),
     description: nonEmptyTrimmedTextSchema.max(20_000),
     websiteUrl: httpsUrlSchema,
     logoStoragePath: storagePathSchema.optional(),
@@ -347,7 +349,7 @@ export const createProgramRequestSchema = z
 export const updateProgramRequestSchema = z
   .object({
     name: nonEmptyTrimmedTextSchema.max(200).optional(),
-    shortSummary: nonEmptyTrimmedTextSchema.max(280).optional(),
+    shortSummary: nonEmptyTrimmedTextSchema.max(PROGRAM_SHORT_SUMMARY_MAX_LENGTH).optional(),
     description: nonEmptyTrimmedTextSchema.max(20_000).optional(),
     websiteUrl: httpsUrlSchema.optional(),
     logoStoragePath: storagePathSchema.nullable().optional(),

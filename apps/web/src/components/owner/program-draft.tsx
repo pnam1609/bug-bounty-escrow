@@ -11,6 +11,7 @@
 import {
   IMPACT_TEMPLATES as DOMAIN_IMPACT_TEMPLATES,
   PLATFORM_PROHIBITED_ACTIVITIES as DOMAIN_PROHIBITED_ACTIVITIES,
+  PROGRAM_SHORT_SUMMARY_MAX_LENGTH,
 } from '@bug-bounty-escrow/shared';
 import type {
   AuthorableAssetType,
@@ -512,8 +513,9 @@ export function validateOverview(draft: ProgramDraft): FieldErrors {
   }
 
   const summary = draft.shortSummary.trim();
-  if (summary === '' || summary.length > 280) {
-    errors['shortSummary'] = 'Add a summary within 280 characters.';
+  if (summary === '' || summary.length > PROGRAM_SHORT_SUMMARY_MAX_LENGTH) {
+    errors['shortSummary'] =
+      `Add a summary within ${PROGRAM_SHORT_SUMMARY_MAX_LENGTH.toLocaleString('en-US')} characters.`;
   }
 
   if (!isHttpsUrl(draft.websiteUrl.trim())) errors['websiteUrl'] = 'Enter a valid HTTPS website.';

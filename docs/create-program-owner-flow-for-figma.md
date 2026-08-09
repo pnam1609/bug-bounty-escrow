@@ -302,7 +302,7 @@ manual original-message recovery, tuyệt đối không chạy lại full bridge
 | ---------------- | ------------- | --------------------------------------------------------------- |
 | Name             | Có            | Trimmed, 1–200 ký tự                                            |
 | Slug             | Có khi create | 1–120 ký tự, lowercase kebab-case: `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
-| Short summary    | Có            | Trimmed, 1–280 ký tự; dùng trong program card/header            |
+| Short summary    | Có            | Trimmed, 1–1,000 ký tự; textarea nhiều dòng, dùng trong program card/header |
 | Description      | Có            | Trimmed, 1–20,000 ký tự; rich long-form overview                |
 | Official website | Có            | HTTPS URL hợp lệ                                                |
 | Logo asset       | Không         | Private draft upload; PNG/JPEG/WebP/SVG, tối đa 2 MB            |
@@ -1410,8 +1410,10 @@ Fields:
    - Placeholder: `aegis-protocol`
    - Helper: `Lowercase letters, numbers and hyphens only.`
 4. `Short summary`
+   - Control: multiline textarea (không phải single-line input), hỗ trợ nội dung dài hơn một câu.
    - Placeholder: `Describe the program in one concise sentence.`
-   - Character counter: `0 / 280`.
+   - Helper: `Used on the program card and the program header.`
+   - Character counter: `0 / 1,000`; đếm sau trim khi validate và không được tự động cắt nội dung vượt giới hạn.
 5. `Official website`
    - Placeholder: `https://aegis.xyz`.
 6. `Tags`
@@ -1444,7 +1446,7 @@ Field errors:
 
 - Name empty: `Enter a program name.`
 - Slug invalid: `Use lowercase letters, numbers and single hyphens.`
-- Short summary empty/too long: `Add a summary within 280 characters.`
+- Short summary empty/too long: `Add a summary within 1,000 characters.`
 - Website invalid: `Enter a valid HTTPS website.`
 - Tags empty: `Add at least one program tag.`
 - Description empty: `Describe the program.`
@@ -2049,6 +2051,11 @@ wallet`, khi connected RainbowKit quản lý shortened address và `Disconnect`.
     qua `submission_uncertain` không có auto-retry; khi mất hash dùng reconcile/manual
     attach/support, còn hash đã biết chỉ poll/reconcile.
   - Các state switch/approve/deposit/pending/confirmed hiển thị inline ngay trong CP-11.
+  - Khi owner bấm `Check deposit` cho một operation đang pending, CP-11 hiển thị live status
+    `Deposit verification in progress` và giải thích rằng Circle Gateway/Bridge finality có thể
+    mất vài phút. Client chỉ gửi một lần reconcile rồi poll funding intent; không mở lại wallet
+    prompt, không ký lại và không tạo deposit attempt mới. Nếu đã có transaction hash, row hiển thị
+    link explorer đúng network (Arcscan, Etherscan, Arbiscan hoặc BaseScan) để owner theo dõi.
   - Ngay trước `Submit` thứ hai, UI lấy fresh App Kit quote bằng connected wallet, gửi server
     validate/bound/persist per-domain provider/gas fee allocations và hiển thị expiry. Chỉ enable
     khi quote còn hạn và mỗi selected domain cover allocation + fee allocation của domain đó;

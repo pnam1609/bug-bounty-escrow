@@ -9,6 +9,7 @@ import {
   onboardingRequestSchema,
   programSlugParamsSchema,
   reportDetailSchema,
+  updateProgramRequestSchema,
   updateProfileRequestSchema,
   isApiErrorCode,
 } from '../src/index.js';
@@ -208,7 +209,7 @@ describe('off-chain shared contracts', () => {
     ['empty name', { name: '   ' }],
     ['slug with invalid characters', { slug: 'Bad_Slug' }],
     ['slug above 120 characters', { slug: 'a'.repeat(121) }],
-    ['short summary above 280 characters', { shortSummary: 'x'.repeat(281) }],
+    ['short summary above 1000 characters', { shortSummary: 'x'.repeat(1_001) }],
     ['description above 20000 characters', { description: 'x'.repeat(20_001) }],
     ['plain-http website', { websiteUrl: 'http://aegis.example.test' }],
     ['empty tag list', { tags: [] }],
@@ -227,6 +228,30 @@ describe('off-chain shared contracts', () => {
     void _deadline;
 
     expect(createProgramRequestSchema.safeParse(openEnded).success).toBe(true);
+  });
+
+  it('accepts a 1000-character short summary without changing the 20000-character description limit', () => {
+    const parsed = createProgramRequestSchema.parse({
+      ...validCreateProgram(),
+      shortSummary: 'x'.repeat(1_000),
+      description: 'y'.repeat(20_000),
+    });
+
+    expect(parsed.shortSummary).toHaveLength(1_000);
+    expect(parsed.description).toHaveLength(20_000);
+    const updateBase = { expectedUpdatedAt: '2030-01-01T00:00:00.000Z' };
+    expect(
+      updateProgramRequestSchema.safeParse({
+        ...updateBase,
+        shortSummary: 'x'.repeat(1_000),
+      }).success,
+    ).toBe(true);
+    expect(
+      updateProgramRequestSchema.safeParse({
+        ...updateBase,
+        shortSummary: 'x'.repeat(1_001),
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects empty, oversized and enum-only scope lists', () => {

@@ -34,6 +34,38 @@ begin
 end;
 $demo_uuid_contract$;
 
+-- CP-01: the public summary accepts richer card/header copy while preserving the long-form
+-- description limit. This fixture is rolled back with the rest of the verification transaction.
+do $short_summary_limit$
+declare
+  program_uuid constant uuid := '39000000-0000-4000-8000-000000000001';
+begin
+  insert into public.programs (
+    id, owner_id, name, slug, short_summary, description, website_url, status, total_pool
+  )
+  values (
+    program_uuid, '30000000-0000-4000-8000-000000000001',
+    'Summary limit fixture', 'summary-limit-fixture', repeat('s', 1000), repeat('d', 20000),
+    'https://summary-limit.example.test', 'draft', 0
+  );
+
+  begin
+    insert into public.programs (
+      id, owner_id, name, slug, short_summary, description, website_url, status, total_pool
+    )
+    values (
+      '39000000-0000-4000-8000-000000000002', '30000000-0000-4000-8000-000000000001',
+      'Oversized summary fixture', 'oversized-summary-fixture', repeat('s', 1001), 'Description',
+      'https://oversized-summary.example.test', 'draft', 0
+    );
+    raise exception 'A 1001-character short summary unexpectedly passed the database constraint';
+  exception
+    when check_violation then
+      null;
+  end;
+end;
+$short_summary_limit$;
+
 -- Seed layout used below (see seeds/offchain-demo.sql):
 --   report 09 -> program 2, status submitted
 --   report 10 -> program 3, status triaged

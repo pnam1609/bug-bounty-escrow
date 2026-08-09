@@ -1,4 +1,13 @@
-import { Controller, Get, Inject, NotFoundException, Post, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  NotFoundException,
+  Post,
+  UnauthorizedException,
+} from '@nestjs/common';
 import {
   createFundingIntentRequestSchema,
   createEscrowWalletChallengeRequestSchema,
@@ -128,7 +137,14 @@ export class EscrowController {
     @ZodBody(createDeploymentFeeQuoteRequestSchema) input: CreateDeploymentFeeQuoteRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<{ success: true; data: DeploymentFeeQuote }> {
-    return { success: true, data: await this.service.createDeploymentFeeQuote(requirePrincipal(principal), params.id, input) };
+    return {
+      success: true,
+      data: await this.service.createDeploymentFeeQuote(
+        requirePrincipal(principal),
+        params.id,
+        input,
+      ),
+    };
   }
 
   @Post(':id/escrow-deployment-fees/payment')
@@ -139,11 +155,22 @@ export class EscrowController {
     @ZodBody(observeDeploymentFeePaymentRequestSchema) input: ObserveDeploymentFeePaymentRequest,
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<{ success: true; data: DeploymentFeeQuote }> {
-    return { success: true, data: await this.service.observeDeploymentFeePayment(requirePrincipal(principal), params.id, input) };
+    return {
+      success: true,
+      data: await this.service.observeDeploymentFeePayment(
+        requirePrincipal(principal),
+        params.id,
+        input,
+      ),
+    };
   }
 
   @Get(':id/escrow-deployment-fees/current')
-  @ApiZodResponse(200, 'Current deployment-fee quote and payment state', deploymentFeeQuoteResponseSchema)
+  @ApiZodResponse(
+    200,
+    'Current deployment-fee quote and payment state',
+    deploymentFeeQuoteResponseSchema,
+  )
   public async currentDeploymentFeeQuote(
     @ZodParam(programIdParamsSchema) params: ProgramIdParams,
     @CurrentPrincipal() principal?: RequestPrincipal,
@@ -649,6 +676,7 @@ export class EscrowController {
   }
 
   @Post(':id/funding-intents/:intentId/source-deposits/:depositId/reconcile')
+  @HttpCode(HttpStatus.OK)
   @RateLimit({ limit: 20, windowMs: 60_000 })
   @ApiZodResponse(
     200,

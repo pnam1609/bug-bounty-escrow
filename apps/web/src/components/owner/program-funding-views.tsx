@@ -57,9 +57,12 @@ export interface FundingAllocationsProps {
   readonly depositStatuses: Readonly<Record<string, SourceDepositStatus>>;
   readonly depositRequiredAmounts: Readonly<Record<string, string>>;
   readonly depositRecoveryHashes: Readonly<Record<string, string>>;
+  readonly depositTransactionHashes?: Readonly<Record<string, string>>;
+  readonly checkingDepositRowId?: string;
   readonly confirmedUnifiedBalance: string | undefined;
   readonly pendingUnifiedBalance: string | undefined;
   readonly estimatedFeeReserve: string | undefined;
+  readonly notice?: string;
   readonly transactionsEnabled: boolean;
   readonly canSubmit: boolean;
   readonly readinessChecked: boolean;
@@ -81,9 +84,11 @@ export interface FundingAllocationsProps {
 export function FundingAllocations({
   confirmedUnifiedBalance,
   canSubmit,
+  checkingDepositRowId,
   readinessChecked,
   depositRequiredAmounts,
   depositRecoveryHashes,
+  depositTransactionHashes = {},
   depositStatuses,
   estimatedFeeReserve,
   errors,
@@ -100,6 +105,7 @@ export function FundingAllocations({
   onSourceChange,
   onSubmit,
   onCheckReadiness,
+  notice,
   pendingUnifiedBalance,
   program,
   sources,
@@ -280,6 +286,30 @@ export function FundingAllocations({
                             {formatUsdc(depositRequiredAmounts[source.rowId]!)}
                           </span>
                         )}
+                        {status === 'pending' ? (
+                          <>
+                            <p className="max-w-prose text-label-md text-text-muted" role="status">
+                              {network.id === 'Arc_Testnet'
+                                ? 'This deposit is moving through Circle Gateway to Arc. Confirmation can take a few minutes; you can check again without signing another transaction.'
+                                : `This deposit is moving through Circle Gateway from ${network.label} to Arc. Confirmation can take a few minutes; you can check again without signing another transaction.`}
+                            </p>
+                            {depositTransactionHashes[source.rowId] === undefined ||
+                            depositTransactionHashes[source.rowId]!.trim() === '' ? null : (
+                              <a
+                                className="text-label-md text-link underline-offset-2 hover:underline"
+                                href={sourceTransactionExplorerHref(
+                                  source.network,
+                                  depositTransactionHashes[source.rowId]!.trim(),
+                                )}
+                                rel="noopener noreferrer"
+                                target="_blank"
+                              >
+                                View transaction{' '}
+                                {shortenAddress(depositTransactionHashes[source.rowId]!.trim())}
+                              </a>
+                            )}
+                          </>
+                        ) : null}
                       </>
                     ) : (
                       <StatusBadge
@@ -296,9 +326,10 @@ export function FundingAllocations({
                         !transactionsEnabled ||
                         walletAddress === undefined ||
                         !hasValidAmount ||
-                        depositBlocked
+                        depositBlocked ||
+                        working
                       }
-                      loading={status === 'submitting'}
+                      loading={status === 'submitting' || checkingDepositRowId === source.rowId}
                       onClick={() => onDepositSource(source)}
                       variant="secondary"
                     >
@@ -345,6 +376,25 @@ export function FundingAllocations({
           <p className="text-label-md text-error" role="alert">
             {errors['sources.total']}
           </p>
+        )}
+
+        {notice === undefined ? null : (
+          <div
+            aria-live="polite"
+            className="flex items-start gap-md rounded-md border border-medium bg-surface-raised p-lg text-body-sm shadow-subtle"
+            role="status"
+          >
+            <LoaderCircle
+              aria-hidden="true"
+              className="mt-xs size-lg shrink-0 text-medium motion-safe:animate-spin"
+            />
+            <div className="flex min-w-0 flex-col gap-xs">
+              <p className="text-label-lg font-semibold text-medium">
+                Deposit verification in progress
+              </p>
+              <p className="text-body-sm text-text">{notice}</p>
+            </div>
+          </div>
         )}
 
         <Button
@@ -845,6 +895,18 @@ function NetworkLogo({ network }: { readonly network: FundingNetworkId }) {
       />
     </svg>
   );
+}
+
+function sourceTransactionExplorerHref(network: FundingNetworkId, transactionHash: string): string {
+  const explorerBaseByNetwork: Readonly<Record<FundingNetworkId, string>> = {
+    Arc_Testnet: 'https://testnet.arcscan.app',
+    Ethereum_Sepolia: 'https://sepolia.etherscan.io',
+    Arbitrum_Sepolia: 'https://sepolia.arbiscan.io',
+    Base_Sepolia: 'https://sepolia.basescan.org',
+  };
+  const base = new URL(explorerBaseByNetwork[network]);
+  base.pathname = `${base.pathname.replace(/\/+$/u, '')}/tx/${transactionHash}`;
+  return base.toString();
 }
 
 function depositStatusLabel(status: SourceDepositStatus): string {

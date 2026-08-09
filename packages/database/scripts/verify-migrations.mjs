@@ -68,6 +68,7 @@ const expectedMigrations = [
   '20260801000900_admin_only_deactivation.sql',
   '20260801001000_cp13_deployment_idempotency_recovery.sql',
   '20260809000100_cp13_publish_canonical_escrow.sql',
+  '20260809000200_cp01_short_summary_1000.sql',
 ];
 
 const tableMigrations = new Map([
@@ -214,6 +215,11 @@ if (!/create or replace function public\.create_escrow_deployment_server_atomic/
 }
 if (!/alter table public\.escrow_deployment_fee_quotes enable row level security/i.test(deploymentFeeGate)) {
   fail('CP-11 deployment fee migration does not enable RLS on escrow_deployment_fee_quotes');
+}
+const shortSummaryLimit = migrationContents.get('20260809000200_cp01_short_summary_1000.sql');
+if (!/drop constraint if exists programs_short_summary_length_check/i.test(shortSummaryLimit) ||
+    !/check \(length\(btrim\(short_summary\)\) between 1 and 1000\)/i.test(shortSummaryLimit)) {
+  fail('CP-01 short-summary migration does not widen the trimmed summary constraint to 1000');
 }
 for (const functionName of [
   'list_active_unified_balance_gateway_intent_ids',

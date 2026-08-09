@@ -512,4 +512,118 @@ describe('CP-11 and CP-12 funding views', () => {
     expect(checkButtons.every((button) => !button.includes('disabled=""'))).toBe(true);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Submit funding plan<\/button>/);
   });
+
+  it('shows a non-wallet verification notice and spinner while checking a pending deposit', () => {
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources,
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'Test wallet',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: { arc: 'pending', base: 'pending' },
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        checkingDepositRowId: 'arc',
+        depositTransactionHashes: {
+          arc: `0x${'a'.repeat(64)}`,
+          base: `0x${'b'.repeat(64)}`,
+        },
+        confirmedUnifiedBalance: '0',
+        pendingUnifiedBalance: '10',
+        estimatedFeeReserve: '0.25',
+        notice:
+          'Deposit submitted. Waiting for Circle Gateway confirmation… checking automatically; no wallet signature is required.',
+        transactionsEnabled: true,
+        canSubmit: false,
+        readinessChecked: false,
+        working: true,
+        onConnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain('Deposit verification in progress');
+    expect(html).toContain('no wallet signature is required');
+    expect(html).toContain('This deposit is moving through Circle Gateway');
+    expect(html).toContain('https://testnet.arcscan.app/tx/');
+    expect(html).toContain('https://sepolia.basescan.org/tx/');
+    const checkButtons = html.match(/<button[^>]*>Check deposit/g) ?? [];
+    expect(checkButtons).toHaveLength(2);
+    expect(checkButtons.every((button) => button.includes('disabled=""'))).toBe(true);
+    expect(html.match(/<button[^>]*data-loading=""[^>]*>Check deposit/g) ?? []).toHaveLength(1);
+  });
+
+  it('renders only valid network explorer links for pending source hashes', () => {
+    const explorerSources: readonly FundingSource[] = [
+      { rowId: 'arc', network: 'Arc_Testnet', amount: '1' },
+      { rowId: 'eth', network: 'Ethereum_Sepolia', amount: '1' },
+      { rowId: 'arb', network: 'Arbitrum_Sepolia', amount: '1' },
+      { rowId: 'base', network: 'Base_Sepolia', amount: '1' },
+    ];
+    const hashes = {
+      arc: `0x${'a'.repeat(64)}`,
+      eth: `0x${'b'.repeat(64)}`,
+      arb: `0x${'c'.repeat(64)}`,
+      base: `0x${'d'.repeat(64)}`,
+    };
+    const render = (depositTransactionHashes: Readonly<Record<string, string>>) =>
+      renderToStaticMarkup(
+        createElement(FundingAllocations, {
+          program: program(),
+          grossAmount: '4',
+          sources: explorerSources,
+          errors: {},
+          walletAddress: WALLET,
+          walletName: 'Test wallet',
+          walletPending: false,
+          walletError: undefined,
+          depositStatuses: { arc: 'pending', eth: 'pending', arb: 'pending', base: 'pending' },
+          depositRequiredAmounts: {},
+          depositRecoveryHashes: {},
+          depositTransactionHashes,
+          confirmedUnifiedBalance: '0',
+          pendingUnifiedBalance: '4',
+          estimatedFeeReserve: '0.25',
+          transactionsEnabled: true,
+          canSubmit: false,
+          readinessChecked: false,
+          working: false,
+          onConnectWallet: vi.fn(),
+          onGrossAmountChange: vi.fn(),
+          onSourceChange: vi.fn(),
+          onAddSource: vi.fn(),
+          onRemoveSource: vi.fn(),
+          onDepositSource: vi.fn(),
+          onDepositRecoveryHashChange: vi.fn(),
+          onRefreshUnifiedBalance: vi.fn(),
+          onSubmit: vi.fn(),
+          onCheckReadiness: vi.fn(),
+          onLater: vi.fn(),
+        }),
+      );
+
+    const html = render(hashes);
+    expect(html).toContain('https://testnet.arcscan.app/tx/');
+    expect(html).toContain('https://sepolia.etherscan.io/tx/');
+    expect(html).toContain('https://sepolia.arbiscan.io/tx/');
+    expect(html).toContain('https://sepolia.basescan.org/tx/');
+    expect(html.match(/View transaction/g) ?? []).toHaveLength(4);
+
+    const withoutHash = render({ arc: hashes['arc']!, eth: '   ' });
+    expect(withoutHash.match(/View transaction/g) ?? []).toHaveLength(1);
+    expect(withoutHash).not.toContain('https://sepolia.etherscan.io/tx/');
+  });
 });

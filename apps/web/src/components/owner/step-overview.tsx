@@ -11,6 +11,7 @@ import {
   SelectValue,
   Textarea,
 } from '@bug-bounty-escrow/ui';
+import { PROGRAM_SHORT_SUMMARY_MAX_LENGTH } from '@bug-bounty-escrow/shared';
 import { ImagePlus, Plus, X } from 'lucide-react';
 import { useState, type ChangeEvent, type KeyboardEvent } from 'react';
 
@@ -215,18 +216,19 @@ export function StepOverview({ draft, errors, onCancel, onContinue, update }: St
         />
 
         <Field
-          counter={`${draft.shortSummary.length} / 280`}
+          counter={`${draft.shortSummary.length.toLocaleString('en-US')} / ${PROGRAM_SHORT_SUMMARY_MAX_LENGTH.toLocaleString('en-US')}`}
           error={errors['shortSummary']}
           helperText="Used on the program card and the program header."
           htmlFor={fieldId('shortSummary')}
           label="Short summary"
           required
         >
-          <Input
+          <Textarea
             id={fieldId('shortSummary')}
-            maxLength={280}
+            maxLength={PROGRAM_SHORT_SUMMARY_MAX_LENGTH}
             onChange={(event) => update({ shortSummary: event.target.value })}
             placeholder="Describe the program in one concise sentence."
+            rows={3}
             size="lg"
             value={draft.shortSummary}
           />

@@ -85,6 +85,29 @@ describe('buildCreatePayload against createProgramRequestSchema', () => {
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 
+  it('keeps the overview validator and shared schema aligned at the 1000-character summary limit', () => {
+    const draft = validDraft();
+    const longSummary = 'x'.repeat(1_000);
+    const overLimit = 'x'.repeat(1_001);
+
+    expect(validateOverview({ ...draft, shortSummary: longSummary })).not.toHaveProperty(
+      'shortSummary',
+    );
+    expect(validateOverview({ ...draft, shortSummary: overLimit })).toMatchObject({
+      shortSummary: 'Add a summary within 1,000 characters.',
+    });
+    expect(
+      createProgramRequestSchema.safeParse(
+        buildCreatePayload({ ...draft, shortSummary: longSummary }),
+      ).success,
+    ).toBe(true);
+    expect(
+      createProgramRequestSchema.safeParse(
+        buildCreatePayload({ ...draft, shortSummary: overLimit }),
+      ).success,
+    ).toBe(false);
+  });
+
   it('never sends cross-shape tier fields left over from a calculation-type switch', () => {
     const draft = validDraft();
     // The owner tried flat and percentage first, then settled on range: stale values remain in

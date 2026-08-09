@@ -518,7 +518,12 @@ function topUpAmountsFromReadiness(
 }
 
 function sourceDepositStatusFromApi(
-  deposit: ApiFundingIntent['sourceDeposits'][number] | undefined,
+  deposit:
+    | {
+        readonly status: VerifiedFundingIntent['sourceDeposits'][number]['status'];
+        readonly canRetry: boolean;
+      }
+    | undefined,
 ): SourceDepositStatus {
   if (deposit?.status === 'confirmed') return 'confirmed';
   if (
@@ -676,6 +681,7 @@ export function ProgramLifecycle({
   const [depositStatuses, setDepositStatuses] = useState<
     Readonly<Record<string, SourceDepositStatus>>
   >({});
+  const [checkingDepositRowId, setCheckingDepositRowId] = useState<string>();
   const [depositTopUpAmounts, setDepositTopUpAmounts] = useState<Readonly<Record<string, string>>>(
     {},
   );
@@ -718,6 +724,7 @@ export function ProgramLifecycle({
     setConfirmedUnifiedBalance(undefined);
     setPendingUnifiedBalance(undefined);
     setDepositStatuses({});
+    setCheckingDepositRowId(undefined);
     setDepositTopUpAmounts({});
     setDepositRecoveryHashes({});
     setFundingError(undefined);
@@ -1294,6 +1301,13 @@ export function ProgramLifecycle({
     if (latest !== undefined) amounts[source.rowId] = latest.amount;
     return amounts;
   }, {});
+  const depositTransactionHashes = sources.reduce<Record<string, string>>((hashes, source) => {
+    const latest = verifiedFundingIntent?.sourceDeposits
+      .filter((deposit) => deposit.network === source.network)
+      .sort((left, right) => right.attemptNo - left.attemptNo)[0];
+    if (latest?.transactionHash !== undefined) hashes[source.rowId] = latest.transactionHash;
+    return hashes;
+  }, {});
 
   function chooseFundingWallet() {
     setWalletError(undefined);
@@ -1383,6 +1397,7 @@ export function ProgramLifecycle({
     if (walletSession === undefined || fundingWorking) return;
     setFundingWorking(true);
     setFundingError(undefined);
+    setFundingNotice(undefined);
     try {
       const balance = await walletSession.executor.getUnifiedBalance();
       setConfirmedUnifiedBalance(balance.confirmedAmount);
@@ -1409,6 +1424,8 @@ export function ProgramLifecycle({
 
     setFundingWorking(true);
     setFundingError(undefined);
+    setFundingNotice(undefined);
+    setCheckingDepositRowId(source.rowId);
     let activeIntent: VerifiedFundingIntent | undefined;
     let depositId: string | undefined;
     let returnedHash: string | undefined;
@@ -1651,20 +1668,70 @@ export function ProgramLifecycle({
         setDepositRecoveryHashes((current) => ({ ...current, [source.rowId]: '' }));
       }
 
-      const reconciled = await apiRequest(
-        `/api/programs/${program.id}/funding-intents/${activeIntent.id}/source-deposits/${depositId}/reconcile`,
-        fundingIntentResponseSchema,
-        { method: 'POST', token: session?.access_token },
-      );
-      activeIntent = verifiedIntentFromApi(reconciled.data);
-      setVerifiedFundingIntent(activeIntent);
-      const reconciledDeposit = activeIntent.sourceDeposits.find(
-        (candidate) => candidate.id === depositId,
-      );
-      setDepositStatuses((current) => ({
-        ...current,
-        [source.rowId]: reconciledDeposit?.status === 'confirmed' ? 'confirmed' : 'pending',
-      }));
+      if (activeIntent === undefined || depositId === undefined) {
+        throw new Error('The source deposit lock is unavailable.');
+      }
+      const lockedIntentId = activeIntent.id;
+      const lockedDepositId = depositId;
+      const reconcileSourceDeposit = async (): Promise<VerifiedFundingIntent> => {
+        const response = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${lockedIntentId}/source-deposits/${lockedDepositId}/reconcile`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
+        );
+        return verifiedIntentFromApi(response.data);
+      };
+      const readFundingIntent = async (): Promise<VerifiedFundingIntent> => {
+        const response = await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${lockedIntentId}`,
+          fundingIntentResponseSchema,
+          { token: session?.access_token },
+        );
+        return verifiedIntentFromApi(response.data);
+      };
+      const updateReconciledDeposit = (intent: VerifiedFundingIntent) => {
+        const deposit = intent.sourceDeposits.find((candidate) => candidate.id === lockedDepositId);
+        setVerifiedFundingIntent(intent);
+        setDepositStatuses((current) => ({
+          ...current,
+          [source.rowId]: sourceDepositStatusFromApi(deposit),
+        }));
+        return deposit;
+      };
+
+      activeIntent = await reconcileSourceDeposit();
+      let reconciledDeposit = updateReconciledDeposit(activeIntent);
+      const isSettled = () =>
+        reconciledDeposit?.status === 'confirmed' || reconciledDeposit?.status === 'failed';
+      if (!isSettled()) {
+        // Source-chain receipt verification and Circle Gateway finalization are independent. A
+        // successful HTTP response can therefore still describe an onchain_verified or
+        // gateway_finalized deposit. Keep the same durable hash and poll the intent projection
+        // while the webhook finalizes it. Do not repeatedly POST reconciliation: that endpoint
+        // performs expensive RPC verification and is rate-limited.
+        setFundingError(undefined);
+        setFundingNotice(
+          'Deposit submitted. Waiting for Circle Gateway confirmation… checking automatically; no wallet signature is required.',
+        );
+        for (let attempt = 0; attempt < 10 && !isSettled(); attempt += 1) {
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 3_000));
+          try {
+            activeIntent = await readFundingIntent();
+            reconciledDeposit = updateReconciledDeposit(activeIntent);
+          } catch (pollError) {
+            // A transient read failure must not turn a known transaction into a replayable wallet
+            // action. Leave the durable deposit pending and continue the bounded poll.
+            if (pollError instanceof ApiClientError && pollError.status < 500) throw pollError;
+          }
+        }
+      }
+      if (reconciledDeposit?.status === 'confirmed') {
+        setFundingNotice(undefined);
+      } else if (!isSettled()) {
+        setFundingNotice(
+          'Deposit is still being confirmed. Keep this page open or click Check deposit again later; no wallet transaction will be submitted again.',
+        );
+      }
       const balance = await walletSession.executor.getUnifiedBalance();
       setConfirmedUnifiedBalance(balance.confirmedAmount);
       setPendingUnifiedBalance(balance.pendingAmount);
@@ -1706,6 +1773,7 @@ export function ProgramLifecycle({
               ? 'recovery_required'
               : 'not_started'),
       }));
+      setFundingNotice(undefined);
       setFundingError(
         restoredStatus === 'replaceable'
           ? 'Arc verified that the original source deposit reverted. A linked replacement attempt is now safe.'
@@ -1721,6 +1789,7 @@ export function ProgramLifecycle({
       );
     } finally {
       setFundingWorking(false);
+      setCheckingDepositRowId(undefined);
     }
   }
 
@@ -3096,8 +3165,10 @@ export function ProgramLifecycle({
           )}
           <FundingAllocations
             confirmedUnifiedBalance={confirmedUnifiedBalance}
+            {...(checkingDepositRowId === undefined ? {} : { checkingDepositRowId })}
             depositRequiredAmounts={depositRequiredAmounts}
             depositRecoveryHashes={depositRecoveryHashes}
+            depositTransactionHashes={depositTransactionHashes}
             depositStatuses={depositStatuses}
             estimatedFeeReserve={activeFundingIntent?.estimatedFeeReserve}
             canSubmit={canSubmitFundingPlan}
@@ -3118,6 +3189,7 @@ export function ProgramLifecycle({
             onSourceChange={updateFundingSource}
             onSubmit={() => void submitFundingPlan()}
             onCheckReadiness={() => void checkFundingReadiness()}
+            {...(fundingNotice === undefined ? {} : { notice: fundingNotice })}
             pendingUnifiedBalance={pendingUnifiedBalance}
             program={program}
             sources={sources}

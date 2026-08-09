@@ -181,6 +181,7 @@ export {
   logoUploadRequestSchema,
   ownerProgramListQuerySchema,
   pocPolicySchema,
+  PROGRAM_SHORT_SUMMARY_MAX_LENGTH,
   programIdParamsSchema,
   programSlugParamsSchema,
   programSlugSchema,
