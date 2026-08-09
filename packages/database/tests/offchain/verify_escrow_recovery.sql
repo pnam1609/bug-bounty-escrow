@@ -1120,6 +1120,36 @@ begin
 end $$;
 insert into public.funding_confirmation_artifacts
 select * from cp13_publish_artifact_backup;
+
+-- Publishing must use the canonical confirmed escrow row rather than the
+-- legacy programs.contract_address projection.  The fixture intentionally
+-- leaves that legacy field null.
+do $$
+begin
+  update public.programs
+  set status = 'draft', published_at = null, total_pool = 16,
+    withdrawn_pool = 15, reserved_pool = 0, paid_pool = 0, max_bounty = 1
+  where id = '31000000-0000-4000-8000-000000000006';
+
+  if (select contract_address from public.programs
+      where id = '31000000-0000-4000-8000-000000000006') is not null then
+    raise exception 'publish canonical escrow regression fixture still has legacy address';
+  end if;
+
+  perform public.publish_program_atomic(
+    '30000000-0000-4000-8000-000000000001',
+    '31000000-0000-4000-8000-000000000006'
+  );
+
+  if (select status from public.programs
+      where id = '31000000-0000-4000-8000-000000000006') <> 'active' then
+    raise exception 'confirmed canonical escrow did not satisfy publish gate';
+  end if;
+
+  update public.programs
+  set status = 'draft', published_at = null
+  where id = '31000000-0000-4000-8000-000000000006';
+end $$;
 drop table cp13_publish_artifact_backup;
 
 -- Confirmed escrow freezes deadline, and publishing requires max-bounty collateral.
