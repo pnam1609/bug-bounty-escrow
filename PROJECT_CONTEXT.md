@@ -1164,6 +1164,9 @@ từ chối hoặc thiếu USDC/native gas, wallet tự hiển thị lỗi và c
 `Deployment fee charge failed`; client không tự suy đoán số dư và không đánh dấu fee đã trả.
 
 Owner listing tách khỏi public listing để route công khai chỉ phục vụ dữ liệu công khai.
+Owner programs table keeps a minimum 10rem deadline column with a single non-wrapping `YYYY-MM-DD`
+cell; its horizontal overflow may scroll on narrow screens. Missing deadlines render `Ongoing` and
+must not be confused with a public bounty-table deadline format.
 `POST /:id/status` xử lý `awaiting_funding`, `paused`, `deactivated`, `expired`, `closed`; publish có endpoint
 riêng vì nó kiểm tra readiness (coverage, reward policy, escrow, funded pool).
 

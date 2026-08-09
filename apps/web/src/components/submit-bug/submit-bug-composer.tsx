@@ -526,17 +526,18 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
   /* ── Submit ───────────────────────────────────────────────────────────────────────────── */
 
   const finish = useCallback(
-    async (reportId: string) => {
+    async (reportId: string, hydratedReport?: ReportResponse, cacheReport = true) => {
       setPhase({ kind: 'opening', reportId });
 
-      const created = createdReportRef.current;
-      if (created === null) return;
+      const created = hydratedReport ?? createdReportRef.current;
+      if (created === null || created === undefined) return;
 
       await finishSubmittedReport({
         principalId: session?.user.id ?? 'no-session',
         draftKey: programSlug,
         queryClient,
         report: created,
+        cacheReport,
         router,
       });
     },
@@ -627,7 +628,9 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
       });
 
       if (!parsed.success) {
-        setSubmitError('Some fields no longer satisfy the report contract. Review each step again.');
+        setSubmitError(
+          'Some fields no longer satisfy the report contract. Review each step again.',
+        );
         return;
       }
       payload = retainFailedCreatePayload(failedCreatePayloadRef.current, parsed.data);
@@ -673,7 +676,20 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
     const uploaded = await uploadAttachment(reportId, attachedFile);
 
     if (uploaded) {
-      await finish(reportId);
+      // POST /reports returns before the attachment transaction. Hydrate the detail after
+      // `/complete` succeeds; otherwise finishSubmittedReport would cache that earlier response
+      // (whose attachments array is necessarily empty) and the detail screen would render
+      // "No attachment was uploaded" even though the Storage row is now uploaded.
+      try {
+        const hydrated = await apiRequest(`/api/reports/${reportId}`, reportResponseSchema, {
+          token: session?.access_token,
+        });
+        await finish(reportId, hydrated);
+      } catch {
+        // The upload is durable even if this read is transiently unavailable. Avoid caching the
+        // pre-upload response; the report detail route will fetch the authoritative projection.
+        await finish(reportId, undefined, false);
+      }
       return;
     }
 

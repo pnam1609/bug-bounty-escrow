@@ -1376,6 +1376,10 @@ flowchart LR
 - Primary CTA: `Create program`.
 - CTA điều hướng tới `/owner/programs/new`.
 - Nếu owner chưa có program, empty state dùng heading `Create your first program` và cùng CTA.
+- In the owner programs table, the deadline column uses a minimum width of `10rem` and renders a
+  fixed deadline as the date-only `YYYY-MM-DD` value in one non-wrapping cell. The table may scroll
+  horizontally on narrow viewports, but the date must never split across hyphens; an absent deadline
+  remains `Ongoing`.
 
 ### CP-01 — Overview
 

@@ -50,6 +50,10 @@ const SORT_OPTIONS = [
   { value: 'deadline', label: 'Deadline' },
 ] as const;
 
+export function formatOwnerDeadline(deadline: string | undefined): string {
+  return deadline === undefined ? 'Ongoing' : deadline.slice(0, 10);
+}
+
 function Stat({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="flex flex-col gap-sm rounded-lg border border-border bg-surface p-lg">
@@ -207,7 +211,7 @@ export function OwnerProgramList() {
                 <TableHead>Status</TableHead>
                 <TableHead>Escrow pool</TableHead>
                 <TableHead>Maximum bounty</TableHead>
-                <TableHead>Deadline</TableHead>
+                <TableHead className="w-40 min-w-[10rem] whitespace-nowrap">Deadline</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -229,8 +233,8 @@ export function OwnerProgramList() {
                     {Number(row.totalPool) === 0 ? 'Not funded' : formatUsdc(row.totalPool)}
                   </TableCell>
                   <TableCell>{formatUsdc(row.maxBounty)}</TableCell>
-                  <TableCell>
-                    {row.deadline === undefined ? 'Ongoing' : row.deadline.slice(0, 10)}
+                  <TableCell className="w-40 min-w-[10rem] whitespace-nowrap">
+                    {formatOwnerDeadline(row.deadline)}
                   </TableCell>
                 </TableRow>
               ))}

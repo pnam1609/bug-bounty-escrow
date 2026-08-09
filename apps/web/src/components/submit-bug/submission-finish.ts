@@ -17,6 +17,12 @@ export interface FinishSubmittedReportInput {
   readonly draftKey: string;
   readonly queryClient: SubmissionQueryCache;
   readonly report: ReportResponse;
+  /**
+   * A completed attachment is committed in a second request after report creation. Callers that
+   * cannot hydrate the latest detail should skip caching the pre-upload response so the detail
+   * route fetches the authoritative projection instead of showing a stale empty attachment list.
+   */
+  readonly cacheReport?: boolean;
   readonly router: SubmissionRouter;
 }
 
@@ -28,6 +34,7 @@ export interface FinishSubmittedReportInput {
  * component makes the no-optimistic-redirect contract directly testable.
  */
 export async function finishSubmittedReport({
+  cacheReport = true,
   principalId,
   draftKey,
   queryClient,
@@ -37,7 +44,9 @@ export async function finishSubmittedReport({
   const reportId = report.data.id;
 
   clearDraft(draftKey);
-  queryClient.setQueryData(queryKeys.report(principalId, reportId), report);
+  if (cacheReport) {
+    queryClient.setQueryData(queryKeys.report(principalId, reportId), report);
+  }
   await queryClient.invalidateQueries({ queryKey: queryKeys.reportsRoot(principalId) });
   router.replace(`/reports/${reportId}`);
 }

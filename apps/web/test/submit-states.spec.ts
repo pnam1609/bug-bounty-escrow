@@ -9,9 +9,7 @@ import { ReportTimeline } from '@/components/reports/report-timeline';
 import { finishSubmittedReport } from '@/components/submit-bug/submission-finish';
 import { SubmissionProgress } from '@/components/submit-bug/submission-progress';
 
-function renderProgress(
-  props: Parameters<typeof SubmissionProgress>[0],
-): string {
+function renderProgress(props: Parameters<typeof SubmissionProgress>[0]): string {
   return renderToStaticMarkup(createElement(SubmissionProgress, props));
 }
 
@@ -109,6 +107,40 @@ describe('SR-10 successful completion lifecycle', () => {
       'replace:/reports/report-42',
     ]);
   });
+
+  it('can skip caching a pre-upload response so detail fetches the completed attachment projection', async () => {
+    const events: string[] = [];
+    const report = {
+      success: true,
+      data: { id: 'report-43' },
+    } as ReportResponse;
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        removeItem: (key: string) => events.push(`clear:${key}`),
+      },
+    });
+
+    await finishSubmittedReport({
+      principalId: 'researcher-a',
+      draftKey: 'aegis-protocol',
+      queryClient: {
+        setQueryData: () => events.push('cache'),
+        invalidateQueries: async () => events.push('invalidate'),
+      },
+      report,
+      cacheReport: false,
+      router: {
+        replace: (href) => events.push(`replace:${href}`),
+      },
+    });
+
+    expect(events).toEqual([
+      'clear:offchain-report-draft:aegis-protocol',
+      'invalidate',
+      'replace:/reports/report-43',
+    ]);
+  });
 });
 
 describe('SR-10 submitted report surface', () => {
@@ -123,16 +155,12 @@ describe('SR-10 submitted report surface', () => {
   });
 
   it('renders all five timeline stages with Submitted complete and current', () => {
-    const markup = renderToStaticMarkup(
-      createElement(ReportTimeline, { status: 'submitted' }),
-    );
+    const markup = renderToStaticMarkup(createElement(ReportTimeline, { status: 'submitted' }));
 
     for (const stage of REPORT_TIMELINE) {
       expect(markup).toContain(stage.label);
     }
-    expect(markup).toMatch(
-      /aria-current="step"[^>]*data-state="complete"[^>]*>[\s\S]*?Submitted/,
-    );
+    expect(markup).toMatch(/aria-current="step"[^>]*data-state="complete"[^>]*>[\s\S]*?Submitted/);
     expect(markup).toMatch(/data-state="next"[^>]*>[\s\S]*?Triage/);
   });
 });
