@@ -621,6 +621,8 @@ export const programMetricsSchema = z
 export const programSchema = programSummarySchema
   .extend({
     ownerId: uuidSchema,
+    /** Server-derived CTA capability; omitted by legacy responses and treated as unavailable. */
+    canSubmitReports: z.boolean().optional(),
     description: z.string(),
     websiteUrl: z.string().optional(),
     /** Canonical confirmed escrow address; populated from escrow_contracts only. */

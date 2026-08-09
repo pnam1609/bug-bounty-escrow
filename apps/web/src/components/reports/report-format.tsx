@@ -217,6 +217,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   report_not_accessible: 'This report is not available to your account.',
   reviewer_role_required: 'Only an owner or an assigned reviewer can act on this report.',
   researcher_role_required: 'Only the researcher who filed this report can do that.',
+  program_owner_cannot_submit_reports: 'Program owners cannot submit reports to their own program.',
   owner_role_required: 'Only the program owner can do that.',
   duplicate_target_invalid:
     'That original report id does not point to a report in this program that can absorb this one.',

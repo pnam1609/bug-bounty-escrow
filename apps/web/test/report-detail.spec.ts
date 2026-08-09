@@ -488,6 +488,28 @@ describe('SR-12 report detail', () => {
     expect(unavailable).toContain('Human review and report actions are still available.');
   });
 
+  it('offers server-side AI recovery only for the unavailable state', () => {
+    const generate = vi.fn().mockResolvedValue(undefined);
+    const unavailable = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'researcher',
+        onGenerateAiReview: generate,
+        review: undefined,
+      }),
+    );
+    const processing = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'researcher',
+        onGenerateAiReview: generate,
+        review: { status: 'processing' },
+      }),
+    );
+
+    expect(unavailable).toContain('Generate AI review');
+    expect(processing).not.toContain('Generate AI review');
+    expect(processing).toContain('Processing');
+  });
+
   it('uses transparent semantic outline badges for every persisted AI state', () => {
     const states = (['processing', 'unavailable', 'superseded'] as const).map((status) =>
       renderToStaticMarkup(

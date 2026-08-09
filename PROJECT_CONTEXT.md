@@ -234,6 +234,16 @@ Mỗi successful submit/resubmit tự động enqueue đúng một AI run cho im
 Queue được persist trong PostgreSQL và serialize FIFO theo từng program (`concurrency = 1/program`) để
 hai report giống nhau submit đồng thời vẫn có thứ tự canonical; các program khác được xử lý song song.
 AI result được validate rồi persist trước khi UI đọc và không tự đổi report status.
+Queued/running AI review chỉ hiển thị state badge/copy. Nếu current revision có terminal failed run
+hoặc không có usable persisted result, server trả `Unavailable` và detail có thể hiển thị `Generate
+AI review`. Action này phải gọi endpoint server-side đã authorize report, enqueue/retry đúng immutable
+revision + content hash và idempotent: queued/running trả run hiện hữu, Ready giữ nguyên result,
+failed/missing-result requeue cùng revision mà không cấp revision hoặc FIFO sequence mới. Browser không
+gọi Gemini/provider, không gửi quyết định lifecycle/payout và không tự thay đổi report status; success
+chỉ refresh persisted result, còn lỗi phải actionable và retry được. Ready/Superseded không có action.
+Recovery chỉ được phép khi report còn `submitted`, `triaged`, `needs_information` hoặc `validated`
+trước settlement; `rejected`, `duplicate`, `reward_approved`, `payment_pending` và `paid` bị từ chối
+ổn định để không tạo AI run vô nghĩa sau terminal/payout.
 AI pass 1 tạo `ReportFingerprint`; BE dùng fingerprint + deterministic signals để shortlist các prior
 sequence trong cùng program; AI pass 2 mới so sánh chi tiết với top candidates. Scope/impact researcher
 chọn không được dùng làm hard filter.
@@ -672,6 +682,16 @@ Với tier `percentage`, reviewer **không** nhập số tiền. Reviewer cung c
 `calculationBasisAmount` (số tiền thực sự bị ảnh hưởng, đã verify); server tính
 `min(basis × percentageBps / 10000, maxRewardCap)` rồi snapshot basis, bps, cap và số tiền
 kết quả vào `report_reviews.metadata`. Percentage không phải guidance text.
+
+Trong dialog owner approve reward, server `finalSeverity` và affected asset của report là
+nguồn sự thật; không dùng `proposedSeverity` để chọn tier. API trả mọi active tier của đúng
+program/asset (bao gồm các severity khác để owner có đủ context), đánh dấu tier trùng
+`finalSeverity` là tier có thể chọn; chỉ tier trùng final severity mới được dùng để tính reward.
+Owner xem calculation type và chi tiết. Flat tier phải
+prefill và khóa đúng `flatAmount`; range tier chỉ cho amount trong inclusive `[minReward,
+maxReward]`, hiện lỗi `Reward amount is outside the configured range` và disable submit khi ngoài
+range. Percentage tier hiển rate/cap và chỉ nhận verified basis; database/RPC luôn validate
+authoritative, không tin client.
 
 Tier là snapshot có lịch sử: khi owner bỏ một tier đã từng định giá một reward được approve,
 tier đó bị `archived_at` chứ không bị xoá.
@@ -1212,6 +1232,11 @@ POST   /api/reports/:id/pay
 POST   /api/reports/:id/confirm-payment
 POST   /api/reports/:id/disclosure
 ```
+
+`POST /api/programs/:id/reports` chỉ dành cho researcher không sở hữu target program. Program owner
+không được submit report vào chính program của mình; program detail ẩn CTA sau khi ownership được
+xác nhận, còn API và `submit_report_atomic` vẫn enforce `program_owner_cannot_submit_reports` để
+chặn direct request fail-closed. Researcher khác vẫn được submit khi program active và payload hợp lệ.
 
 `GET /api/reports` trả dữ liệu theo quyền của user hiện tại và hỗ trợ filter `programId`, `status`,
 `severity` và `researcherId`. Researcher chỉ thấy report của mình; owner/reviewer chỉ thấy report

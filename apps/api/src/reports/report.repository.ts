@@ -59,6 +59,18 @@ interface ReportRow {
     reserved_pool?: string | number;
     paid_pool?: string | number;
     withdrawn_pool?: string | number;
+    program_reward_tiers?: Array<{
+      asset_type: ReportImpact['assetType'];
+      severity: ReportSummary['proposedSeverity'];
+      calculation_type: 'range' | 'flat' | 'percentage';
+      min_reward: string | number | null;
+      max_reward: string | number | null;
+      flat_amount: string | number | null;
+      percentage_bps: number | null;
+      max_reward_cap: string | number | null;
+      calculation_note: string | null;
+      archived_at: string | null;
+    }>;
   } | null;
   readonly affected_scope: {
     id: string;
@@ -163,7 +175,7 @@ const REPORT_SUMMARY_PROJECTION = [
   'created_at',
   'updated_at',
   // Joined so "My reports" and the review inbox can render a program name without an N+1.
-  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool,withdrawn_pool)',
+  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool,withdrawn_pool,program_reward_tiers(asset_type,severity,calculation_type,min_reward,max_reward,flat_amount,percentage_bps,max_reward_cap,calculation_note,archived_at))',
 ].join(',');
 
 const REPORT_DETAIL_PROJECTION = [
@@ -422,6 +434,19 @@ function mapDetail(
     ...(paidSettlementProof === undefined ? {} : { paidSettlementProof }),
     contentHash: row.content_hash,
     createdAt: row.created_at,
+    rewardTiers: (row.programs?.program_reward_tiers ?? [])
+      .filter((tier) => tier.archived_at === null)
+      .map((tier) => ({
+        assetType: tier.asset_type,
+        severity: tier.severity,
+        calculationType: tier.calculation_type,
+        ...(tier.min_reward === null ? {} : { minReward: money(tier.min_reward) }),
+        ...(tier.max_reward === null ? {} : { maxReward: money(tier.max_reward) }),
+        ...(tier.flat_amount === null ? {} : { flatAmount: money(tier.flat_amount) }),
+        ...(tier.percentage_bps === null ? {} : { percentageBps: tier.percentage_bps }),
+        ...(tier.max_reward_cap === null ? {} : { maxRewardCap: money(tier.max_reward_cap) }),
+        ...(tier.calculation_note === null ? {} : { calculationNote: tier.calculation_note }),
+      })),
   };
 }
 

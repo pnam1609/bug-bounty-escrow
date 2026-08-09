@@ -5,12 +5,14 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type {
   ApproveRewardRequest,
   ConfirmPaymentRequest,
   CreateReportRequest,
   DisclosureDecisionRequest,
+  GenerateAiReviewRequest,
   MarkDuplicateRequest,
   PublicDisclosureListResponse,
   RejectReportRequest,
@@ -27,6 +29,7 @@ import type {
   ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
 
+import { DatabaseError } from '../database/database-error.js';
 import { reportContentHash } from './report-content-hash.js';
 import { ReportRepository } from './report.repository.js';
 import { SupabaseAiReviewQueueRepository } from './ai-review.repository.js';
@@ -98,12 +101,46 @@ export class ReportService {
     return aiReview === undefined ? report : { ...report, aiReview };
   }
 
+  /**
+   * Requests recovery for a missing or terminal AI result. The queue RPC validates the current
+   * immutable revision and is idempotent; this method never calls a provider from the request
+   * path and never changes report status or any settlement decision.
+   */
+  public async generateAiReview(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: GenerateAiReviewRequest,
+  ): Promise<ReportDetail> {
+    void input;
+    if (
+      principal.role !== 'researcher' &&
+      principal.role !== 'owner' &&
+      principal.role !== 'reviewer'
+    ) {
+      throw new ForbiddenException();
+    }
+
+    const report = await this.repository.findAccessible(principal, reportId);
+    if (report === null) throw new NotFoundException();
+    if (this.aiReviewRepository === undefined) {
+      throw new ServiceUnavailableException('AI review recovery is unavailable');
+    }
+
+    try {
+      await this.aiReviewRepository.retryReview(report.id, report.programId, report.contentHash);
+    } catch (error) {
+      if (error instanceof DatabaseError) throw error;
+      throw new ServiceUnavailableException('AI review recovery is temporarily unavailable');
+    }
+    return this.get(principal, report.id);
+  }
+
   public async submit(
     principal: RequestPrincipal,
     programId: string,
     input: CreateReportRequest,
   ): Promise<ReportDetail> {
-    if (principal.role !== 'researcher') {
+    if (principal.role !== 'researcher' && principal.role !== 'owner') {
       throw new ForbiddenException();
     }
 

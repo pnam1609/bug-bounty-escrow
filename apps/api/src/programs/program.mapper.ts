@@ -154,6 +154,9 @@ export interface MapOptions {
   readonly resolveLogoUrl: (storagePath: string | null) => string | undefined;
   /** Median time to the first rejected, duplicate, or validated review decision. */
   readonly medianResolutionSeconds?: number | null;
+  /** Authenticated viewer context used for server-derived researcher capabilities. */
+  readonly viewerId?: string;
+  readonly viewerRole?: 'owner' | 'researcher' | 'reviewer';
 }
 
 export function money(value: Numeric | null): string {
@@ -209,6 +212,12 @@ export function mapProgramDetail(row: ProgramDetailRow, options: MapOptions): Pr
   return {
     ...mapProgramSummary(row, options),
     ownerId: row.owner_id,
+    canSubmitReports:
+      options.viewerRole === undefined
+        ? row.status === 'active'
+        : options.viewerRole === 'researcher' &&
+          row.status === 'active' &&
+          row.owner_id !== options.viewerId,
     description: row.description,
     ...(row.website_url === null ? {} : { websiteUrl: row.website_url }),
     ...(canonicalEscrow?.contract_address === undefined || canonicalEscrow.contract_address === null

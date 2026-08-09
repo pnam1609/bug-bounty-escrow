@@ -125,6 +125,41 @@ describe('off-chain application services', () => {
     expect(repository.submit.mock.calls[1]?.[3]).toBe(firstHash);
   });
 
+  it('preserves the database owner-submit guard for a direct owner request', async () => {
+    const repository = {
+      submit: vi.fn().mockRejectedValue(
+        new DatabaseError({
+          code: 'business_rule_violation',
+          databaseCode: '22023',
+          message: 'program_owner_cannot_submit_reports',
+          reason: 'program_owner_cannot_submit_reports',
+        }),
+      ),
+      findAccessible: vi.fn().mockResolvedValue({ id: '10000000-0000-4000-8000-000000000300' }),
+    };
+    const input = {
+      affectedScopeId: '10000000-0000-4000-8000-000000000200',
+      title: 'Owner self-submission',
+      description: 'Synthetic description',
+      reproductionSteps: 'Synthetic steps',
+      proposedSeverity: 'high' as const,
+      programImpactIds: ['10000000-0000-4000-8000-000000000400'],
+      customImpacts: [],
+      severityMismatchAcknowledged: false,
+    };
+
+    await expect(
+      new ReportService(repository as never).submit(
+        owner,
+        '10000000-0000-4000-8000-000000000100',
+        input,
+      ),
+    ).rejects.toMatchObject({
+      reason: 'program_owner_cannot_submit_reports',
+    });
+    expect(repository.submit).toHaveBeenCalledOnce();
+  });
+
   it('dispatches safe reviews and retires the legacy reward mutation path', async () => {
     const detail = { id: '10000000-0000-4000-8000-000000000300' };
     const repository = {

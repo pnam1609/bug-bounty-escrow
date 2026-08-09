@@ -43,9 +43,8 @@ ký approval và khởi động reward settlement.
 - Reviewer invitation/assignment management.
 - UI/implementation chi tiết của submit/resubmit; flow đó chịu trách nhiệm atomically ghi nhận lần
   gửi và queue AI job tương ứng.
-- AI provider, prompt orchestration, worker retry hoặc queue implementation. Inbox/detail chỉ đọc
-  trạng thái và kết quả đã persist; mở screen không khởi chạy AI.
-- Bất kỳ owner/reviewer control nào để Generate, Regenerate hoặc Retry AI review.
+- AI provider, prompt orchestration hoặc worker internals. Inbox/detail không gọi provider trực tiếp;
+  chỉ có terminal Unavailable mới được phép gọi server-side recovery cho đúng revision.
 - Mainnet, token khác canonical Arc USDC hoặc payout qua chain khác Arc Testnet.
 - Thay đổi smart contract, database, API hoặc application code trong chính task viết flow này.
 
@@ -270,8 +269,8 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Không hiển thị tổng số private reports ở public header hoặc browser title.
 - Có thể hiển thị indicator read-only `AI review: Ready | Processing | Unavailable`; indicator chỉ
   phản ánh persisted run hiện hành, không phải report decision/status.
-- Không thêm AI action hoặc AI filter khi chưa có API contract tương ứng. Không có Generate,
-  Regenerate hoặc Retry AI control trên inbox.
+- Không thêm AI action hoặc AI filter khi chưa có API contract tương ứng. Generate chỉ xuất hiện
+  trong detail terminal `Unavailable` và gọi server-side recovery; inbox không tạo run.
 
 ### Filters
 
@@ -486,6 +485,12 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 ### Preflight summary
 
 - Final severity và reward tier áp dụng cho affected asset type.
+- The dialog is keyed by the server-returned `finalSeverity` and affected asset, never by
+  `proposedSeverity` or a client-selected severity. It lists every active configured tier for that
+  exact program/asset across all severities, including calculation type and all relevant range,
+  flat, percentage rate and cap details. Tiers whose severity differs from `finalSeverity` are
+  context-only and visibly marked not applicable; only the exact final-severity tier can be chosen.
+  If no exact tier is returned, the owner cannot submit an approval.
 - Escrow/chain `Arc Testnet`, token `USDC`.
 - Available pool, reserved pool, amount/basis và recipient wallet được server derive/verify.
 - Connected wallet phải đúng locked owner/admin wallet; account/network mismatch fail closed.
@@ -499,13 +504,18 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 
 ### Range hoặc flat tier
 
-- Owner nhập reward amount dạng decimal string.
+- A flat tier pre-fills its exact configured `flatAmount` and the amount control is read-only.
+- A range tier accepts an inclusive decimal amount between the configured `minReward` and
+  `maxReward`; the dialog shows `Reward amount is outside the configured range` and disables
+  confirmation while the value is outside the range.
 - Server kiểm tra tier bounds, remaining pool, canonical USDC decimals và current report status.
 - Không parse monetary values qua JavaScript floating point.
 
 ### Percentage tier
 
 - Owner nhập `Verified funds at risk` (`calculationBasisAmount`) lớn hơn zero.
+- The dialog shows the configured percentage rate and maximum cap; it never asks the browser to
+  choose a payout amount.
 - Server derive reward theo snapshotted `percentageBps`, áp `maxRewardCap` và trả computed amount.
 - Browser không gửi một amount tự tính để override kết quả.
 - Review screen cho owner xem basis, rate, cap và computed amount trước signature.
@@ -806,15 +816,19 @@ Response requirements:
 | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | Current result `completed`, schema valid                     | Compact `AI review · Ready` badge outside the AI box; persisted result is rendered inline in the RR-02 detail evidence column |
 | Current run `queued \| running`                              | `AI review: Processing`; không spinner vô hạn, human actions vẫn dùng được                                                    |
-| Current run `failed`                                         | `AI review: Unavailable`; safe copy, backend retry only                                                                       |
+| Current run `failed` hoặc không có usable persisted result   | `AI review: Unavailable`; safe copy và `Generate AI review` action                                                            |
 | Result parse/schema invalid                                  | Safe unavailable/invalid copy; không render raw payload                                                                       |
 | Result hash/revision không khớp current report               | `AI review is being refreshed`; stale/superseded result bị ẩn                                                                 |
-| AI endpoint/network load error                               | Safe unavailable; report/evidence/human actions không bị thay thế                                                             |
+| AI endpoint/network load error                               | Safe unavailable; report/evidence/human actions không bị thay thế; action error phải actionable và retry được                 |
 | Unauthorized candidate/result hoặc principal không còn quyền | Không render AI metadata; dùng cùng non-enumerating report access boundary                                                    |
 
-Không có Generate, Regenerate hoặc Retry AI button ở bất kỳ state nào. Worker/backend chịu trách
-nhiệm retry theo policy; UI reload/refetch thông thường chỉ đọc trạng thái đã persist và không tạo
-AI run mới.
+`Processing` chỉ có badge/copy và không có action. Với `Unavailable`, `Generate AI review` gọi
+endpoint server-side đã authorize report và enqueue/retry **đúng current revision + content hash**.
+Endpoint phải idempotent: queued/running trả run hiện hữu, Ready giữ nguyên result, terminal failed
+hoặc missing-result requeue cùng revision mà không cấp revision/sequence mới. Recovery chỉ áp dụng
+cho report đang `submitted`, `triaged`, `needs_information` hoặc `validated` trước khi settlement;
+`rejected`, `duplicate`, `reward_approved`, `payment_pending` và `paid` không được tạo run mới.
+Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload/refetch không tạo run.
 
 ### 15.4a Inline result và external state badge
 
@@ -884,7 +898,8 @@ AI run mới.
   `persistedAt`; stale/superseded result không được trình bày như current.
 - AI không validate, reject, mark duplicate, chọn final severity, reserve reward, ký transaction,
   relay payout, thay đổi report status hoặc chặn human review.
-- Không có owner/reviewer Generate/Regenerate/Retry control; retry AI chỉ do backend policy.
+- Processing/Ready/Superseded không có AI action; terminal Unavailable có `Generate AI review` gọi
+  server-side recovery đúng revision/content hash. Retry vẫn do backend policy và không đổi lifecycle.
 - AI duplicate candidates phải được re-authorize theo current principal khi đọc; suggestion không
   tự điền/confirm duplicate target và candidate mất quyền được redacted/non-enumerating.
 - Không persist/render raw prompt, private attachment URL, signed URL, storage key hoặc provider raw
@@ -945,8 +960,13 @@ AI run mới.
       confirm và không lộ candidate ngoài quyền.
 - [ ] AC-07 — Validate chỉ ghi final severity; không reserve/payout. Assigned reviewer dừng ở waiting
       state, chỉ owner thấy reward settlement controls.
-- [ ] AC-08 — Range/flat amount và percentage basis dùng decimal-safe/server-derived rules; reserve
-      pool atomic/idempotent và không gọi legacy approve/pay/confirm endpoints.
+- [ ] AC-08 — The owner reward dialog uses the server final severity and exact affected asset,
+      lists all active tiers for that program/asset with complete calculation details, marks
+      other-severity tiers as context-only, and allows selection only of the exact final-severity
+      tier. It pre-fills/locks flat amounts, bounds-checks range amounts with `Reward amount is
+      outside the configured range`, and shows percentage rate/cap. Range/flat amount and percentage basis use
+      decimal-safe/server-derived rules; reserve pool atomic/idempotent and no legacy
+      approve/pay/confirm endpoints are called.
 - [ ] AC-09 — Owner chỉ ký một approval; uncertain/submitted/confirmed evidence luôn dẫn tới
       resume/reconcile, không mở signature thứ hai.
 - [ ] AC-10 — Paid chỉ sau exact Arc escrow + canonical USDC events và atomic ledger update; provider
@@ -960,9 +980,11 @@ AI run mới.
       result khớp current revision + hash mới được trình bày là `Ready`.
 - [ ] AC-14 — RR-08 có completed/processing/unavailable/failed/invalid/stale/access-safe states tại
       1440/768/390; prior result sau resubmit mang superseded và không fallback như current.
-- [ ] AC-15 — Inbox/detail không có Generate, Regenerate hoặc Retry AI control và mở/reload screen
-      không tạo run mới. AI luôn mang label `AI suggestion`, không prefill/mutate quyết định, reward,
-      signature hoặc report status; human review vẫn khả dụng khi AI chưa sẵn sàng.
+- [ ] AC-15 — Processing/queued chỉ có state badge và mở/reload screen không tạo run mới. Terminal
+      Unavailable/missing-result có `Generate AI review`; action server-authorized, idempotent cho
+      current revision/content hash, không cấp revision/sequence mới, không gọi provider từ browser,
+      không prefill/mutate quyết định, reward, signature hoặc report status; Ready/Superseded không có
+      action và human review vẫn khả dụng.
 - [ ] AC-16 — Submit/resubmit atomically cấp monotonic per-program sequence và enqueue đúng một run;
       durable worker concurrency `1/program`, FIFO, cross-program parallelism và multi-replica race
       protection có automated evidence.
@@ -980,39 +1002,41 @@ AI run mới.
 
 ## 20. Test matrix
 
-| Nhóm        | Scenario                                       | Expected                                                        |
-| ----------- | ---------------------------------------------- | --------------------------------------------------------------- |
-| Auth        | Anonymous mở `/review/:id`                     | Login + safe returnTo; không flash private data                 |
-| Auth        | Researcher/owner khác đoán UUID                | Safe unavailable/access denied; không lộ title/status           |
-| Scope       | Owner và assigned reviewer xem inbox           | Mỗi role chỉ thấy đúng owned/assigned program reports           |
-| Inbox       | Filter + load more + next-page failure         | Query giữ filters; rows đã tải còn nguyên; retry được           |
-| Review      | Validate với từng severity                     | Một atomic transition; final severity đúng; chưa reserve tiền   |
-| Review      | Request info → comment → researcher resubmit   | needs_information → submitted; audit giữ đủ vòng                |
-| Review      | Reject thiếu reason hoặc double click          | Client/server chặn; không duplicate review record               |
-| Duplicate   | Self/cross-program/cycle/unauthorized target   | Stable validation/forbidden; current report không đổi           |
-| Race        | Hai reviewer quyết định cùng lúc               | Chỉ transition hợp lệ thắng; client thua refetch state          |
-| Reward      | Range/flat ngoài tier hoặc pool thiếu          | Không tạo/reserve intent; safe field/business error             |
-| Reward      | Percentage basis                               | Server derive amount/cap đúng; client không override amount     |
-| Wallet      | Wrong owner wallet/network                     | Fail closed trước signature; không reserve/sign sai account     |
-| Recovery    | Wallet reject chắc chắn trước submit           | Continue/cancel theo safe scan; không report paid               |
-| Recovery    | Unknown wallet outcome hoặc reload sau tx      | Resume/reconcile only; không prompt approval lần hai            |
-| Payout      | Circle accepts nhưng Arc chưa confirmed        | Chưa paid; tiếp tục provider/Arc reconciliation                 |
-| Payout      | Deterministic payout failure                   | Linked replacement attempt; không reserve/reapprove lại         |
-| Payout      | Exact Arc event + USDC Transfer verified       | reward_approved/payment_pending → paid đúng một lần             |
-| Attachment  | Uploaded/pending/expired URL/forged attachment | Chỉ uploaded; refresh on click; forged relation denied          |
-| Privacy     | Analytics/log/error capture                    | Không report body, UUID, Gist, URL, comment, wallet secret      |
-| Responsive  | 390/768/1440 + 200% zoom                       | Không overflow/che action; keyboard/focus order đúng            |
-| A11y        | Screen reader dialog/status/progress           | Label/effect/error rõ; poll không spam announcements            |
-| AI trigger  | Submit/resubmit cùng revision/hash             | Persist enqueue record đúng một lần; không phụ thuộc mở review  |
-| AI current  | Completed result khớp revision + content hash  | Ready badge + inline advisory result; human form không prefill  |
-| AI stale    | Resubmit khi prior result đã completed         | Prior result superseded/ẩn; run mới Processing hoặc Unavailable |
-| AI safety   | Failed/invalid/network/access-safe             | Không raw payload/metadata leak; không chặn human review        |
-| AI control  | Mở/reload inbox/detail                         | Không tạo run; không có Generate/Regenerate/Retry button        |
-| AI race     | Hai same-program submits đồng thời             | Sequence `N/N+1`; FIFO; report sau xét report trước             |
-| AI parallel | Hai program submit đồng thời                   | Có thể chạy song song; không dùng global concurrency `1`        |
-| AI retry    | Gemini 429/timeout/5xx                         | Bounded backoff; terminal Unavailable; queue tiếp tục           |
-| AI privacy  | Private report ở `gemini_free_demo`            | Không gọi provider; AI Unavailable; human review vẫn dùng được  |
-| AI access   | Researcher đọc possible duplicate              | Chỉ safe aggregate copy; không candidate ID/title/private body  |
+| Nhóm        | Scenario                                       | Expected                                                                        |
+| ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Auth        | Anonymous mở `/review/:id`                     | Login + safe returnTo; không flash private data                                 |
+| Auth        | Researcher/owner khác đoán UUID                | Safe unavailable/access denied; không lộ title/status                           |
+| Scope       | Owner và assigned reviewer xem inbox           | Mỗi role chỉ thấy đúng owned/assigned program reports                           |
+| Inbox       | Filter + load more + next-page failure         | Query giữ filters; rows đã tải còn nguyên; retry được                           |
+| Review      | Validate với từng severity                     | Một atomic transition; final severity đúng; chưa reserve tiền                   |
+| Review      | Request info → comment → researcher resubmit   | needs_information → submitted; audit giữ đủ vòng                                |
+| Review      | Reject thiếu reason hoặc double click          | Client/server chặn; không duplicate review record                               |
+| Duplicate   | Self/cross-program/cycle/unauthorized target   | Stable validation/forbidden; current report không đổi                           |
+| Race        | Hai reviewer quyết định cùng lúc               | Chỉ transition hợp lệ thắng; client thua refetch state                          |
+| Reward      | Final severity mismatches proposed severity    | All active tiers for the asset render; other severities are context-only and only the final-severity tier is selectable |
+| Reward      | Flat tier                                      | Exact flat amount is prefilled and immutable; server rechecks it                |
+| Reward      | Range/flat ngoài tier hoặc pool thiếu          | Inline range error/disabled confirm; không tạo/reserve intent                   |
+| Reward      | Percentage basis                               | Server derive amount/cap đúng; client không override amount                     |
+| Wallet      | Wrong owner wallet/network                     | Fail closed trước signature; không reserve/sign sai account                     |
+| Recovery    | Wallet reject chắc chắn trước submit           | Continue/cancel theo safe scan; không report paid                               |
+| Recovery    | Unknown wallet outcome hoặc reload sau tx      | Resume/reconcile only; không prompt approval lần hai                            |
+| Payout      | Circle accepts nhưng Arc chưa confirmed        | Chưa paid; tiếp tục provider/Arc reconciliation                                 |
+| Payout      | Deterministic payout failure                   | Linked replacement attempt; không reserve/reapprove lại                         |
+| Payout      | Exact Arc event + USDC Transfer verified       | reward_approved/payment_pending → paid đúng một lần                             |
+| Attachment  | Uploaded/pending/expired URL/forged attachment | Chỉ uploaded; refresh on click; forged relation denied                          |
+| Privacy     | Analytics/log/error capture                    | Không report body, UUID, Gist, URL, comment, wallet secret                      |
+| Responsive  | 390/768/1440 + 200% zoom                       | Không overflow/che action; keyboard/focus order đúng                            |
+| A11y        | Screen reader dialog/status/progress           | Label/effect/error rõ; poll không spam announcements                            |
+| AI trigger  | Submit/resubmit cùng revision/hash             | Persist enqueue record đúng một lần; không phụ thuộc mở review                  |
+| AI current  | Completed result khớp revision + content hash  | Ready badge + inline advisory result; human form không prefill                  |
+| AI stale    | Resubmit khi prior result đã completed         | Prior result superseded/ẩn; run mới Processing hoặc Unavailable                 |
+| AI safety   | Failed/invalid/network/access-safe             | Không raw payload/metadata leak; không chặn human review                        |
+| AI control  | Mở/reload inbox/detail                         | Processing chỉ badge; Unavailable có Generate server-side; reload không tạo run |
+| AI race     | Hai same-program submits đồng thời             | Sequence `N/N+1`; FIFO; report sau xét report trước                             |
+| AI parallel | Hai program submit đồng thời                   | Có thể chạy song song; không dùng global concurrency `1`                        |
+| AI retry    | Gemini 429/timeout/5xx                         | Bounded backoff; terminal Unavailable; queue tiếp tục                           |
+| AI privacy  | Private report ở `gemini_free_demo`            | Không gọi provider; AI Unavailable; human review vẫn dùng được                  |
+| AI access   | Researcher đọc possible duplicate              | Chỉ safe aggregate copy; không candidate ID/title/private body                  |
 
 ## 21. Implementation gates
 

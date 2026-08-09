@@ -131,6 +131,27 @@ const result = {
 };
 
 describe('SupabaseAiReviewQueueRepository report projection', () => {
+  it('delegates manual recovery to the idempotent current-revision RPC', async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: '10000000-0000-0000-0000-000000000012',
+      error: null,
+    });
+    const repository = new SupabaseAiReviewQueueRepository({ rpc } as never);
+
+    await expect(
+      repository.retryReview(
+        '10000000-0000-0000-0000-000000000020',
+        '10000000-0000-0000-0000-000000000099',
+        run.source_content_hash,
+      ),
+    ).resolves.toBe('10000000-0000-0000-0000-000000000012');
+    expect(rpc).toHaveBeenCalledWith('retry_report_ai_run_atomic', {
+      target_report_id: '10000000-0000-0000-0000-000000000020',
+      target_program_id: '10000000-0000-0000-0000-000000000099',
+      generated_content_hash: run.source_content_hash,
+    });
+  });
+
   it('hides duplicate candidates from researchers while exposing the advisory result', async () => {
     const repository = new SupabaseAiReviewQueueRepository(
       clientFor(run.source_content_hash, run, result) as never,

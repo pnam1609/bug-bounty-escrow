@@ -48,6 +48,24 @@ export function formatUsdcFull(value: string): string {
 }
 
 /**
+ * The server-derived capability is the source of truth for the submit CTA. Keeping the role
+ * fallback here means an owner session never gets a submit affordance while the detail request
+ * is still settling, and the rule remains testable without mounting the full page.
+ */
+export function canSubmitProgramReports(
+  program: Pick<Program, 'status' | 'canSubmitReports'>,
+  viewerRole?: 'owner' | 'researcher' | 'reviewer',
+  authenticated = false,
+): boolean {
+  return (
+    program.status === 'active' &&
+    program.canSubmitReports === true &&
+    (!authenticated || viewerRole !== undefined) &&
+    viewerRole !== 'owner'
+  );
+}
+
+/**
  * Compact on the primary line, exact in the accessible label. `role` completes the sentence a
  * screen reader hears, e.g. "250,000 USDC maximum bounty".
  */
@@ -151,8 +169,7 @@ export function describeDeadline(
   return {
     primary: relative,
     secondary: absolute,
-    label:
-      remaining === 0 ? `Closes today, ${absolute}` : `Closes in ${relative} on ${absolute}`,
+    label: remaining === 0 ? `Closes today, ${absolute}` : `Closes in ${relative} on ${absolute}`,
     ended: false,
   };
 }

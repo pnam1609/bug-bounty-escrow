@@ -9,6 +9,7 @@ import {
   reportResponseSchema,
   rewardSettlementIntentResponseSchema,
   requestInformationRequestSchema,
+  parseUsdcBaseUnits,
   sendBackForReviewRequestSchema,
   validateReportRequestSchema,
   type ApproveRewardRequest,
@@ -718,26 +719,101 @@ function ReopenDuplicateAction({ busy, submit }: ActionProps) {
 
 type RewardMode = 'decided' | 'percentage';
 
+type ReviewRewardTier = NonNullable<ReportDetail['rewardTiers']>[number];
+
+export function matchingRewardTiers(report: ReportDetail): readonly ReviewRewardTier[] {
+  if (report.finalSeverity === undefined || report.rewardTiers === undefined) return [];
+  return report.rewardTiers.filter(
+    (tier) =>
+      tier.assetType === report.affectedScope.assetType && tier.severity === report.finalSeverity,
+  );
+}
+
+export function configuredRewardTiers(report: ReportDetail): readonly ReviewRewardTier[] {
+  if (report.rewardTiers === undefined) return [];
+  return report.rewardTiers.filter((tier) => tier.assetType === report.affectedScope.assetType);
+}
+
+export function tierDetails(tier: ReviewRewardTier): string {
+  if (tier.calculationType === 'flat') return `Flat · ${tier.flatAmount ?? '—'} USDC`;
+  if (tier.calculationType === 'range') {
+    return `Range · ${tier.minReward ?? '—'}–${tier.maxReward ?? '—'} USDC`;
+  }
+  return `Percentage · ${tier.percentageBps === undefined ? '—' : `${tier.percentageBps / 100}%`} · cap ${tier.maxRewardCap ?? '—'} USDC`;
+}
+
+export function amountWithinTier(amount: string, tier: ReviewRewardTier): boolean {
+  const value = parseUsdcBaseUnits(amount);
+  if (value === undefined) return false;
+  if (tier.calculationType === 'flat') {
+    const flat = tier.flatAmount === undefined ? undefined : parseUsdcBaseUnits(tier.flatAmount);
+    return flat !== undefined && value === flat;
+  }
+  if (tier.calculationType !== 'range') return true;
+  const minimum = tier.minReward === undefined ? undefined : parseUsdcBaseUnits(tier.minReward);
+  const maximum = tier.maxReward === undefined ? undefined : parseUsdcBaseUnits(tier.maxReward);
+  return minimum !== undefined && maximum !== undefined && value >= minimum && value <= maximum;
+}
+
 function ApproveRewardAction({
   busy,
+  report,
   settleReward,
 }: {
   readonly busy: boolean;
+  readonly report: ReportDetail;
   readonly settleReward: (input: ApproveRewardRequest) => Promise<SubmitResult>;
 }) {
-  const [mode, setMode] = useState<RewardMode>('decided');
+  const tiers = matchingRewardTiers(report);
+  const configuredTiers = configuredRewardTiers(report);
+  const [selectedTierIndex, setSelectedTierIndex] = useState(0);
   const [amount, setAmount] = useState('');
   const [basis, setBasis] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const selectedTier = tiers[selectedTierIndex];
+  const mode: RewardMode =
+    selectedTier?.calculationType === 'percentage' ? 'percentage' : 'decided';
   const form = useActionForm(() => {
-    setMode('decided');
+    setSelectedTierIndex(0);
     setAmount('');
     setBasis('');
     setFieldError(null);
   });
 
+  useEffect(() => {
+    if (
+      !form.open ||
+      selectedTier?.calculationType !== 'flat' ||
+      selectedTier.flatAmount === undefined
+    ) {
+      return;
+    }
+    setAmount(selectedTier.flatAmount);
+  }, [form.open, selectedTier?.calculationType, selectedTier?.flatAmount]);
+
+  const rangeOutOfBounds =
+    selectedTier?.calculationType === 'range' && amount.trim() !== ''
+      ? !amountWithinTier(amount.trim(), selectedTier)
+      : false;
+  const flatAmountInvalid =
+    selectedTier?.calculationType === 'flat' &&
+    (amount.trim() === '' || !amountWithinTier(amount.trim(), selectedTier));
+
   async function confirm() {
     setFieldError(null);
+
+    if (selectedTier === undefined) {
+      setFieldError('No reward tier matches this report’s final severity and affected asset.');
+      return;
+    }
+    if (rangeOutOfBounds || flatAmountInvalid) {
+      setFieldError(
+        selectedTier.calculationType === 'range'
+          ? 'Reward amount is outside the configured range'
+          : 'The flat reward amount must match the configured tier exactly.',
+      );
+      return;
+    }
 
     // Only the field the chosen tier type actually uses is sent. A percentage tier never carries
     // an amount, so the payload cannot even suggest the client decided the payout.
@@ -771,40 +847,96 @@ function ApproveRewardAction({
       title="Approve the reward"
       trigger={<Button>Approve reward</Button>}
       warning="Approval reserves USDC from the pool and cannot be reversed from this screen."
+      confirmDisabled={
+        selectedTier === undefined ||
+        rangeOutOfBounds ||
+        flatAmountInvalid ||
+        (mode === 'decided' && amount.trim() === '')
+      }
     >
-      <fieldset className="flex flex-col gap-md">
-        <legend className="mb-sm text-label-md text-text">How is this tier calculated?</legend>
-        <RadioGroup
-          onValueChange={(value) => {
-            setMode(value as RewardMode);
-            setFieldError(null);
-          }}
-          value={mode}
-        >
-          <RadioGroupCard
-            description="You decide the payout. The server bounds-checks it against the tier for this severity and asset type."
-            title="Range or flat tier"
-            value="decided"
-          />
-          <RadioGroupCard
-            description="You supply the verified funds at risk. The server derives the reward from the tier's basis points and applies the cap."
-            title="Percentage tier"
-            value="percentage"
-          />
-        </RadioGroup>
-      </fieldset>
+      <Callout title={`Final severity: ${report.finalSeverity ?? 'Unavailable'}`} variant="info">
+        <p>
+          All active tiers for {report.affectedScope.name} ({report.affectedScope.assetType}) are
+          shown below. Only tiers matching the validated final severity can be selected; the
+          proposed severity is not used for pricing.
+        </p>
+      </Callout>
 
-      {mode === 'decided' ? (
+      {configuredTiers.length === 0 ? null : (
+        <div className="flex flex-col gap-xs" data-testid="configured-reward-tiers">
+          <p className="text-label-md text-text">Configured tiers for this asset</p>
+          {configuredTiers.map((tier, index) => {
+            const applicable = tiers.includes(tier);
+            return (
+              <div
+                className={`flex items-center justify-between gap-md rounded-md border p-sm ${applicable ? 'border-primary bg-surface-raised' : 'border-border bg-surface'}`}
+                key={`${tier.assetType}-${tier.severity}-${tier.calculationType}-${index}`}
+              >
+                <span className="text-body-sm text-text">{`${tier.severity} · ${tierDetails(tier)}`}</span>
+                <span className="text-label-sm text-text-muted">
+                  {applicable ? 'Available for final severity' : 'Not applicable'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tiers.length > 1 ? (
+        <fieldset className="flex flex-col gap-md">
+          <legend className="mb-sm text-label-md text-text">Choose a configured reward tier</legend>
+          <RadioGroup
+            onValueChange={(value) => {
+              setSelectedTierIndex(Number(value));
+              setAmount('');
+              setBasis('');
+              setFieldError(null);
+            }}
+            value={String(selectedTierIndex)}
+          >
+            {tiers.map((tier, index) => (
+              <RadioGroupCard
+                key={`${tier.assetType}-${tier.severity}-${tier.calculationType}-${index}`}
+                description={tier.calculationNote ?? tierDetails(tier)}
+                title={tierDetails(tier)}
+                value={String(index)}
+              />
+            ))}
+          </RadioGroup>
+        </fieldset>
+      ) : selectedTier === undefined ? (
+        <p className="text-body-sm text-error" role="alert">
+          No active reward tier matches this report&rsquo;s final severity and affected asset.
+        </p>
+      ) : (
+        <Callout title="Configured reward tier" variant="info">
+          <p>{tierDetails(selectedTier)}</p>
+          {selectedTier.calculationNote === undefined ? null : (
+            <p>{selectedTier.calculationNote}</p>
+          )}
+        </Callout>
+      )}
+
+      {selectedTier?.calculationType !== 'percentage' ? (
         <Field
-          error={fieldError ?? undefined}
-          helperText="Plain USDC figure. The server rejects anything outside the tier's bounds."
+          error={
+            fieldError ??
+            (rangeOutOfBounds ? 'Reward amount is outside the configured range' : undefined)
+          }
+          helperText={
+            selectedTier?.calculationType === 'flat'
+              ? 'The configured flat amount is prefilled and cannot be changed.'
+              : 'Inclusive configured range. The server validates the amount again.'
+          }
           label="Reward amount (USDC)"
           required
         >
           <Input
+            aria-readonly={selectedTier?.calculationType === 'flat' || undefined}
             inputMode="decimal"
             onChange={(event) => setAmount(event.target.value)}
-            placeholder="2500"
+            placeholder={selectedTier?.calculationType === 'range' ? '2500' : undefined}
+            readOnly={selectedTier?.calculationType === 'flat'}
             size="lg"
             value={amount}
           />
@@ -1319,7 +1451,7 @@ export function ReviewActions({
           {viewerRole === 'owner' &&
           available.includes('approve-reward') &&
           settlementMode === 'approve' ? (
-            <ApproveRewardAction busy={busy} settleReward={settleReward} />
+            <ApproveRewardAction busy={busy} report={report} settleReward={settleReward} />
           ) : null}
           {viewerRole === 'owner' &&
           settlementMode === 'continue' &&

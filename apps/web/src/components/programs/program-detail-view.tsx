@@ -22,7 +22,13 @@ import {
   RewardsPanel,
   ScopePanel,
 } from './program-detail-panels';
-import { describeDeadline, formatUsdcFull, programMonogram } from './program-format';
+import {
+  canSubmitProgramReports,
+  describeDeadline,
+  formatUsdcFull,
+  programMonogram,
+} from './program-format';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { useAuth } from '@/providers/auth-provider';
@@ -60,6 +66,7 @@ const ANCHORED_TABS: readonly TabValue[] = ['scope'];
 
 export function ProgramDetailView({ slug }: { readonly slug: string }) {
   const { loading, session } = useAuth();
+  const currentUser = useCurrentUser();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -175,6 +182,11 @@ export function ProgramDetailView({ slug }: { readonly slug: string }) {
    * offer it.
    */
   const isAcceptingReports = program.status === 'active';
+  const canSubmitReports = canSubmitProgramReports(
+    program,
+    currentUser.data?.role,
+    session !== null,
+  );
   const deadline = describeDeadline(program);
   const deadlineText =
     program.deadline === undefined
@@ -267,23 +279,25 @@ export function ProgramDetailView({ slug }: { readonly slug: string }) {
         </div>
 
         <div className="flex shrink-0 flex-col items-start gap-sm md:items-end">
-          {isAcceptingReports ? (
+          {canSubmitReports && isAcceptingReports ? (
             <Button asChild size="lg">
               <Link href={`/reports/new?programSlug=${encodeURIComponent(program.slug)}`}>
                 Submit a private report
               </Link>
             </Button>
-          ) : (
+          ) : canSubmitReports ? (
             <Button disabled size="lg">
               {hasEnded ? 'Program closed' : 'Not accepting reports'}
             </Button>
-          )}
+          ) : null}
           <p className="text-label-md text-text-muted">
-            {isAcceptingReports
-              ? 'Private by default · No wallet required'
-              : hasEnded
-                ? 'Program ended · Browse approved disclosures'
-                : 'This program is not accepting reports right now'}
+            {!canSubmitReports
+              ? 'Program owner accounts cannot submit reports'
+              : isAcceptingReports
+                ? 'Private by default · No wallet required'
+                : hasEnded
+                  ? 'Program ended · Browse approved disclosures'
+                  : 'This program is not accepting reports right now'}
           </p>
         </div>
       </header>

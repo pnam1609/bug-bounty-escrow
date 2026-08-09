@@ -1344,11 +1344,13 @@ declare
   researcher_actor uuid := '30000000-0000-4000-8000-000000000002';
   program_one uuid := '31000000-0000-4000-8000-000000000001';
   program_two uuid := '31000000-0000-4000-8000-000000000002';
+  program_other uuid := '31000000-0000-4000-8000-000000000010';
   program_optional_poc uuid := '31000000-0000-4000-8000-000000000003';
   program_paused uuid := '31000000-0000-4000-8000-000000000007';
   scope_one uuid := '32000000-0000-4000-8000-000000000001';
   scope_one_excluded uuid := '32000000-0000-4000-8000-000000000101';
   scope_two uuid := '32000000-0000-4000-8000-000000000002';
+  scope_other uuid := '32000000-0000-4000-8000-000000000010';
   scope_optional_poc uuid := '32000000-0000-4000-8000-000000000003';
   scope_paused uuid := '32000000-0000-4000-8000-000000000007';
   impact_low uuid := '32200000-0000-4000-8001-000000000002';
@@ -1375,18 +1377,55 @@ begin
     'customImpacts', '[]'::jsonb
   );
 
-  ---------------------------------------------------------------- role gate
+  ---------------------------------------------------------------- own-program owner guard
   begin
     perform public.submit_report_atomic(
       owner_actor, program_one, base_input, '0x' || repeat('11', 32)
     );
-    raise exception 'An owner was allowed to submit a report';
+    raise exception 'A program owner was allowed to submit a report into their own program';
+  exception
+    when sqlstate '22023' then
+      get stacked diagnostics rejected_code = pg_exception_detail;
+      if rejected_code <> 'program_owner_cannot_submit_reports' then
+        raise exception 'Expected program_owner_cannot_submit_reports, got %', rejected_code;
+      end if;
+  end;
+
+  ---------------------------------------------------------------- role gate for an owner's other program
+  begin
+    perform public.submit_report_atomic(
+      owner_actor, program_other,
+      base_input || jsonb_build_object('affectedScopeId', scope_other),
+      '0x' || repeat('12', 32)
+    );
+    raise exception 'An owner was allowed to submit a report into another program';
   exception
     when sqlstate '42501' then
       get stacked diagnostics rejected_code = pg_exception_detail;
       if rejected_code <> 'researcher_role_required' then
         raise exception 'Expected researcher_role_required, got %', rejected_code;
       end if;
+  end;
+
+  ---------------------------------------------------------------- researcher remains allowed
+  begin
+    created_report := public.submit_report_atomic(
+      researcher_actor,
+      program_one,
+      base_input,
+      '0x' || repeat('13', 32)
+    );
+
+    if not exists (
+      select 1
+      from public.reports
+      where id = created_report
+        and researcher_id = researcher_actor
+        and program_id = program_one
+        and status = 'submitted'
+    ) then
+      raise exception 'A non-owning researcher submission was not persisted';
+    end if;
   end;
 
   ---------------------------------------------------------------- program must be active

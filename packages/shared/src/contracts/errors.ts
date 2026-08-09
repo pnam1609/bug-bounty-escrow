@@ -54,6 +54,7 @@ export const API_ERROR_CODES = Object.freeze([
   'report_not_accessible',
   'invalid_report_transition',
   'researcher_role_required',
+  'program_owner_cannot_submit_reports',
   'scope_not_eligible',
   'impact_not_eligible',
   'custom_impact_not_allowed',
@@ -65,6 +66,12 @@ export const API_ERROR_CODES = Object.freeze([
   'duplicate_reopen_program_not_active',
   'duplicate_reopen_funded',
   'duplicate_reopen_settlement_started',
+
+  // AI review recovery
+  'ai_manual_review_report_not_found',
+  'ai_manual_review_report_state',
+  'ai_manual_review_stale_hash',
+  'ai_manual_review_revision_missing',
 
   // Settlement
   'reward_out_of_bounds',

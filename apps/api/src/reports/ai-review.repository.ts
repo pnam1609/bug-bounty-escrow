@@ -61,6 +61,10 @@ export interface AiReviewReadRepository {
   getReview(reportId: string, principal: RequestPrincipal): Promise<ReportAiReview | undefined>;
 }
 
+export interface AiReviewRecoveryRepository {
+  retryReview(reportId: string, programId: string, contentHash: string): Promise<string>;
+}
+
 interface SnapshotRow {
   readonly snapshot: Record<string, unknown>;
 }
@@ -107,7 +111,7 @@ function publicAiSchemaVersion(value: number | null | undefined): string | undef
 
 @Injectable()
 export class SupabaseAiReviewQueueRepository
-  implements AiReviewQueueRepository, AiReviewReadRepository
+  implements AiReviewQueueRepository, AiReviewReadRepository, AiReviewRecoveryRepository
 {
   private readonly workerId = `api:${randomUUID()}`;
   private providerName = 'mock';
@@ -118,6 +122,26 @@ export class SupabaseAiReviewQueueRepository
   public configureProvider(name: string, model: string): void {
     this.providerName = name;
     this.providerModel = model;
+  }
+
+  /**
+   * Requeues the current immutable revision without creating a new submission sequence. The
+   * database function owns authorization-independent state validation and remains idempotent for
+   * queued/running or already-persisted results.
+   */
+  public async retryReview(
+    reportId: string,
+    programId: string,
+    contentHash: string,
+  ): Promise<string> {
+    const { data, error } = await this.client.rpc('retry_report_ai_run_atomic', {
+      target_report_id: reportId,
+      target_program_id: programId,
+      generated_content_hash: contentHash,
+    });
+    if (error !== null) throw normalizeDatabaseError(error);
+    if (typeof data !== 'string') throw new Error('ai_manual_retry_run_missing');
+    return data;
   }
 
   public async getReview(

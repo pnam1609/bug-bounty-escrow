@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { MAX_UPLOAD_SIZE_BYTES, SAFE_UPLOAD_MIME_TYPES } from '../constants/uploads.js';
 import { paginationQuerySchema } from '../schemas/pagination.js';
+import { rewardTierSchema } from './program.js';
 import {
   evmAddressSchema,
   httpsUrlSchema,
@@ -36,6 +37,8 @@ export const reportListQuerySchema = paginationQuerySchema
   .strict();
 
 export const reportIdParamsSchema = z.object({ id: uuidSchema }).strict();
+/** Empty body for an authorized, server-side AI review recovery request. */
+export const generateAiReviewRequestSchema = z.object({}).strict();
 export const reportAttachmentParamsSchema = z
   .object({ id: uuidSchema, attachmentId: uuidSchema })
   .strict();
@@ -493,6 +496,8 @@ export const reportDetailSchema = reportSummarySchema
     submissionRevision: z.number().int().positive().optional(),
     createdAt: isoDateTimeSchema,
     aiReview: reportAiReviewSchema.optional(),
+    /** Active program tiers for this report's asset/severity preflight. */
+    rewardTiers: z.array(rewardTierSchema).optional(),
   })
   .strict();
 
@@ -553,6 +558,7 @@ export const publicDisclosureListResponseSchema = z
 
 export type ReportListQuery = z.output<typeof reportListQuerySchema>;
 export type CreateReportRequest = z.output<typeof createReportRequestSchema>;
+export type GenerateAiReviewRequest = z.output<typeof generateAiReviewRequestSchema>;
 export type UpdateReportRequest = z.output<typeof updateReportRequestSchema>;
 export type RequestInformationRequest = z.output<typeof requestInformationRequestSchema>;
 export type ValidateReportRequest = z.output<typeof validateReportRequestSchema>;

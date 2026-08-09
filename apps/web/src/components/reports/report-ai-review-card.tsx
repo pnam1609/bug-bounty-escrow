@@ -35,6 +35,8 @@ export interface ReportAiReviewCardProps {
   readonly currentSubmittedAt?: string;
   /** Opens the existing human duplicate confirmation dialog for an authorized candidate. */
   readonly onMarkDuplicate?: (candidateReportId: string) => void;
+  /** Requests server-side recovery for a terminal or missing AI review. */
+  readonly onGenerateAiReview?: () => Promise<void> | void;
 }
 
 export const DUPLICATE_ACTION_CONFIDENCE_THRESHOLD = 0.4;
@@ -453,7 +455,10 @@ export function ReportAiReviewCard({
   currentSubmittedAt,
   currentSubmissionRevision,
   onMarkDuplicate,
+  onGenerateAiReview,
 }: ReportAiReviewCardProps) {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string>();
   const status = resolveAiReviewStatus(review, currentContentHash, currentSubmissionRevision);
   const safeReview = isKnownReview(review) ? review : undefined;
   const effectiveReview: ReportAiReview =
@@ -466,6 +471,19 @@ export function ReportAiReviewCard({
         ? safeReview
         : { status: 'unavailable' };
   const copy = STATUS_COPY[effectiveReview.status];
+
+  const handleGenerateAiReview = async (): Promise<void> => {
+    if (onGenerateAiReview === undefined || isGenerating) return;
+    setIsGenerating(true);
+    setGenerateError(undefined);
+    try {
+      await onGenerateAiReview();
+    } catch {
+      setGenerateError('Could not generate the AI review. Try again in a moment.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <Card aria-label="AI suggestion" className="gap-lg" padding="lg">
@@ -494,9 +512,28 @@ export function ReportAiReviewCard({
         </p>
       ) : null}
 
-      {effectiveReview.status === 'unavailable' || effectiveReview.status === 'superseded' ? (
+      {effectiveReview.status === 'unavailable' ? (
+        <div className="flex flex-col gap-md">
+          <p className="text-body-sm text-text-muted">
+            Human review and report actions are still available.
+          </p>
+          {onGenerateAiReview === undefined ? null : (
+            <div className="flex flex-col items-start gap-sm">
+              <Button disabled={isGenerating} onClick={() => void handleGenerateAiReview()}>
+                {isGenerating ? 'Generating…' : 'Generate AI review'}
+              </Button>
+              {generateError === undefined ? null : (
+                <p aria-live="polite" className="text-body-sm text-error">
+                  {generateError}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ) : effectiveReview.status === 'superseded' ? (
         <p className="text-body-sm text-text-muted">
-          Human review and report actions are still available.
+          This result belongs to an earlier submission. A new review will be queued for the latest
+          revision.
         </p>
       ) : null}
 

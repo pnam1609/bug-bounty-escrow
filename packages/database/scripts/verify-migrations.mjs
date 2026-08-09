@@ -71,6 +71,8 @@ const expectedMigrations = [
   '20260809000200_cp01_short_summary_1000.sql',
   '20260809000300_rr_flow_reopen_duplicate.sql',
   '20260810000100_rr_flow_validated_send_back.sql',
+  '20260810000200_sr_owner_submit_guard.sql',
+  '20260810000300_ai_manual_review_recovery.sql',
 ];
 
 const tableMigrations = new Map([
@@ -276,6 +278,32 @@ for (const requiredFragment of [
 ]) {
   if (!validatedSendBack.includes(requiredFragment)) {
     fail(`RR-FLOW validated send-back migration is missing ${requiredFragment}`);
+  }
+}
+const ownerSubmitGuard = migrationContents.get('20260810000200_sr_owner_submit_guard.sql');
+for (const requiredFragment of [
+  'create or replace function public.submit_report_atomic',
+  "'program_owner_cannot_submit_reports'",
+  'program_record.owner_id = actor_id',
+  "'researcher_role_required'",
+  'grant execute on function public.submit_report_atomic',
+]) {
+  if (!ownerSubmitGuard.includes(requiredFragment)) {
+    fail(`SR owner-submit guard migration is missing ${requiredFragment}`);
+  }
+}
+const manualAiRecovery = migrationContents.get('20260810000300_ai_manual_review_recovery.sql');
+for (const requiredFragment of [
+  'create or replace function public.retry_report_ai_run_atomic',
+  "'ai_manual_review_report_not_found'",
+  "'ai_manual_review_report_state'",
+  "'ai_manual_review_stale_hash'",
+  "'ai_manual_review_revision_missing'",
+  "status = 'queued'",
+  'grant execute on function public.retry_report_ai_run_atomic',
+]) {
+  if (!manualAiRecovery.includes(requiredFragment)) {
+    fail(`AI manual-review recovery migration is missing ${requiredFragment}`);
   }
 }
 for (const functionName of [

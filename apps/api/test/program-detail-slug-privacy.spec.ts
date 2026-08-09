@@ -197,7 +197,22 @@ describe('program detail slug privacy', () => {
       slug: 'aegis-protocol',
       totalPaid: null,
       paidReportCount: null,
+      canSubmitReports: true,
     });
+  });
+
+  it('derives the report CTA capability from the authenticated owner boundary', async () => {
+    const ownerDetail = await repositoryFor(row('active')).repository.findAccessibleBySlug(
+      'aegis-protocol',
+      { userId: OWNER_ID, email: 'owner@example.test', role: 'owner' },
+    );
+    const researcherDetail = await repositoryFor(row('active')).repository.findAccessibleBySlug(
+      'aegis-protocol',
+      { userId: REVIEWER_ID, email: 'researcher@example.test', role: 'researcher' },
+    );
+
+    expect(ownerDetail).toMatchObject({ canSubmitReports: false });
+    expect(researcherDetail).toMatchObject({ canSubmitReports: true });
   });
 
   it.each([null, 'active'] as const)(

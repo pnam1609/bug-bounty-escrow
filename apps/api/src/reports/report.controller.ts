@@ -13,6 +13,7 @@ import {
   confirmPaymentRequestSchema,
   createReportRequestSchema,
   disclosureDecisionRequestSchema,
+  generateAiReviewRequestSchema,
   markDuplicateRequestSchema,
   programIdParamsSchema,
   rejectReportRequestSchema,
@@ -29,6 +30,7 @@ import {
   type ConfirmPaymentRequest,
   type CreateReportRequest,
   type DisclosureDecisionRequest,
+  type GenerateAiReviewRequest,
   type MarkDuplicateRequest,
   type ProgramIdParams,
   type PublicDisclosureListResponse,
@@ -95,6 +97,21 @@ export class ReportController {
     return {
       success: true,
       data: await this.service.get(requirePrincipal(principal), params.id),
+    };
+  }
+
+  @Roles('researcher', 'owner', 'reviewer')
+  @Post(':id/ai-review/generate')
+  @RateLimit({ limit: 5, windowMs: 60_000 })
+  public async generateAiReview(
+    @ZodParam(reportIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(generateAiReviewRequestSchema)
+    input: GenerateAiReviewRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<ReportResponse> {
+    return {
+      success: true,
+      data: await this.service.generateAiReview(requirePrincipal(principal), params.id, input),
     };
   }
 
@@ -271,7 +288,7 @@ export class ReportController {
 export class ProgramReportController {
   public constructor(@Inject(ReportService) private readonly service: ReportService) {}
 
-  @Roles('researcher')
+  @Roles('owner', 'researcher')
   @Post()
   @RateLimit({ limit: 10, windowMs: 60_000 })
   public async submit(

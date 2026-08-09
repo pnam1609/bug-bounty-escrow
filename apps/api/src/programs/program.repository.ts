@@ -18,11 +18,7 @@ import type {
 
 import { normalizeDatabaseError } from '../database/database-error.js';
 import { SUPABASE_CLIENT } from '../database/supabase.provider.js';
-import {
-  PROGRAM_LOGO_BUCKET,
-  buildLogoStoragePath,
-  publicLogoUrl,
-} from './program-logo.js';
+import { PROGRAM_LOGO_BUCKET, buildLogoStoragePath, publicLogoUrl } from './program-logo.js';
 import {
   PROGRAM_DETAIL_PROJECTION,
   PROGRAM_SUMMARY_PROJECTION,
@@ -61,10 +57,7 @@ interface FilterBuilder {
   not: (column: string, operator: string, value: unknown) => FilterBuilder;
   ilike: (column: string, pattern: string) => FilterBuilder;
   overlaps: (column: string, values: readonly string[]) => FilterBuilder;
-  order: (
-    column: string,
-    options?: { ascending?: boolean; nullsFirst?: boolean },
-  ) => FilterBuilder;
+  order: (column: string, options?: { ascending?: boolean; nullsFirst?: boolean }) => FilterBuilder;
   range: (
     from: number,
     to: number,
@@ -229,10 +222,7 @@ export class ProgramRepository {
     principal?: RequestPrincipal,
     requiredOwnerId?: string,
   ): Promise<Program | null> {
-    let request = this.client
-      .from('programs')
-      .select(PROGRAM_DETAIL_PROJECTION)
-      .eq(column, value);
+    let request = this.client.from('programs').select(PROGRAM_DETAIL_PROJECTION).eq(column, value);
 
     if (requiredOwnerId !== undefined) {
       request = request.eq('owner_id', requiredOwnerId);
@@ -262,6 +252,9 @@ export class ProgramRepository {
       revealTotalPaid: isOwner || isReviewer,
       resolveLogoUrl: this.resolveLogoUrl,
       medianResolutionSeconds: await this.medianResolutionSeconds(row.id),
+      ...(principal === undefined
+        ? {}
+        : { viewerId: principal.userId, viewerRole: principal.role }),
     });
   }
 
@@ -312,11 +305,7 @@ export class ProgramRepository {
     }
   }
 
-  public async fund(
-    ownerId: string,
-    programId: string,
-    input: FundProgramRequest,
-  ): Promise<void> {
+  public async fund(ownerId: string, programId: string, input: FundProgramRequest): Promise<void> {
     const { error } = await this.client.rpc('fund_program_escrow_atomic', {
       actor_id: ownerId,
       target_program_id: programId,

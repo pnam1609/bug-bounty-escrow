@@ -63,6 +63,14 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
     queryFn: () =>
       apiRequest(`/api/reports/${encodeURIComponent(id)}`, reportResponseSchema, { token }),
   });
+  const generateAiReview = async (): Promise<void> => {
+    await apiRequest(
+      `/api/reports/${encodeURIComponent(id)}/ai-review/generate`,
+      reportResponseSchema,
+      { method: 'POST', token, body: {} },
+    );
+    await query.refetch();
+  };
 
   if (query.isPending) {
     return (
@@ -180,6 +188,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
             audience="reviewer"
             currentContentHash={report.contentHash}
             currentSubmittedAt={report.submittedAt ?? report.createdAt}
+            onGenerateAiReview={generateAiReview}
             {...(viewer.data?.role === 'owner' || viewer.data?.role === 'reviewer'
               ? { onMarkDuplicate: (candidateId: string) => setDuplicateCandidateId(candidateId) }
               : {})}

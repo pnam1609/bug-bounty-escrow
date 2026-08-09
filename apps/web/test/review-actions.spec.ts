@@ -15,9 +15,13 @@ vi.mock('wagmi', () => ({
 }));
 
 import {
+  amountWithinTier,
+  configuredRewardTiers,
   connectRewardWalletViaRainbowKit,
   duplicateTargetIsSafe,
+  matchingRewardTiers,
   ReviewActions,
+  tierDetails,
 } from '@/components/reports/review-actions';
 
 const REPORT_ID = '10000000-0000-4000-8000-000000000010';
@@ -149,6 +153,73 @@ async function renderActions(
 }
 
 describe('ReviewActions reward ownership boundary', () => {
+  it('uses final severity and affected asset to select reward tiers with decimal-safe bounds', () => {
+    const rangeTier = {
+      assetType: 'smart_contract' as const,
+      severity: 'high' as const,
+      calculationType: 'range' as const,
+      minReward: '1.25',
+      maxReward: '2.50',
+    };
+    const flatTier = {
+      assetType: 'smart_contract' as const,
+      severity: 'high' as const,
+      calculationType: 'flat' as const,
+      flatAmount: '5.000001',
+    };
+    const selected = matchingRewardTiers({
+      ...report,
+      proposedSeverity: 'critical',
+      finalSeverity: 'high',
+      rewardTiers: [
+        rangeTier,
+        flatTier,
+        { ...rangeTier, severity: 'low' as const },
+        { ...rangeTier, assetType: 'website' as const },
+      ],
+    });
+
+    expect(selected).toEqual([rangeTier, flatTier]);
+    expect(configuredRewardTiers({ ...report, finalSeverity: 'high', rewardTiers: [
+      rangeTier,
+      flatTier,
+      { ...rangeTier, severity: 'low' as const },
+    ] } as ReportDetail)).toHaveLength(3);
+    expect(amountWithinTier('1.250000', rangeTier)).toBe(true);
+    expect(amountWithinTier('2.500001', rangeTier)).toBe(false);
+    expect(amountWithinTier('5.000001', flatTier)).toBe(true);
+    expect(amountWithinTier('5', flatTier)).toBe(false);
+  });
+
+  it('describes matching range, flat, and percentage tiers without floating-point bounds', () => {
+    expect(
+      tierDetails({
+        assetType: 'smart_contract',
+        severity: 'high',
+        calculationType: 'range',
+        minReward: '10',
+        maxReward: '20',
+      }),
+    ).toContain('Range · 10–20 USDC');
+    expect(
+      tierDetails({
+        assetType: 'smart_contract',
+        severity: 'high',
+        calculationType: 'flat',
+        flatAmount: '12.5',
+      }),
+    ).toContain('Flat · 12.5 USDC');
+    expect(
+      tierDetails({
+        assetType: 'smart_contract',
+        severity: 'high',
+        calculationType: 'percentage',
+        percentageBps: 1250,
+        maxRewardCap: '1000',
+      }),
+    ).toContain('Percentage · 12.5% · cap 1000 USDC');
+  });
+
   it('opens the RainbowKit modal instead of requesting an arbitrary injected provider', async () => {
     openConnectModal.mockClear();
 

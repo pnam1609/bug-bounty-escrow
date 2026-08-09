@@ -63,6 +63,9 @@ Report được tạo trước attachment. Vì vậy attachment upload error là
 ### Quyền truy cập
 
 - Chỉ account type `researcher` được mở composer.
+- Program owner không được submit report vào chính program mà họ sở hữu. Khi session/profile xác
+  nhận ownership, program detail không render CTA submit; nếu client bypass UI thì API/RPC vẫn từ
+  chối fail-closed bằng stable `program_owner_cannot_submit_reports`.
 - Anonymous chọn `Submit a private report` phải sign in và giữ internal `returnTo` an toàn.
 - Owner/reviewer mở deep link phải tới safe forbidden state; không render private form trước khi role/profile được xác nhận.
 - Researcher chỉ xem report của chính mình.
@@ -775,13 +778,18 @@ AI review card ngay trong report detail:
 - `Ready`: summary, completeness, suggested severity, scope assessment, missing information,
   confidence và duplicate assessment `none | possible | likely`.
 - `Unavailable`: `AI review is temporarily unavailable. Your report was submitted and human review
-can continue.`
+can continue.` Hiển thị `Generate AI review`; nút gọi server-side idempotent enqueue/retry đúng current
+  revision/content hash, rồi refresh persisted result. Không gọi provider từ browser và lỗi phải có copy
+  actionable để retry. Server chỉ cho recovery ở `submitted`, `triaged`, `needs_information` hoặc
+  `validated` trước settlement; các trạng thái terminal/đã payout không tạo run mới.
 - Researcher không bao giờ thấy candidate report ID, title, author hoặc private excerpt của researcher
   khác. Với `possible | likely`, chỉ hiển thị `A prior report may describe the same issue. The program
 reviewer will make the final decision.`
 - Result chỉ là current khi `submissionRevision` và `contentHash` khớp report detail. Sau resubmit,
   prior result chuyển `superseded` và UI quay về `Processing` cho run mới.
-- Detail dùng polling bounded hoặc realtime subscription để refresh server state; reload không tạo run.
+- Detail dùng polling bounded hoặc realtime subscription để refresh server state; Processing chỉ hiển
+  thị badge/copy, còn reload không tạo run. `Generate AI review` chỉ xuất hiện ở terminal Unavailable;
+  Ready/Superseded không có action.
 
 `Ready` là kết quả đã persist trong database, không render trực tiếp provider response. Nếu schema
 invalid, provenance mismatch hoặc result chưa persist thì UI dùng `Unavailable/Processing`, không
@@ -1071,7 +1079,8 @@ Figma annotation tại SR-04, SR-05, SR-06 và SR-09 phải ghi rõ:
 - Hai submission đồng thời cùng program có canonical ordering; report sau chỉ duplicate-check với
   prior sequence và không thể bỏ qua report trước do multi-replica race.
 - Structured AI result được validate rồi persist; report detail hiển thị Processing/Ready/Unavailable
-  và tự refresh nhưng reload/navigation không enqueue run mới.
+  và tự refresh nhưng reload/navigation không enqueue run mới. Terminal Unavailable có Generate AI
+  review server-side, idempotent cho revision/hash hiện hành và không cấp revision/sequence mới.
 - Duplicate output chỉ là suggestion; researcher không thấy candidate metadata và human reviewer mới
   có quyền mark duplicate.
 - Gemini dùng exact stable `gemini-3.5-flash`; free tier chỉ cho demo/synthetic data do privacy terms,

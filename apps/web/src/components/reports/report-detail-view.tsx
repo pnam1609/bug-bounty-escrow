@@ -204,6 +204,14 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
     queryFn: () =>
       apiRequest(`/api/reports/${encodeURIComponent(id)}`, reportResponseSchema, { token }),
   });
+  const generateAiReview = async (): Promise<void> => {
+    await apiRequest(
+      `/api/reports/${encodeURIComponent(id)}/ai-review/generate`,
+      reportResponseSchema,
+      { method: 'POST', token, body: {} },
+    );
+    await query.refetch();
+  };
   const accessFailure = getReportAccessFailure(query.error);
 
   useEffect(() => {
@@ -367,7 +375,11 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
         <DisclosureSummary report={report} />
       </div>
 
-      <ReportAiReviewCard audience="researcher" review={report.aiReview} />
+      <ReportAiReviewCard
+        audience="researcher"
+        onGenerateAiReview={generateAiReview}
+        review={report.aiReview}
+      />
 
       <ReportContent report={report} token={token} />
 
