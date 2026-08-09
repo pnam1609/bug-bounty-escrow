@@ -240,11 +240,14 @@ chọn không được dùng làm hard filter.
 
 Owner/reviewer duplicate candidates remain advisory and are re-authorized at read time. The server
 projection enriches retained same-program candidates with the original report `submittedAt` (falling
-back to `createdAt` only for legacy rows), drops rows without a valid timestamp and sorts them
-chronologically ascending with a UUID tie-break. The inline human `Mark duplicate` shortcut is shown
-only when a candidate is assessed `likely`, its confidence is strictly greater than 40%, and the
-current canonical `submissionSequence` is greater than 1. It is hidden for `possible`, exactly 40%
-or lower, the first sequence, or missing/invalid sequence. Clicking it only opens the existing human
+back to `createdAt` only for legacy rows), preserves the candidate status, drops rows without a valid
+timestamp and sorts them chronologically ascending with a UUID tie-break. Candidate title and short ID
+are links to `/reports/:id` only within the authorized owner/reviewer detail scope. The inline human
+`Mark duplicate` shortcut is shown only when a candidate is assessed `likely`, its confidence is
+strictly greater than 40%, the current canonical `submissionSequence` is greater than 1, and the
+candidate target is not already `validated`. A `validated` target is evidence-only and renders a
+`Validated` badge. The shortcut is hidden for `possible`, exactly 40% or lower, the first sequence,
+missing/invalid sequence, or a validated target. Clicking it only opens the existing human
 confirmation dialog; owner/reviewer role, status, same-program, self-reference and cycle checks stay
 server-authoritative, and AI cannot mutate lifecycle or payout.
 The dialog's normal path is a server-authorized select, never arbitrary UUID entry: options require a

@@ -10,11 +10,17 @@ import {
   Callout,
   Button,
   SeverityBadge,
+  StatusBadge,
 } from '@bug-bounty-escrow/ui';
 import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 
-import { formatTimestamp, SEVERITY_LABELS } from './report-format';
+import {
+  formatTimestamp,
+  reportReferenceAriaLabel,
+  SEVERITY_LABELS,
+  shortReportId,
+} from './report-format';
 
 type AiReviewAudience = 'researcher' | 'reviewer';
 
@@ -37,7 +43,7 @@ export function canMarkDuplicateCandidate(
   review: Pick<ReportAiReview, 'status' | 'submissionSequence'>,
   candidate: Pick<
     NonNullable<ReportAiReview['duplicateCandidates']>[number],
-    'assessment' | 'confidence' | 'submittedAt'
+    'assessment' | 'confidence' | 'status' | 'submittedAt'
   >,
   currentSubmittedAt?: string,
 ): boolean {
@@ -45,6 +51,7 @@ export function canMarkDuplicateCandidate(
     review.status === 'ready' &&
     review.submissionSequence !== undefined &&
     review.submissionSequence > 1 &&
+    candidate.status !== 'validated' &&
     candidate.assessment === 'likely' &&
     candidate.confidence > DUPLICATE_ACTION_CONFIDENCE_THRESHOLD &&
     candidate.submittedAt !== undefined &&
@@ -251,10 +258,20 @@ function ReviewerCandidates({
           >
             <div className="flex flex-wrap items-start justify-between gap-sm">
               <div className="flex min-w-0 flex-col gap-xs">
-                <p className="text-body-sm text-text">{candidate.title ?? 'Untitled report'}</p>
-                <code className="break-all text-label-sm text-text">
-                  {candidate.candidateReportId}
-                </code>
+                <a
+                  aria-label={`Open candidate report ${candidate.title ?? 'Untitled report'}`}
+                  className="text-body-sm text-text underline decoration-border underline-offset-2 hover:text-escrow"
+                  href={`/reports/${candidate.candidateReportId}`}
+                >
+                  {candidate.title ?? 'Untitled report'}
+                </a>
+                <a
+                  aria-label={reportReferenceAriaLabel(candidate.candidateReportId)}
+                  className="break-all text-label-sm text-text-muted underline decoration-border underline-offset-2 hover:text-escrow"
+                  href={`/reports/${candidate.candidateReportId}`}
+                >
+                  <code>{shortReportId(candidate.candidateReportId)}…</code>
+                </a>
                 {candidate.submittedAt === undefined ? null : (
                   <time className="text-label-sm text-text-muted" dateTime={candidate.submittedAt}>
                     Submitted {formatTimestamp(candidate.submittedAt)}
@@ -265,6 +282,9 @@ function ReviewerCandidates({
                 <span className="text-label-sm text-medium">
                   {candidate.assessment} · {percentage(candidate.confidence)}
                 </span>
+                {candidate.status === 'validated' ? (
+                  <StatusBadge className="bg-transparent" label="Validated" status="validated" />
+                ) : null}
                 {onMarkDuplicate !== undefined &&
                 canMarkDuplicateCandidate(review, candidate, currentSubmittedAt) ? (
                   <Button

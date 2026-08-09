@@ -231,15 +231,15 @@ prompt hoặc provider progress.
 
 ### 6.2 Action availability
 
-| Status                               | Owner                                                                       | Assigned reviewer                     |
-| ------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------- |
-| `submitted`, `triaged`               | Validate, Request information, Reject, Mark duplicate                       | Cùng bốn review actions               |
-| `needs_information`                  | Comment/view; chờ researcher resubmit                                       | Comment/view; chờ researcher resubmit |
+| Status                               | Owner                                                                            | Assigned reviewer                     |
+| ------------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------- |
+| `submitted`, `triaged`               | Validate, Request information, Reject, Mark duplicate                            | Cùng bốn review actions               |
+| `needs_information`                  | Comment/view; chờ researcher resubmit                                            | Comment/view; chờ researcher resubmit |
 | `validated`                          | Send back for review (before settlement) or approve reward / continue settlement | Chỉ xem, chờ owner                    |
-| `reward_approved`, `payment_pending` | Resume/reconcile settlement khi cần                                         | Chỉ xem progress                      |
-| `rejected`, `paid`                   | Read-only terminal                                                          | Read-only terminal                    |
-| `duplicate`                          | Reopen duplicate only when server capability allows it; otherwise read-only | Read-only terminal                    |
-| `draft`                              | Không xuất hiện trong review inbox                                          | Không xuất hiện trong review inbox    |
+| `reward_approved`, `payment_pending` | Resume/reconcile settlement khi cần                                              | Chỉ xem progress                      |
+| `rejected`, `paid`                   | Read-only terminal                                                               | Read-only terminal                    |
+| `duplicate`                          | Reopen duplicate only when server capability allows it; otherwise read-only      | Read-only terminal                    |
+| `draft`                              | Không xuất hiện trong review inbox                                               | Không xuất hiện trong review inbox    |
 
 Mọi mutation phải chặn double-submit, giữ dialog mở khi error, refresh đúng report/inbox query sau
 success và xử lý conflict do status đổi ở tab khác bằng server response thay vì overwrite.
@@ -341,11 +341,13 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - AI output không prefill final severity, duplicate target, decision form hoặc reward field. Human
   reviewer phải tự chọn và confirm mọi quyết định.
 - Với owner/reviewer, mỗi candidate đã được server re-authorize hiển thị timestamp `submittedAt`
-  của report gốc và được sort chronological ascending (earliest first; UUID tie-break). Chỉ candidate
-  có assessment `likely`, confidence **strictly greater than 40%** và current
-  `submissionSequence > 1` mới có nút `Mark duplicate`; `possible`, confidence bằng/nhỏ hơn 40%,
-  first sequence hoặc sequence thiếu/không hợp lệ chỉ là advisory evidence. Nút mở dialog duplicate
-  human hiện hành với UUID được prefill, không tự submit.
+  của report gốc và được sort chronological ascending (earliest first; UUID tie-break). Title và
+  short ID của candidate là link tới `/reports/:id` để đọc detail khi principal còn quyền. Chỉ
+  candidate có assessment `likely`, confidence **strictly greater than 40%**, current
+  `submissionSequence > 1` và target status khác `validated` mới có nút `Mark duplicate`;
+  candidate `validated` chỉ hiển thị badge `Validated` và là evidence-only. `possible`, confidence
+  bằng/nhỏ hơn 40%, first sequence hoặc sequence thiếu/không hợp lệ chỉ là advisory evidence. Nút
+  mở dialog duplicate human hiện hành với UUID được prefill, không tự submit.
 - Nếu result chưa current/valid/available, dùng safe state của RR-08 và vẫn để human decision
   controls khả dụng theo report status.
 
@@ -424,8 +426,10 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
   2,000 ký tự. Không dùng nhập UUID tự do làm happy path.
 - Target phải tồn tại, cùng program, reviewer có quyền đọc, không self-reference và không tạo cycle.
 - Select options chỉ gồm candidates cùng program, `assessment = likely`, confidence `> 0.40`,
-  timestamp hợp lệ và `submittedAt` sớm hơn report hiện tại. Mỗi option hiển thị title, short UUID
-  và exact/relative submitted timestamp; không có option thì confirm disabled.
+  timestamp hợp lệ, `submittedAt` sớm hơn report hiện tại và target status khác `validated`. Mỗi
+  option hiển thị title, short UUID và exact/relative submitted timestamp; không có option thì
+  confirm disabled. Candidate `validated` vẫn có thể được đọc qua link nhưng không được chọn để
+  mark duplicate.
 - Inline AI candidates chỉ là shortcut để mở dialog human: candidate phải là `likely` với confidence
   `> 0.40`, current submission sequence phải lớn hơn 1, và report gốc phải có timestamp do server
   trả. Candidate list sort theo `submittedAt` tăng dần (UUID tăng dần khi cùng timestamp). Report đầu
@@ -433,6 +437,8 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
 - Click shortcut preselect candidate đó trong selector; mở Mark duplicate trực tiếp bắt đầu không có
   selection. Server vẫn re-authorize target, client không thể submit arbitrary UUID để bypass selector.
 - Trước confirm hiển thị target title + short ID để owner đối chiếu; không lộ candidate ngoài quyền.
+  Candidate title/ID trong evidence list luôn là authorized detail links, và status badge `Validated`
+  thay thế mọi duplicate action cho original report đã validated.
 - Success → `duplicate`, hiển thị linked original; duplicate không nhận reward.
 
 ### Send validated report back for review

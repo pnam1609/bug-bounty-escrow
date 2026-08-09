@@ -423,6 +423,8 @@ export const aiDuplicateCandidateSchema = z
     candidateReportId: uuidSchema,
     /** Server-enriched title of the authorized original report. */
     title: z.string().optional(),
+    /** Server-enriched lifecycle status of the authorized original report. */
+    status: reportStatusSchema.optional(),
     assessment: z.enum(['possible', 'likely']),
     reason: z.string(),
     confidence: z.number().min(0).max(1),

@@ -29,6 +29,7 @@ describe('persisted report AI contract', () => {
       duplicateCandidates: [
         {
           candidateReportId: '10000000-0000-4000-8000-000000000099',
+          status: 'validated',
           assessment: 'likely',
           reason: 'Same affected function and impact.',
           confidence: 0.95,

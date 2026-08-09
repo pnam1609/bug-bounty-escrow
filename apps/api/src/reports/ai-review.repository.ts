@@ -75,6 +75,7 @@ interface CandidateRow {
   readonly id: string;
   readonly program_id: string;
   readonly title: string | null;
+  readonly status: string | null;
   readonly submitted_at: string | null;
   readonly created_at: string | null;
 }
@@ -82,6 +83,7 @@ interface CandidateRow {
 interface AuthorizedCandidateTime {
   readonly submittedAt: string;
   readonly title?: string;
+  readonly status?: string;
 }
 
 interface CandidateFingerprintRow {
@@ -364,7 +366,7 @@ export class SupabaseAiReviewQueueRepository
       } else {
         const { data: candidateRows, error: candidateError } = await this.client
           .from('reports')
-          .select('id,program_id,title,submitted_at,created_at')
+          .select('id,program_id,title,status,submitted_at,created_at')
           .in('id', candidateIds)
           .eq('program_id', access.program_id);
         if (candidateError !== null) throw normalizeDatabaseError(candidateError);
@@ -380,6 +382,7 @@ export class SupabaseAiReviewQueueRepository
             authorizedTimes.set(row.id, {
               submittedAt,
               ...(typeof row.title === 'string' ? { title: row.title } : {}),
+              ...(typeof row.status === 'string' ? { status: row.status } : {}),
             });
           }
         }
@@ -401,6 +404,7 @@ export class SupabaseAiReviewQueueRepository
                     ...candidate,
                     submittedAt: timestamp,
                     ...(authorized.title === undefined ? {} : { title: authorized.title }),
+                    ...(authorized.status === undefined ? {} : { status: authorized.status }),
                   },
                 ];
           })

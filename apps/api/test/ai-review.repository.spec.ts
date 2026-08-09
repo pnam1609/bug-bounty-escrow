@@ -379,6 +379,7 @@ describe('SupabaseAiReviewQueueRepository report projection', () => {
             id: latest,
             program_id: '10000000-0000-0000-0000-000000000099',
             title: 'Latest candidate',
+            status: 'submitted',
             submitted_at: '2026-08-01T00:00:00.000Z',
             created_at: '2026-07-31T00:00:00.000Z',
           },
@@ -386,6 +387,7 @@ describe('SupabaseAiReviewQueueRepository report projection', () => {
             id: earliest,
             program_id: '10000000-0000-0000-0000-000000000099',
             title: 'Earliest candidate',
+            status: 'validated',
             submitted_at: '2026-07-30T00:00:00.000Z',
             created_at: '2026-07-29T00:00:00.000Z',
           },
@@ -401,6 +403,7 @@ describe('SupabaseAiReviewQueueRepository report projection', () => {
         {
           candidateReportId: earliest,
           title: 'Earliest candidate',
+          status: 'validated',
           submittedAt: '2026-07-30T00:00:00.000Z',
         },
         {
@@ -409,6 +412,55 @@ describe('SupabaseAiReviewQueueRepository report projection', () => {
           submittedAt: '2026-08-01T00:00:00.000Z',
         },
       ],
+    });
+  });
+
+  it('preserves the current candidate status for validated evidence', async () => {
+    const candidateId = '10000000-0000-4000-8000-000000000012';
+    const candidateResult = {
+      ...result,
+      result: {
+        ...(result.result as Record<string, unknown>),
+        duplicateAssessment: {
+          assessment: 'likely',
+          confidence: 0.9,
+          candidates: [
+            {
+              candidateRef: candidateId,
+              assessment: 'likely',
+              reasons: ['same issue'],
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    };
+    const repository = new SupabaseAiReviewQueueRepository(
+      clientFor(
+        run.source_content_hash,
+        { ...run, program_submission_sequence: 2 },
+        candidateResult,
+        run['submission_revision'],
+        { submitted_at: '2026-08-02T00:00:00.000Z' },
+        null,
+        owner.userId,
+        [
+          {
+            id: candidateId,
+            program_id: '10000000-0000-0000-0000-000000000099',
+            title: 'Validated original',
+            status: 'validated',
+            submitted_at: '2026-08-01T00:00:00.000Z',
+            created_at: '2026-07-31T00:00:00.000Z',
+          },
+        ],
+      ) as never,
+    );
+
+    await expect(
+      repository.getReview('10000000-0000-0000-0000-000000000020', owner),
+    ).resolves.toMatchObject({
+      duplicateCandidates: [{ candidateReportId: candidateId, status: 'validated' }],
     });
   });
 

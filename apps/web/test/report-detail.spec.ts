@@ -217,6 +217,7 @@ describe('SR-12 report detail', () => {
       duplicateCandidates: [
         {
           candidateReportId: '10000000-0000-4000-8000-000000000099',
+          status: 'submitted' as const,
           assessment: 'likely' as const,
           reason: 'The affected function and outcome match.',
           confidence: 0.94,
@@ -246,6 +247,7 @@ describe('SR-12 report detail', () => {
     expect(researcherMarkup).not.toContain(candidateId);
     expect(reviewerMarkup).toContain(candidateId);
     expect(reviewerMarkup).toContain('Authorized duplicate candidates');
+    expect(reviewerMarkup).toContain('href="/reports/10000000-0000-4000-8000-000000000099"');
   });
 
   it('gates Mark duplicate above 40 percent and never offers it for the first sequence', () => {
@@ -255,6 +257,7 @@ describe('SR-12 report detail', () => {
       reason: 'The affected function and outcome match.',
       confidence: 0.41,
       submittedAt: '2026-07-26T09:00:00.000Z',
+      status: 'submitted' as const,
     };
     const renderCandidate = (confidence: number, submissionSequence: number) =>
       renderToStaticMarkup(
@@ -310,6 +313,13 @@ describe('SR-12 report detail', () => {
         '2026-07-27T09:00:00.000Z',
       ),
     ).toBe(false);
+    expect(
+      canMarkDuplicateCandidate(
+        { status: 'ready', submissionSequence: 2 },
+        { ...candidate, status: 'validated' },
+        '2026-07-27T09:00:00.000Z',
+      ),
+    ).toBe(false);
   });
 
   it('orders candidate evidence by original submission timestamp before UUID', () => {
@@ -343,6 +353,7 @@ describe('SR-12 report detail', () => {
           {
             candidateReportId: '10000000-0000-4000-8000-000000000099',
             title: 'Earlier finding',
+            status: 'submitted',
             assessment: 'likely',
             reason: 'same impact',
             confidence: 0.41,
@@ -351,6 +362,7 @@ describe('SR-12 report detail', () => {
           {
             candidateReportId: '10000000-0000-4000-8000-000000000098',
             title: 'Later finding',
+            status: 'submitted',
             assessment: 'likely',
             reason: 'same impact',
             confidence: 0.99,
@@ -359,6 +371,7 @@ describe('SR-12 report detail', () => {
           {
             candidateReportId: '10000000-0000-4000-8000-000000000097',
             title: 'Possible finding',
+            status: 'submitted',
             assessment: 'possible',
             reason: 'weak signal',
             confidence: 0.99,
@@ -394,6 +407,7 @@ describe('SR-12 report detail', () => {
             duplicateCandidates: [
               {
                 candidateReportId: candidateId,
+                status: 'submitted',
                 assessment: 'likely',
                 reason: 'same impact',
                 confidence: 0.41,
@@ -421,6 +435,40 @@ describe('SR-12 report detail', () => {
     });
     expect(selectedCandidate).toBe(candidateId);
     mountedRenderer.unmount();
+  });
+
+  it('shows validated candidates as linked evidence without a duplicate action', () => {
+    const candidateId = '10000000-0000-4000-8000-000000000099';
+    const markup = renderToStaticMarkup(
+      createElement(ReportAiReviewCard, {
+        audience: 'reviewer',
+        currentContentHash: '0xhash',
+        currentSubmissionRevision: 1,
+        currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+        onMarkDuplicate: () => undefined,
+        review: {
+          status: 'ready',
+          submissionRevision: 1,
+          submissionSequence: 2,
+          sourceContentHash: '0xhash',
+          duplicateCandidates: [
+            {
+              candidateReportId: candidateId,
+              title: 'Validated original',
+              status: 'validated',
+              assessment: 'likely',
+              reason: 'Same issue',
+              confidence: 0.95,
+              submittedAt: '2026-07-26T09:00:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(markup).toContain('Validated');
+    expect(markup).toContain('href="/reports/10000000-0000-4000-8000-000000000099"');
+    expect(markup).not.toContain('Mark duplicate');
   });
 
   it('renders safe Processing and Unavailable states when the API has no AI projection', () => {
