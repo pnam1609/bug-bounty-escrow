@@ -247,6 +247,13 @@ for (const requiredFragment of [
   'duplicate_reopen_funded',
   'duplicate_reopen_settlement_started',
   'duplicate_target_invalid',
+  'program_record.owner_id <> actor_id',
+  "report_record.status <> 'duplicate'",
+  "program_record.status <> 'active'",
+  'program_record.total_pool <> 0',
+  'program_record.withdrawn_pool <> 0',
+  'where report_id = target_report_id',
+  'grant execute on function public.reopen_duplicate_report_atomic',
 ]) {
   if (!reopenDuplicate.includes(requiredFragment)) {
     fail(`RR-FLOW-008 reopen migration is missing ${requiredFragment}`);
