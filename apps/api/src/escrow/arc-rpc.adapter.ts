@@ -554,10 +554,17 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
     if (matchingTransfers.length === 0) {
       throw new EscrowProviderError('funding_transfer_log_missing', false);
     }
-    if (matchingTransfers.length !== 1) {
+    // Unified Balance can mint one canonical USDC transfer per selected source in the
+    // destination transaction. Aggregate those transfers into the transaction-level net
+    // amount; the service still bounds the result against the locked intent amount. Send and
+    // Bridge remain single-transfer routes and fail closed if their receipt is ambiguous.
+    if (input.routeMode !== 'unified_balance' && matchingTransfers.length !== 1) {
       throw new EscrowProviderError('funding_transfer_log_ambiguous', false);
     }
-    const netReceivedBaseUnits = matchingTransfers[0]!.value;
+    const netReceivedBaseUnits = matchingTransfers.reduce(
+      (total, transfer) => total + transfer.value,
+      0n,
+    );
     return {
       destinationTransactionHash: input.destinationTransactionHash,
       destinationLogIndex: matchingTransfers[0]!.logIndex,

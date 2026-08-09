@@ -761,6 +761,52 @@ describe('Arc RPC escrow verifier', () => {
     }
   });
 
+  it('aggregates canonical mints from multiple Unified Balance source domains', async () => {
+    const client = rpc();
+    client.getTransactionReceipt = vi.fn().mockResolvedValue({
+      status: 'success',
+      blockNumber: 42n,
+      blockHash: BLOCK_HASH,
+      contractAddress: null,
+      logs: [
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: '0x0000000000000000000000000000000000000000', to: ESCROW },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [5_000_000n]),
+          logIndex: 6,
+        },
+        {
+          address: USDC,
+          topics: encodeEventTopics({
+            abi: [TRANSFER_ABI],
+            eventName: 'Transfer',
+            args: { from: '0x0000000000000000000000000000000000000000', to: ESCROW },
+          }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [5_000_000n]),
+          logIndex: 9,
+        },
+      ],
+    });
+    client.readContract = vi.fn().mockResolvedValue(10_000_000n);
+
+    await expect(
+      new ArcRpcAdapter(config(), client).verifyFundingDestination({
+        escrowAddress: ESCROW,
+        routeMode: 'unified_balance',
+        walletAddress: OWNER,
+        destinationTransactionHash: TRANSACTION_HASH,
+        preBalanceBaseUnits: 0n,
+      }),
+    ).resolves.toMatchObject({
+      netReceivedBaseUnits: 10_000_000n,
+      destinationLogIndex: 6,
+    });
+  });
+
   it('rejects receipt evidence whose block hash no longer matches the canonical block', async () => {
     const client = rpc();
     client.getBlock = vi.fn().mockResolvedValue({ hash: `0x${'9'.repeat(64)}` });
