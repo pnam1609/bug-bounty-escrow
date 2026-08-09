@@ -169,6 +169,7 @@ export const NOTIFICATION_TYPES = Object.freeze([
   'report_validated',
   'report_rejected',
   'report_duplicate',
+  'report_reopened',
   'reward_approved',
   'payment_pending',
   'payment_confirmed',
