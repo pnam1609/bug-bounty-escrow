@@ -1219,7 +1219,7 @@ chuyển sang `payment_pending`; `confirm-payment` chuyển reserved → paid v�
 `POST /api/reports/:id/reopen-duplicate` là recovery action chỉ program owner được phép dùng cho
 report đang `duplicate`. Database/RPC là authority: chỉ chuyển `duplicate → submitted` khi program
 đang `active`, chưa có funding/settlement/payment/disclosure evidence và cả `total_pool`,
-`reserved_pool`, `paid_pool` đều bằng 0; `paused`, `expired`, `closed`, `deactivated`, reviewer và
+`reserved_pool`, `paid_pool`, `withdrawn_pool` đều bằng 0; `paused`, `expired`, `closed`, `deactivated`, reviewer và
 researcher đều bị chặn. Action ghi audit `reopen_duplicate` và notification, giữ nguyên lịch sử
 duplicate; không tự chạy AI, validate, reward hoặc payout. Comments vẫn là private collaboration
 được researcher/owner/reviewer dùng theo quyền hiện hành, không phải cơ chế reopen.

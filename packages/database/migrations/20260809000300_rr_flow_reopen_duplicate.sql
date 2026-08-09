@@ -73,6 +73,7 @@ begin
   if program_record.total_pool <> 0
     or program_record.reserved_pool <> 0
     or program_record.paid_pool <> 0
+    or program_record.withdrawn_pool <> 0
   then
     perform public.reject_business('duplicate_reopen_funded');
   end if;

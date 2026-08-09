@@ -57,6 +57,7 @@ interface ReportRow {
     total_pool?: string | number;
     reserved_pool?: string | number;
     paid_pool?: string | number;
+    withdrawn_pool?: string | number;
   } | null;
   readonly affected_scope: {
     id: string;
@@ -161,7 +162,7 @@ const REPORT_SUMMARY_PROJECTION = [
   'created_at',
   'updated_at',
   // Joined so "My reports" and the review inbox can render a program name without an N+1.
-  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool)',
+  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool,withdrawn_pool)',
 ].join(',');
 
 const REPORT_DETAIL_PROJECTION = [
@@ -265,6 +266,7 @@ function mapDetail(
     isZeroPool(row.programs.total_pool) &&
     isZeroPool(row.programs.reserved_pool) &&
     isZeroPool(row.programs.paid_pool) &&
+    isZeroPool(row.programs.withdrawn_pool) &&
     (row.escrow_transactions ?? []).length === 0 &&
     (row.reward_settlement_intents ?? []).length === 0 &&
     (row.report_disclosures ?? []).length === 0;

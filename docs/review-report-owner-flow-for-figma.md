@@ -443,7 +443,7 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
   không tự validate, tạo reward, payout hoặc chạy lại AI. Researcher vẫn có thể comment/appeal nhưng
   không có nút reopen.
 - Server/RPC kiểm tra atomic: report đang `duplicate`, original report tồn tại/cùng program/được
-  owner đọc, program đang `active`, `total_pool = reserved_pool = paid_pool = 0`, escrow chưa có
+  owner đọc, program đang `active`, `total_pool = reserved_pool = paid_pool = withdrawn_pool = 0`, escrow chưa có
   funding/settlement/payment/disclosure evidence, và không có transition/reopen race đang chạy.
   `paused`, `expired`, `closed` và `deactivated` đều bị chặn.
 - Success ghi audit action `reopen_duplicate` với lý do tùy chọn (server dùng reason mặc định nếu bỏ
