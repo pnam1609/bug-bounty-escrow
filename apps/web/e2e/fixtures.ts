@@ -11,6 +11,7 @@ import {
   publicDisclosureListResponseSchema,
   reportListResponseSchema,
   reportResponseSchema,
+  researcherPayoutWalletListResponseSchema,
   signedDownloadResponseSchema,
   signedUploadResponseSchema,
   updateProfileRequestSchema,
@@ -67,6 +68,7 @@ export const IDS = {
   duplicateTarget: '43000000-0000-4000-8000-000000000002',
   attachment: '44000000-0000-4000-8000-000000000001',
   comment: '45000000-0000-4000-8000-000000000001',
+  payoutWallet: '46000000-0000-4000-8000-000000000001',
 } as const;
 
 // --------------------------------------------------------------------------------- program data
@@ -444,6 +446,12 @@ function reportDetail(state: MockState): ReportDetail {
       description: 'The vault withdraw path re-enters before the balance is written back.',
       reproductionSteps: '1. Deposit\n2. Call withdraw from a malicious receiver\n3. Observe',
       severityMismatchAcknowledged: false,
+      affectedScope: {
+        id: IDS.aegisScope,
+        assetType: 'smart_contract',
+        name: 'Aegis Core Contract',
+        contractAddress: '0xa41e5f0d2c8b9a7361f4e2d3c5b6a7980f1e7f80',
+      },
       impacts: [
         {
           id: '47000000-0000-4000-8000-000000000001',
@@ -463,8 +471,27 @@ function reportDetail(state: MockState): ReportDetail {
           createdAt: '2026-07-25T00:00:00.000Z',
         },
       ],
+      capabilities: {
+        canEdit: true,
+        canResubmit: false,
+        canReopenDuplicate: false,
+        canSendBackForReview: false,
+      },
       contentHash: `0x${'a'.repeat(64)}`,
       createdAt: '2026-07-25T00:00:00.000Z',
+      payoutWallet: {
+        walletId: IDS.payoutWallet,
+        label: 'Research wallet',
+        address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        maskedAddress: '0xaaaa…aaaa',
+        chainId: 5_042_002,
+        network: 'Arc Testnet',
+        verifiedAt: '2026-07-24T00:00:00.000Z',
+        selectedAt: '2026-07-25T00:00:00.000Z',
+        selectionVersion: 1,
+      },
+      payoutWalletCapability: { canEdit: true },
+      payoutWalletSelectionVersion: 1,
     },
   }).data;
 }
@@ -568,11 +595,14 @@ function publicPrograms(query: URLSearchParams): readonly ProgramSummary[] {
   } else if (sort === 'deadline') {
     sorted.sort(
       (left, right) =>
-        direction * ((left.deadline ?? '9999').localeCompare(right.deadline ?? '9999')),
+        direction * (left.deadline ?? '9999').localeCompare(right.deadline ?? '9999'),
     );
   } else {
     // `newest`: active programs first, exactly as the contract documents.
-    sorted.sort((left, right) => Number(right.publicStatus === 'active') - Number(left.publicStatus === 'active'));
+    sorted.sort(
+      (left, right) =>
+        Number(right.publicStatus === 'active') - Number(left.publicStatus === 'active'),
+    );
   }
 
   return sorted;
@@ -605,7 +635,9 @@ async function serve<T>(
 ): Promise<void> {
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
-    state.violations.push(`${label} response does not satisfy its contract: ${parsed.error.message}`);
+    state.violations.push(
+      `${label} response does not satisfy its contract: ${parsed.error.message}`,
+    );
   }
   await route.fulfill({
     status: 200,
@@ -628,7 +660,9 @@ async function fail(route: Route, status: number, code: string, message: string)
 function checkRequest(state: MockState, schema: ZodType, body: unknown, label: string): void {
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    state.violations.push(`${label} request does not satisfy its contract: ${parsed.error.message}`);
+    state.violations.push(
+      `${label} request does not satisfy its contract: ${parsed.error.message}`,
+    );
   }
 }
 
@@ -828,6 +862,32 @@ async function configurePage(page_: Page, role: Role, state: MockState): Promise
         publicDisclosureListResponseSchema,
         { success: true, data: [], metadata: page(1, 20, 0) },
         'GET /api/programs/:id/disclosures',
+      );
+    }
+
+    if (path === '/api/rewards/payout-wallets' && method === 'GET') {
+      return serve(
+        state,
+        route,
+        researcherPayoutWalletListResponseSchema,
+        {
+          success: true,
+          data: [
+            {
+              id: IDS.payoutWallet,
+              label: 'Research wallet',
+              address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              maskedAddress: '0xaaaa…aaaa',
+              walletType: 'evm',
+              network: 'Arc Testnet',
+              chainId: 5_042_002,
+              verificationMethod: 'eip191_personal_sign',
+              verifiedAt: '2026-07-24T00:00:00.000Z',
+              createdAt: '2026-07-24T00:00:00.000Z',
+            },
+          ],
+        },
+        'GET /api/rewards/payout-wallets',
       );
     }
 
@@ -1032,9 +1092,7 @@ function applyTransition(
   if (action === 'approve-reward') {
     if (state.reportStatus !== 'validated') return refuse;
     checkRequest(state, approveRewardRequestSchema, body, 'POST /api/reports/:id/approve-reward');
-    const input = body as
-      | { amount?: string; calculationBasisAmount?: string }
-      | undefined;
+    const input = body as { amount?: string; calculationBasisAmount?: string } | undefined;
     // The server, not the client, decides a percentage payout.
     state.approvedReward = input?.amount ?? '12000';
     state.reportStatus = 'reward_approved';
@@ -1048,9 +1106,7 @@ function applyTransition(
 
 function publicApi(state: MockState): MockApi {
   const matching = (method: string, pathSuffix: string) =>
-    state.recorded.filter(
-      (entry) => entry.method === method && entry.path.endsWith(pathSuffix),
-    );
+    state.recorded.filter((entry) => entry.method === method && entry.path.endsWith(pathSuffix));
 
   return {
     get requests() {
@@ -1064,7 +1120,8 @@ function publicApi(state: MockState): MockApi {
     },
     setReportStatus: (status, options) => {
       state.reportStatus = status;
-      state.finalSeverity = options?.finalSeverity ?? (status === 'validated' ? 'critical' : undefined);
+      state.finalSeverity =
+        options?.finalSeverity ?? (status === 'validated' ? 'critical' : undefined);
     },
     setProfile: (profile) => {
       state.profile = {

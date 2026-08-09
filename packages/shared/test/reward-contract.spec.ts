@@ -1,8 +1,12 @@
 import {
+  createPayoutWalletChallengeRequestSchema,
+  payoutWalletChallengeResponseSchema,
   payoutWalletResponseSchema,
+  researcherPayoutWalletListResponseSchema,
   researcherRewardListQuerySchema,
   researcherRewardSummarySchema,
   updatePayoutWalletRequestSchema,
+  verifyPayoutWalletRequestSchema,
 } from '../src/index.js';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -168,5 +172,73 @@ describe('RW-04 payout wallet contract', () => {
         },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('verified researcher payout-wallet contract', () => {
+  const ADDRESS = `0x${'a'.repeat(40)}`;
+  const WALLET_ID = '10000000-0000-4000-8000-000000000011';
+
+  it('accepts only a connected address when requesting a server challenge', () => {
+    expect(createPayoutWalletChallengeRequestSchema.parse({ address: ADDRESS })).toEqual({
+      address: ADDRESS,
+    });
+    expect(
+      createPayoutWalletChallengeRequestSchema.safeParse({
+        address: ADDRESS,
+        chainId: 1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires a canonical EIP-191 signature and never accepts secret material', () => {
+    expect(
+      verifyPayoutWalletRequestSchema.safeParse({ signature: `0x${'a'.repeat(130)}` }).success,
+    ).toBe(true);
+    expect(
+      verifyPayoutWalletRequestSchema.safeParse({ signature: `0x${'a'.repeat(128)}` }).success,
+    ).toBe(true);
+    expect(verifyPayoutWalletRequestSchema.safeParse({ signature: '0x1234' }).success).toBe(false);
+    expect(
+      verifyPayoutWalletRequestSchema.safeParse({
+        signature: `0x${'a'.repeat(130)}`,
+        privateKey: 'never',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('pins the challenge and saved wallet to Arc Testnet', () => {
+    const now = '2026-08-10T10:00:00.000Z';
+    const challenge = payoutWalletChallengeResponseSchema.parse({
+      success: true,
+      data: {
+        id: WALLET_ID,
+        address: ADDRESS,
+        chainId: 5_042_002,
+        message: 'exact server message',
+        issuedAt: now,
+        expiresAt: '2026-08-10T10:05:00.000Z',
+      },
+    });
+    expect(challenge.data.chainId).toBe(5_042_002);
+
+    expect(
+      researcherPayoutWalletListResponseSchema.parse({
+        success: true,
+        data: [
+          {
+            id: WALLET_ID,
+            address: ADDRESS,
+            maskedAddress: '0xaaaa…aaaa',
+            walletType: 'evm',
+            network: 'Arc Testnet',
+            chainId: 5_042_002,
+            verificationMethod: 'eip191_personal_sign',
+            verifiedAt: now,
+            createdAt: now,
+          },
+        ],
+      }).data,
+    ).toHaveLength(1);
   });
 });

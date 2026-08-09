@@ -13,6 +13,8 @@ import type {
   ReopenDuplicateRequest,
   ReportDetail,
   ReportPaidSettlementProof,
+  ReportPayoutWallet,
+  ReportPayoutWalletCapability,
   ReportImpact,
   ReportListQuery,
   ReportProgramFilterOption,
@@ -22,6 +24,7 @@ import type {
   SendBackForReviewRequest,
   StartPaymentRequest,
   UpdateReportRequest,
+  UpdateReportPayoutWalletRequest,
   ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
 import { randomUUID } from 'node:crypto';
@@ -50,10 +53,12 @@ interface ReportRow {
   readonly paid_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+  readonly payout_wallet_version?: number;
   readonly programs: {
     name: string;
     slug: string;
     status: string;
+    deadline?: string | null;
     owner_id?: string;
     total_pool?: string | number;
     reserved_pool?: string | number;
@@ -137,6 +142,28 @@ interface ReportRow {
     }>;
   }>;
   readonly report_disclosures?: Array<{ id: string }>;
+  readonly payout_wallet_snapshot?: {
+    id: string;
+    researcher_payout_wallet_id: string | null;
+    wallet_label: string | null;
+    address: string;
+    chain_id: number | string;
+    wallet_verified_at: string | null;
+    version: number;
+    selected_at: string;
+  } | null;
+}
+
+interface ReportPayoutWalletStateRow {
+  readonly snapshot_id: string | null;
+  readonly wallet_id: string | null;
+  readonly wallet_label: string | null;
+  readonly wallet_address: string | null;
+  readonly chain_id: number | string | null;
+  readonly version: number;
+  readonly verified_at: string | null;
+  readonly can_edit: boolean;
+  readonly blocked_reason: string | null;
 }
 
 interface ReportProgramFilterOptionRow {
@@ -174,8 +201,9 @@ const REPORT_SUMMARY_PROJECTION = [
   'paid_at',
   'created_at',
   'updated_at',
+  'payout_wallet_version',
   // Joined so "My reports" and the review inbox can render a program name without an N+1.
-  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool,withdrawn_pool,program_reward_tiers(asset_type,severity,calculation_type,min_reward,max_reward,flat_amount,percentage_bps,max_reward_cap,calculation_note,archived_at))',
+  'programs(name,slug,status,deadline,owner_id,total_pool,reserved_pool,paid_pool,withdrawn_pool,program_reward_tiers(asset_type,severity,calculation_type,min_reward,max_reward,flat_amount,percentage_bps,max_reward_cap,calculation_note,archived_at))',
 ].join(',');
 
 const REPORT_DETAIL_PROJECTION = [
@@ -190,6 +218,7 @@ const REPORT_DETAIL_PROJECTION = [
   'escrow_transactions!escrow_transactions_report_program_fkey(transaction_hash,chain_id,token_address,amount,block_number,block_hash,confirmations,log_index,status,transaction_type,confirmed_at)',
   'reward_settlement_intents(status,amount,recipient_address,escrow_contracts(chain_id,token_address),reward_settlement_operations(operation_type,status,transaction_hash,event_log_index,transfer_log_index,block_number,block_hash,updated_at))',
   'report_disclosures!report_disclosures_report_fkey(id)',
+  'payout_wallet_snapshot:report_payout_wallet_snapshots!reports_payout_wallet_snapshot_id_fkey(id,researcher_payout_wallet_id,wallet_label,address,chain_id,wallet_verified_at,version,selected_at)',
 ].join(',');
 
 function money(value: string | number): string {
@@ -197,7 +226,25 @@ function money(value: string | number): string {
 }
 
 function maskAddress(address: string): string {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+  const normalized = address.toLowerCase();
+  return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
+}
+
+function mapPayoutWalletBlockedReason(
+  reason: string | null,
+): ReportPayoutWalletCapability['blockedReason'] | undefined {
+  switch (reason) {
+    case 'report_payout_wallet_report_closed':
+      return 'report_closed';
+    case 'report_payout_wallet_program_ended':
+      return 'program_ended';
+    case 'report_payout_wallet_settlement_started':
+      return 'settlement_started';
+    case null:
+      return undefined;
+    default:
+      return 'report_closed';
+  }
 }
 
 function isZeroPool(value: string | number | undefined): boolean {
@@ -247,6 +294,7 @@ function mapDetail(
   row: ReportRow,
   principal: RequestPrincipal,
   duplicateTargets: ReadonlyMap<string, DuplicateTargetRow> = new Map(),
+  payoutWalletState?: ReportPayoutWalletStateRow,
 ): ReportDetail {
   if (row.affected_scope === null) {
     throw new Error('Report affected scope relation is missing');
@@ -376,6 +424,59 @@ function mapDetail(
           accountingApplied: true,
           verifiedAt: paidOperation.updated_at,
         };
+  const snapshot =
+    payoutWalletState?.snapshot_id === null
+      ? undefined
+      : (payoutWalletState ?? row.payout_wallet_snapshot ?? undefined);
+  const snapshotVerifiedAt =
+    snapshot === undefined || snapshot === null
+      ? null
+      : 'verified_at' in snapshot
+        ? snapshot.verified_at
+        : snapshot.wallet_verified_at;
+  const snapshotAddress =
+    snapshot === undefined || snapshot === null
+      ? null
+      : 'wallet_address' in snapshot
+        ? snapshot.wallet_address
+        : snapshot.address;
+  const payoutWallet: ReportPayoutWallet | undefined =
+    snapshot === undefined ||
+    snapshot === null ||
+    snapshotVerifiedAt === null ||
+    snapshotAddress === null
+      ? undefined
+      : {
+          ...(principal.role === 'researcher' &&
+          'wallet_id' in snapshot &&
+          snapshot.wallet_id !== null
+            ? { walletId: snapshot.wallet_id }
+            : principal.role === 'researcher' &&
+                'researcher_payout_wallet_id' in snapshot &&
+                snapshot.researcher_payout_wallet_id !== null
+              ? { walletId: snapshot.researcher_payout_wallet_id }
+              : {}),
+          ...(snapshot.wallet_label === null ? {} : { label: snapshot.wallet_label }),
+          ...(principal.role === 'researcher' ? { address: snapshotAddress } : {}),
+          maskedAddress: maskAddress(snapshotAddress),
+          chainId: 5_042_002,
+          network: 'Arc Testnet',
+          verifiedAt: snapshotVerifiedAt,
+          ...('selected_at' in snapshot ? { selectedAt: snapshot.selected_at } : {}),
+          selectionVersion: snapshot.version,
+        };
+  const payoutWalletCapability: ReportPayoutWalletCapability | undefined =
+    principal.role !== 'researcher'
+      ? undefined
+      : payoutWalletState === undefined
+        ? { canEdit: false, blockedReason: 'report_closed' }
+        : payoutWalletState.can_edit
+          ? { canEdit: true }
+          : {
+              canEdit: false,
+              blockedReason:
+                mapPayoutWalletBlockedReason(payoutWalletState.blocked_reason) ?? 'report_closed',
+            };
   return {
     ...mapSummary(row),
     description: row.description,
@@ -432,6 +533,14 @@ function mapDetail(
         }),
     ...(reviewEvents === undefined || reviewEvents.length === 0 ? {} : { reviewEvents }),
     ...(paidSettlementProof === undefined ? {} : { paidSettlementProof }),
+    ...(payoutWallet === undefined ? {} : { payoutWallet }),
+    ...(payoutWalletCapability === undefined ? {} : { payoutWalletCapability }),
+    ...(principal.role !== 'researcher'
+      ? {}
+      : {
+          payoutWalletSelectionVersion:
+            payoutWalletState?.version ?? row.payout_wallet_version ?? 0,
+        }),
     contentHash: row.content_hash,
     createdAt: row.created_at,
     rewardTiers: (row.programs?.program_reward_tiers ?? [])
@@ -560,7 +669,20 @@ export class ReportRepository {
         ? await this.findSameProgramDuplicateTargets(row.program_id, duplicateIds)
         : new Map<string, DuplicateTargetRow>();
 
-    return mapDetail(row, principal, duplicateTargets);
+    let payoutWalletState: ReportPayoutWalletStateRow | undefined;
+    if (principal.role === 'researcher' && principal.userId === row.researcher_id) {
+      const { data: payoutData, error: payoutError } = await this.client.rpc(
+        'get_report_payout_wallet_state',
+        {
+          actor_id: principal.userId,
+          target_report_id: reportId,
+        },
+      );
+      if (payoutError !== null) throw normalizeDatabaseError(payoutError);
+      payoutWalletState = (payoutData as ReportPayoutWalletStateRow[] | null)?.[0];
+    }
+
+    return mapDetail(row, principal, duplicateTargets, payoutWalletState);
   }
 
   public async submit(
@@ -600,6 +722,21 @@ export class ReportRepository {
     if (error !== null) {
       throw normalizeDatabaseError(error);
     }
+  }
+
+  public async setPayoutWallet(
+    researcherId: string,
+    reportId: string,
+    input: UpdateReportPayoutWalletRequest,
+  ): Promise<void> {
+    const { error } = await this.client.rpc('set_report_payout_wallet_atomic', {
+      actor_id: researcherId,
+      target_report_id: reportId,
+      target_wallet_id: input.walletId,
+      expected_version: input.expectedSelectionVersion,
+    });
+
+    if (error !== null) throw normalizeDatabaseError(error);
   }
 
   public async transition(

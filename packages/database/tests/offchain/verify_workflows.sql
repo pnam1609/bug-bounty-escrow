@@ -1366,7 +1366,24 @@ declare
   submitted_report uuid;
   report_row public.reports;
   program_snapshot timestamptz;
+  verified_wallet uuid := '38000000-0000-4000-8000-000000000001';
 begin
+  insert into public.researcher_payout_wallets (
+    id, researcher_id, chain_id, address, label, status, verification_method,
+    verification_message_hash, verified_at, source
+  ) values (
+    verified_wallet, researcher_actor, 5042002,
+    '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'Primary test wallet', 'verified',
+    'eip191_personal_sign', '0x' || repeat('ab', 32), now(), 'signature'
+  )
+  on conflict (researcher_id, chain_id, address) do update
+  set status = excluded.status,
+      verification_method = excluded.verification_method,
+      verification_message_hash = excluded.verification_message_hash,
+      verified_at = excluded.verified_at,
+      revoked_at = null,
+      source = excluded.source;
+
   base_input := jsonb_build_object(
     'affectedScopeId', scope_one,
     'title', 'SR-04 contract fixture',
@@ -1374,7 +1391,8 @@ begin
     'reproductionSteps', 'Synthetic steps',
     'proposedSeverity', 'high',
     'programImpactIds', jsonb_build_array(impact_high),
-    'customImpacts', '[]'::jsonb
+    'customImpacts', '[]'::jsonb,
+    'payoutWalletId', verified_wallet
   );
 
   ---------------------------------------------------------------- own-program owner guard
@@ -1728,7 +1746,8 @@ begin
       'description', 'Synthetic description',
       'proposedSeverity', 'medium',
       'programImpactIds', jsonb_build_array(impact_optional_poc),
-      'customImpacts', '[]'::jsonb
+      'customImpacts', '[]'::jsonb,
+      'payoutWalletId', verified_wallet
     ),
     '0x' || repeat('e1', 32)
   );

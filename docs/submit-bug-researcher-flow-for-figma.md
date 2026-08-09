@@ -12,6 +12,8 @@ Phạm vi gồm:
 - Soạn report với local autosave trong browser.
 - Chọn affected scope, một hoặc nhiều impact do program công bố và proposed severity riêng của researcher.
 - Đính kèm một PoC file riêng tư trong MVP.
+- Chọn một Arc EVM payout wallet đã verify; researcher có thể lưu và verify nhiều wallet bằng
+  MetaMask hoặc OKX Wallet rồi chọn đúng một wallet cho report.
 - Review disclosure trước khi gửi.
 - Submit report, upload attachment bằng signed URL và xác nhận thành công.
 - Signed upload/download URLs trả về cho browser phải dùng public HTTPS Supabase origin; không được
@@ -40,9 +42,13 @@ không tự validate/reject/mark duplicate và UI submit không được hứa h
 
 ```text
 GET  /api/programs/:slug
+GET  /api/me/payout-wallets
+POST /api/me/payout-wallet-verification-challenges
+POST /api/me/payout-wallets
 POST /api/programs/:id/reports
 POST /api/reports/:id/attachments/upload-url
 GET  /api/reports/:id
+PATCH /api/reports/:id/payout-wallet
 ```
 
 Submit request được validate bằng `createReportRequestSchema`.
@@ -51,7 +57,8 @@ Flow attachment hiện tại:
 
 ```text
 create report
-  → atomically allocate per-program submission sequence + enqueue one AI run
+  → atomically validate/snapshot the selected verified payout wallet
+  → allocate per-program submission sequence + enqueue one AI run
   → receive report id
   → request short-lived signed upload URL
   → PUT file directly to private storage
@@ -69,6 +76,8 @@ Report được tạo trước attachment. Vì vậy attachment upload error là
 - Anonymous chọn `Submit a private report` phải sign in và giữ internal `returnTo` an toàn.
 - Owner/reviewer mở deep link phải tới safe forbidden state; không render private form trước khi role/profile được xác nhận.
 - Researcher chỉ xem report của chính mình.
+- Researcher chỉ list/select wallet do chính authenticated principal sở hữu; biết wallet UUID hoặc
+  address của user khác không tạo quyền truy cập.
 - Program phải có trạng thái `active` tại thời điểm server nhận submit.
 - Chỉ scope item có `isInScope = true` được phép chọn trong form.
 
@@ -86,6 +95,8 @@ Server không tạo report `draft` trong flow hiện tại. `POST /api/programs/
 status = submitted
 submittedAt = now
 contentHash = SHA-256 of canonical report payload
+payoutWalletId = server-authorized verified wallet id
+payoutWalletAddress/chainId/verifiedAt = immutable report settlement snapshot
 submissionRevision = immutable monotonic revision
 programSubmissionSequence = monotonic sequence allocated under the program queue lock
 ```
@@ -94,6 +105,11 @@ Trong cùng database transaction, server insert đúng một durable AI run theo
 `(reportId, submissionRevision, contentHash)`. Sau thành công, client xóa local draft, invalidate
 reports query, cache report response và dùng `router.replace(/reports/:id)`. Mở/reload report detail
 chỉ đọc trạng thái/result đã persist, không enqueue thêm run.
+
+Wallet association không thuộc vulnerability `contentHash`: một thay đổi payout wallet được server
+cho phép không cấp content revision và không enqueue AI run mới. Tuy nhiên submit transaction phải
+re-authorize wallet ID, verify trạng thái durable `verified`, snapshot address/Arc chain/provenance và
+tạo report atomically; client không được gửi một address tùy ý thay cho wallet ID.
 
 ### Per-program AI queue và simultaneous duplicate safety
 
@@ -167,6 +183,7 @@ Migration/backend validation chưa nằm trong phạm vi thiết kế Figma, nh�
 | Description              | Có           | Trimmed, 1–50,000 ký tự                                                                                                     |
 | Reproduction steps / PoC | Theo policy  | Trimmed, 1–50,000 ký tự khi program yêu cầu PoC; optional khi policy cho phép                                               |
 | Proposed severity        | Có           | `critical`, `high`, `medium`, `low`, `informational`                                                                        |
+| Payout wallet            | Có           | ID của một Arc EVM wallet do researcher hiện tại sở hữu và đã được server verify; không nhận arbitrary address              |
 
 `program_impacts` target tối thiểu cần có:
 
@@ -213,7 +230,8 @@ Target submit payload về mặt ý nghĩa:
   "title": "…",
   "description": "…",
   "reproductionSteps": "…",
-  "secretGistUrl": null
+  "secretGistUrl": null,
+  "payoutWalletId": "uuid"
 }
 ```
 
@@ -259,10 +277,40 @@ Ví dụ:
 Your selected impacts suggest Critical, but your proposed severity is High. Review your selection or confirm that you want to continue.
 ```
 
+### Payout-wallet target contract
+
+Một researcher có thể lưu nhiều wallet. Mỗi durable wallet record tối thiểu có opaque ID,
+authenticated researcher owner, normalized/checksummed EVM address, fixed Arc chain ID, optional
+label, verification method/version và `verifiedAt`; không có private key, seed phrase hoặc profile
+authorization role. Address hiển thị đầy đủ trong selection/detail bằng explicit copy action và có
+thể mask ở summary.
+
+Setup wallet không có `Wallet type` select. UI hiển thị read-only `EVM · Arc Testnet`, dùng
+RainbowKit/Wagmi allowlist MetaMask và OKX Wallet để connect, rồi lấy active address từ connector.
+Sau connect, address là read-only; account/chain thay đổi làm invalid transient verification state.
+
+Verification protocol:
+
+1. Browser yêu cầu server challenge cho authenticated researcher + connected address + Arc chain.
+2. Challenge là short-lived, single-use và bind tối thiểu user ID, normalized address, chain ID,
+   domain/origin, environment, purpose, nonce, issued-at và expiry.
+3. UI chỉ gọi `personal_sign` cho exact server message; copy phải nói đây là proof of control, không
+   phải transaction/token approval và không tốn gas.
+4. Server recover signer và verify mọi binding, current auth, expiry và unused nonce rồi consume nonce
+   + upsert verified wallet trong một atomic operation. Hai verify request cạnh tranh chỉ một request
+   được consume; retry sau success trả durable wallet idempotently, không tạo duplicate row.
+5. User reject, wrong account/chain, expired/used challenge, unsupported connector và signature
+   mismatch đều là recoverable explicit states; client phải xin challenge mới khi binding đổi/hết hạn.
+
+Target submit chỉ gửi `payoutWalletId`. Server re-authorize ownership/verified state và snapshot
+wallet ID, checksummed address, Arc chain ID, verification timestamp/version vào report trong cùng
+transaction tạo report. Settlement dùng snapshot, không lookup một mutable default wallet.
+
 ### Các dữ liệu cố ý không thuộc submit request
 
 - Không có KYC trong sản phẩm hoặc flow này.
-- Wallet payout không nằm trong submit flow; wallet được thu thập/xác nhận trong reward/payout flow riêng khi cần.
+- Không gửi raw wallet address, wallet type, raw challenge message hoặc signature trong report-create
+  request; verification dùng contract riêng và submit chỉ tham chiếu verified wallet ID.
 - Researcher submission quota/level và anti-spam policy là platform-level, không phải field của program hay report.
 - Quyết định public disclosure không được hỏi researcher trong composer này. Report private mặc định.
 
@@ -304,7 +352,8 @@ quyết định `validated`, `rejected` hoặc `duplicate` đầu tiên.
 
 ## 4. Nguyên tắc UX
 
-1. Flow dùng composer 4 bước tương ứng data contract đích: Assets & Impact, Severity, Main Report, Review.
+1. Flow dùng composer 5 bước tương ứng data contract đích: Assets & Impact, Severity, Main Report,
+   Wallet, Review.
 2. Program context và private-disclosure warning luôn nhìn thấy trên desktop.
 3. Local autosave phải được truyền đạt rõ là chỉ lưu trong browser hiện tại.
 4. Back/Next giữ dữ liệu; validation theo field khi blur và theo step khi Continue.
@@ -314,7 +363,8 @@ quyết định `validated`, `rejected` hoặc `duplicate` đầu tiên.
 8. Trong lúc submit, khóa stepper, Back, file controls và primary action; không optimistic redirect.
 9. API/network error trước khi tạo report giữ toàn bộ local draft để retry cùng payload.
 10. Attachment error sau khi tạo report không gửi lại report; chuyển sang recovery state gắn với report ID đã có.
-11. Không dùng wallet trong submit flow. Researcher chỉ cần wallet khi nhận payout theo flow riêng.
+11. Wallet step chỉ dùng để prove control và chọn payout recipient; không yêu cầu transaction,
+    approval token, gas payment hoặc dùng wallet làm login/authorization identity.
 12. Không hiển thị AI suggestion trong composer. AI review được enqueue tự động sau submit/resubmit;
     report detail hiển thị `Processing`, `Ready` hoặc `Unavailable`, nhưng AI không phải quyết định
     cuối cùng và không chặn human review.
@@ -354,7 +404,7 @@ quyết định `validated`, `rejected` hoặc `duplicate` đầu tiên.
 - Eyebrow: `PRIVATE DISCLOSURE`.
 - Title: `Submit a vulnerability report`.
 - Supporting copy về privacy và local autosave.
-- Stepper: Assets & Impact, Severity, Main Report, Review.
+- Stepper: Assets & Impact, Severity, Main Report, Wallet, Review.
 - Main form card.
 - Sticky program context card.
 - Action row nằm trong document flow của form card; cách field cuối tối thiểu `32px` và không được overlay nội dung.
@@ -362,11 +412,13 @@ quyết định `validated`, `rejected` hoặc `duplicate` đầu tiên.
 ### Stepper states
 
 - Stepper desktop nằm trong raised surface riêng, có khoảng cách `38px` sau subtitle và `32px` trước content card.
-- Không dùng số `1/2/3/4`. Dùng Lucide component từ BBE Design System: Assets & Impact = `crosshair`, Severity = `gauge`, Main Report = `file-text`, Review = `clipboard-check`.
+- Không dùng số `1/2/3/4/5`. Dùng Lucide component từ BBE Design System: Assets & Impact =
+  `crosshair`, Severity = `gauge`, Main Report = `file-text`, Wallet = `wallet`, Review =
+  `clipboard-check`.
 - Completed: mint node, dark Lucide icon và mint connector.
 - Current: brand violet node, primary-contrast Lucide icon và halo nhẹ.
 - Upcoming: raised node, default border, disabled Lucide icon và disabled label.
-- Mobile chỉ hiển thị `Step N of 4`, current label và compact progress bar.
+- Mobile chỉ hiển thị `Step N of 5`, current label và compact progress bar.
 
 ## 6. User flow tổng quát
 
@@ -377,8 +429,13 @@ flowchart LR
   B -->|Missing/incompatible| BV[SR-01V Asset or impact validation]
   C -->|Severity valid or mismatch confirmed| D[SR-03 Main Report]
   C -->|Missing or unconfirmed mismatch| CV[SR-02V Severity validation]
-  D -->|Required content valid| E[SR-04 Review]
+  D -->|Required content valid| W[SR-03W Wallet]
   D -->|Invalid report or attachment| DV[SR-03V Main report validation]
+  W -->|Select verified wallet| E[SR-04 Review]
+  W -->|Setup new wallet| WA[SR-03WA Connect wallet]
+  WA -->|Connected on Arc| WB[SR-03WB Verify signature]
+  WB -->|Server verifies proof| W
+  W -->|Missing/stale/invalid wallet| WV[SR-03WV Wallet validation]
   E -->|Submit private report| F[SR-05 Submitting]
   F -->|Report + AI run committed, no file| G[SR-07 Submitted + AI processing]
   F -->|Report created, file selected| U[SR-06 Uploading attachment]
@@ -395,6 +452,7 @@ flowchart LR
   B -->|Leave dirty flow| J[SR-10 Discard dialog]
   C -->|Leave dirty flow| J
   D -->|Leave dirty flow| J
+  W -->|Leave dirty flow| J
   E -->|Leave dirty flow| J
   J -->|Keep editing| back[Return to current step]
   J -->|Discard local draft| A
@@ -412,7 +470,11 @@ flowchart LR
 | SR-02V    | Severity validation        | Client state                         | Thiếu severity hoặc mismatch chưa được xác nhận                            |
 | SR-03     | Main Report                | Step 3                               | Nhập title, vulnerability details, PoC/reproduction và optional attachment |
 | SR-03V    | Main Report validation     | Client state                         | Content, PoC policy hoặc attachment không hợp lệ                           |
-| SR-04     | Review                     | Step 4                               | Kiểm tra disclosure trước submit                                           |
+| SR-03W    | Wallet                     | Step 4                               | Chọn một verified Arc EVM payout wallet cho report                         |
+| SR-03WA   | Add wallet                 | Wallet dialog                        | Connect MetaMask/OKX; address lấy từ connector, không chọn wallet type     |
+| SR-03WB   | Verify wallet              | Wallet dialog/signature pending      | Ký exact server challenge và persist proof-of-control                      |
+| SR-03WV   | Wallet validation/recovery | Client/server state                  | Missing selection, wrong chain/account, reject, expired/replayed challenge |
+| SR-04     | Review                     | Step 5                               | Kiểm tra disclosure và payout recipient trước submit                      |
 | SR-05     | Submitting report          | Mutation pending                     | Tạo report trên server                                                     |
 | SR-06     | Uploading attachment       | Upload pending                       | Upload file qua signed URL                                                 |
 | SR-07     | Submitted                  | `/reports/:id`                       | Xác nhận report đã gửi                                                     |
@@ -655,6 +717,89 @@ Files are uploaded to private storage using a short-lived link after the report 
 
 Validation error không xóa main report content, selected asset, impacts hoặc severity ở các step trước.
 
+### SR-03W — Wallet
+
+Heading:
+
+```text
+Select your payout wallet
+```
+
+Supporting copy:
+
+```text
+Choose the verified Arc EVM wallet where you want to receive this report's reward if it is eligible.
+```
+
+UI:
+
+- Load every verified wallet owned by the current researcher; one researcher may have multiple rows.
+- Each selectable card shows optional label, masked/checksummed address with explicit copy action,
+  `EVM · Arc Testnet` and `Verified` + verified time. Selection uses a radio-group semantic because
+  exactly one wallet is attached to a report.
+- Previously verified wallets do not require another signature merely because the composer was
+  reopened. Server still re-authorizes current ownership/verified state at submit.
+- `Setup new wallet` opens SR-03WA. It adds a wallet; it does not overwrite or delete existing wallets.
+- Warning copy: `Use a wallet you control. This address will be locked before reward settlement.`
+- Do not show balance, portfolio, seed/private-key fields or wallet type selector.
+- Continue is disabled until one durable verified wallet ID is selected.
+
+Actions:
+
+- Ghost: `Back`.
+- Primary: `Continue to review`.
+
+### SR-03WA — Add wallet / connect
+
+Dialog heading: `Add your wallet`.
+
+- Optional `Name` helps distinguish saved wallets.
+- Type/network is read-only copy `EVM · Arc Testnet`; there is no dropdown.
+- Before connection, show `Connect wallet`. This opens the existing RainbowKit modal restricted to
+  MetaMask and OKX Wallet; do not implement a parallel provider picker.
+- After connection, show the active checksummed address in a read-only field and
+  `Disconnect wallet`. Never allow typing or pasting an arbitrary payout address as proof.
+- If connector is on another chain, show `Switch to Arc Testnet` and request the canonical Arc chain;
+  verification stays disabled until the active account and chain are re-read as correct.
+- Changing account, chain or connector invalidates the current challenge and pending signature state.
+- `Verify and add wallet` is enabled only after a valid connected Arc account exists. Clicking it
+  requests a new server challenge, then opens the wallet signature request in SR-03WB.
+
+### SR-03WB — Verify signature
+
+Before opening the wallet, explain:
+
+```text
+Sign a verification message to prove you control this address. This is not a transaction, does not
+approve USDC and does not cost gas.
+```
+
+- Browser signs the exact server-generated message with `personal_sign`; it must not compose its own
+  nonce/message or accept a signature made by another active account.
+- Pending button copy: `Verifying wallet…`; dialog cannot submit a second verification concurrently.
+- Server verifies the EIP-191 signer and every challenge binding, atomically consumes the nonce and
+  persists the durable verified wallet. On success, close the dialog, select the new wallet and
+  announce `Wallet verified and selected` without moving focus unexpectedly.
+- Raw message/signature is not placed in analytics, logs, URLs, localStorage or report payload.
+
+### SR-03WV — Wallet validation and recovery
+
+State/error copy must distinguish:
+
+- No selection: `Select a verified payout wallet before continuing.`
+- User rejected signature: `Wallet verification was cancelled. Your report draft is unchanged.`
+- Wrong account: `The connected account changed. Reconnect the address you want to verify.`
+- Wrong chain: `Switch to Arc Testnet to verify this wallet.`
+- Challenge expired/consumed: `This verification request expired. Try again to sign a new request.`
+- Invalid signature: `We could not verify control of this wallet. Check the connected account and try again.`
+- Unsupported/no provider: show MetaMask/OKX install/connect recovery; do not silently select a provider.
+- List/API failure: keep report draft and provide `Try again`; do not render cached wallet as verified
+  when its current server state cannot be confirmed.
+
+Retry obtains a new challenge after expiry, account/chain change or ambiguous failure. It never
+replays the old nonce/signature. A server conflict caused by concurrent verification refetches the
+wallet list and selects the idempotent verified row if it exists.
+
 ### SR-04 — Review
 
 Heading:
@@ -683,7 +828,10 @@ Summary sections:
    - Title, description preview và PoC/reproduction preview dùng toàn bộ chiều rộng content khả dụng.
    - Secret Gist URL nếu có và attachment filename/size hoặc `No attachment` cũng dùng cùng bố cục dọc.
    - Edit → Step 3.
-4. `What happens next`
+4. `Payout wallet`
+   - Optional label, masked/checksummed address, `Verified`, `EVM · Arc Testnet` and copy action.
+   - Edit → Wallet step. Review never exposes raw signature/challenge.
+5. `What happens next`
    - Report enters review as `Submitted`.
    - Reviewer may request more information.
    - Final severity and reward are decided by authorized humans.
@@ -695,7 +843,7 @@ Confirmation checkbox:
 I confirm this report is accurate to the best of my knowledge and contains no secrets unrelated to this disclosure.
 ```
 
-Không có KYC checkbox, wallet field hoặc public-disclosure opt-in trong Review.
+Không có KYC checkbox, editable/raw wallet-address field hoặc public-disclosure opt-in trong Review.
 
 Actions:
 
@@ -718,7 +866,9 @@ We’re creating the report securely. Keep this tab open.
 
 Progress list:
 
-- `Creating report` — active.
+- `Validating payout wallet` — active; server re-authorizes verified wallet and locks the snapshot
+  inside report-create transaction.
+- `Creating report` — upcoming/active.
 - `Queueing AI review` — upcoming; hoàn tất atomically cùng report create, không phải model completion.
 - `Uploading attachment` — upcoming hoặc skipped nếu không có file.
 - `Opening report` — upcoming.
@@ -763,6 +913,26 @@ Header:
 - Proposed severity.
 - Submitted timestamp.
 - Report ID với copy action.
+
+Payout wallet card:
+
+- Shows the report's server snapshot: optional label, masked/checksummed address with explicit copy,
+  `Verified`, `EVM · Arc Testnet` and the current server lock state.
+- `Edit wallet` opens the same verified-wallet selector and can add/verify another wallet. The action
+  is enabled only when the report detail returns `canChangePayoutWallet = true`; the browser does not
+  infer capability from status alone.
+- Server atomically allows replacement only for the owning researcher, while the report is not
+  `duplicate`, `rejected` or `paid`, the program is not ended/closed, and no report-specific reward
+  settlement intent, approval, payout or funding evidence exists. The wallet must still be verified
+  and owned by that researcher.
+- On allowed replacement, server writes a new immutable report-wallet snapshot plus audit history.
+  It does not change report content hash/revision, rerun AI, reset review status or mutate global
+  wallet defaults.
+- On lock/conflict, disable or close the editor after refetch and show the server reason, for example
+  `This payout wallet is locked because reward settlement has started.` A race with owner intent
+  creation must have one atomic winner; settlement can never read a half-updated recipient.
+- `duplicate`, `rejected`, `paid`, ended/closed program and any report-specific settlement/funding
+  evidence render the snapshot read-only. Owner/reviewer cannot edit it from their report detail.
 
 Timeline:
 
@@ -832,6 +1002,10 @@ Actions:
 - Secondary: `Review report`.
 
 Nếu server trả program không active, chuyển SR-11 thay vì retry vô hạn.
+
+Nếu server trả wallet missing/unverified/not-owned/stale, quay lại SR-03W với safe inline error và
+giữ toàn bộ local draft. Nếu wallet became locked/removed between Review and submit, refetch list;
+không fallback sang address cũ hoặc tự chọn wallet khác.
 
 ### SR-09 — Attachment recovery
 
@@ -927,7 +1101,7 @@ Primary: `Browse programs`.
 
 ## 9. Prototype scenarios bắt buộc
 
-1. Active program → Assets & Impact → Severity → Main Report → Review → Submit → Success.
+1. Active program → Assets & Impact → Severity → Main Report → Wallet → Review → Submit → Success.
 2. Chọn một asset → chọn nhiều program impacts cùng asset type → proposed severity khớp → continue.
 3. Chọn asset Smart contract rồi đổi sang Website → confirmation clear incompatible impacts → chọn lại Website impacts.
 4. Thiếu asset/impact → inline validation → chọn đủ → continue.
@@ -954,14 +1128,31 @@ Primary: `Browse programs`.
     result cũ như current.
 24. Researcher nhận `possible_duplicate` → chỉ thấy safe advisory copy; owner/reviewer có quyền mới
     thấy candidate để quyết định thủ công.
+25. Researcher có hai verified wallets → chọn wallet B → Review và submitted detail đều hiển thị
+    snapshot wallet B; owner settlement dùng wallet B, không dùng default/profile/client address.
+26. Không có wallet → Setup new wallet → RainbowKit MetaMask/OKX → switch Arc nếu cần → connect
+    address read-only → request challenge → `personal_sign` → server verifies → new wallet selected.
+27. Reject signature, wrong account/chain, expired/used nonce và invalid signature → state riêng,
+    report draft còn nguyên; retry dùng challenge mới và không tạo duplicate wallet.
+28. Hai request verify cùng nonce → tối đa một consume thành công; refetch trả cùng durable wallet.
+29. Submit với wallet ID của researcher khác, unverified wallet hoặc arbitrary address → server deny;
+    không tạo report/AI run/attachment row.
+30. Researcher detail đổi wallet trước settlement → atomic new snapshot + audit; content revision/hash
+    và AI run không đổi.
+31. Edit wallet raced với owner settlement-intent creation → một atomic policy winner; intent luôn
+    có đúng một locked recipient, client thua refetch capability.
+32. `duplicate`, `rejected`, `paid`, program ended/closed hoặc có report-specific settlement/funding
+    evidence → wallet card read-only và direct PATCH trả stable conflict.
 
-Không tạo KYC, Wallet Address hoặc disclosure-consent screen trong bất kỳ prototype scenario nào.
+Không tạo KYC, manual Wallet Address input, wallet-type selector hoặc disclosure-consent screen trong
+bất kỳ prototype scenario nào. Address chỉ đến từ active MetaMask/OKX connector.
 
 ## 10. Figma screen placement và naming
 
 - Page: `researcher`.
 - Section: `Researcher · Submit bug flow`.
-- Desktop frames xếp theo hàng chính: PG-DETAIL → SR-01 → SR-02 → SR-03 → SR-04 → SR-05/SR-06 → SR-07.
+- Desktop frames xếp theo hàng chính: PG-DETAIL → SR-01 → SR-02 → SR-03 → SR-03W → SR-04 →
+  SR-05/SR-06 → SR-07. SR-03WA/SR-03WB/SR-03WV nằm cạnh wallet screen.
 - Validation/error states đặt ngay dưới screen gốc.
 - Mobile frames đặt thành hàng riêng: `Researcher · Submit bug · Mobile`.
 - Không overlap section/page đang được thread owner flow chỉnh.
@@ -986,6 +1177,8 @@ Không tạo KYC, Wallet Address hoặc disclosure-consent screen trong bất k�
 | Step progress                   | Semantic list + progress indicator                                 |
 | Privacy/guidance                | `Alert` / callout                                                  |
 | Attachment                      | Styled file input / dropzone                                       |
+| Saved payout wallets            | `RadioGroup` cards + `Badge` + copy `Button`                       |
+| Add/verify wallet               | `Dialog`, RainbowKit modal trigger, read-only `Input`, status alert |
 | Discard confirmation            | `AlertDialog`                                                      |
 | Review summary                  | Definition list + `Separator`                                      |
 | Loading                         | Disabled Button + spinner/progress                                 |
@@ -1022,6 +1215,10 @@ Layout rules:
 - Field error được liên kết với field và có screen-reader announcement.
 - Character counter không thay thế validation message.
 - Dropzone có keyboard-accessible `Choose file` action.
+- Wallet cards use radio semantics with an accessible selected/verified state; masked address does
+  not replace an accessible full-address label for copy.
+- Add-wallet dialog traps/restores focus; connect/switch/sign pending states have stable button width,
+  text status and controlled `aria-live`. Wallet popup rejection returns focus to the triggering action.
 - Loading button giữ width ổn định.
 - Sticky rail desktop chuyển thành collapsible program summary trên mobile.
 - Bottom action bar mobile không che textarea hoặc virtual keyboard content.
@@ -1031,7 +1228,10 @@ Layout rules:
 Figma annotation tại SR-04, SR-05, SR-06 và SR-09 phải ghi rõ:
 
 - Report content không public mặc định.
-- Không có KYC trong flow và payout wallet được xử lý riêng khỏi submit.
+- Không có KYC trong flow; payout wallet là verified recipient association tách khỏi report content
+  và không được dùng làm auth identity.
+- Wallet verification challenge/signature không vào analytics, URL, localStorage hoặc report body;
+  server nonce single-use/short-lived và report snapshot được lock atomically.
 - Public disclosure chỉ có thể được owner quyết định theo từng report sau khi program kết thúc.
 - `Known Issues` chỉ dùng public-safe content/snapshot của report đã được explicit approve; không render trực tiếp private body.
 - Không gửi report body vào analytics hoặc application logs.
@@ -1085,7 +1285,20 @@ Figma annotation tại SR-04, SR-05, SR-06 và SR-09 phải ghi rõ:
   có quyền mark duplicate.
 - Gemini dùng exact stable `gemini-3.5-flash`; free tier chỉ cho demo/synthetic data do privacy terms,
   quota/timeout/schema failure không làm mất report hoặc chặn human review.
-- Không có KYC; không yêu cầu wallet trong submit flow; không đặt AI làm gate; không hứa chắc reward.
+- Không có KYC; submit yêu cầu đúng một verified Arc EVM wallet ID nhưng không yêu cầu transaction,
+  token approval/gas hay hứa chắc reward; AI không là gate.
+- Researcher có thể lưu nhiều verified wallets; Add wallet không có type selector, chỉ dùng
+  MetaMask/OKX qua RainbowKit/Wagmi và active address read-only trên Arc Testnet.
+- Challenge `personal_sign` short-lived/single-use được bind user/address/chain/domain/origin/purpose;
+  server verify/consume atomic, replay/cross-account/cross-chain/wrong-signer bị chặn và raw proof
+  không đi vào report/log/analytics.
+- Submit atomically re-authorize verified wallet ownership và snapshot wallet ID/address/Arc
+  chain/provenance; arbitrary client address, profile default và wallet của researcher khác bị từ chối.
+- Researcher detail chỉ enable Edit wallet theo server capability; terminal duplicate/rejected/paid,
+  program ended/closed và mọi report-specific settlement/approval/payout/funding evidence đều khóa
+  snapshot. Race với settlement intent được serialize và có audit history.
+- Owner reward settlement lấy server-locked report recipient; owner/reviewer không nhập/override
+  researcher wallet.
 - Report private mặc định; chỉ explicit owner decision sau program end mới cho phép tạo Known Issue/public disclosure.
 - Có discard confirmation, program-closed, wrong-role, session-expired và missing-program states.
 - Figma tạo page `researcher`, dùng BBE Design System hiện tại, dark desktop, semantic layer names và prototype connections.

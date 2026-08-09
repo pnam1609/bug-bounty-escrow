@@ -8,10 +8,11 @@
  *
  * Flow doc overrides: the impacts panel labels researcher-proposed rows explicitly, shows the
  * highest selected impact alongside the proposed severity, and surfaces the mismatch
- * acknowledgement when one was recorded. No KYC, no wallet field, no public-disclosure opt-in.
+ * acknowledgement when one was recorded, and confirms the report-bound verified reward wallet.
+ * There is no KYC or public-disclosure opt-in.
  */
 
-import type { Severity } from '@bug-bounty-escrow/shared';
+import type { ResearcherPayoutWallet, Severity } from '@bug-bounty-escrow/shared';
 import {
   Callout,
   Card,
@@ -34,6 +35,7 @@ import {
   type StepIndex,
 } from './submit-bug-model';
 import { MarkdownPreview } from '@/components/owner/markdown-editor';
+import { CopyButton } from '@/components/reports/copy-value';
 
 export const REVIEW_PRIVACY_NOTICE =
   "Submitting shares this report with the program's authorized owner and reviewers. It will not be public by default.";
@@ -112,6 +114,7 @@ export interface StepReviewProps {
   readonly programName: string;
   readonly scope: ProgramScope | undefined;
   readonly selectedImpactTitles: readonly string[];
+  readonly selectedWallet: ResearcherPayoutWallet | undefined;
   readonly suggestedSeverity: Severity | undefined;
 }
 
@@ -125,6 +128,7 @@ export function StepReview({
   programName,
   scope,
   selectedImpactTitles,
+  selectedWallet,
   suggestedSeverity,
 }: StepReviewProps) {
   const customImpacts = draft.customImpacts.map((entry) => entry.trim()).filter(Boolean);
@@ -247,6 +251,26 @@ export function StepReview({
               `${file.name} · ${formatBytes(file.size)} · uploads after the report is created`
             )}
           </StackedSummaryRow>
+        </dl>
+      </SummarySection>
+
+      <SummarySection editLabel="Edit" onEdit={() => onEditStep(3)} title="Reward wallet">
+        <dl className="flex flex-col gap-md">
+          <SummaryRow label="Name">{selectedWallet?.label ?? 'Verified wallet'}</SummaryRow>
+          <SummaryRow label="Address">
+            {selectedWallet === undefined ? (
+              <span className="text-text-muted">Not selected</span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-sm">
+                <code className="font-mono">{selectedWallet.maskedAddress}</code>
+                <CopyButton value={selectedWallet.address} what="reward wallet address" />
+              </span>
+            )}
+          </SummaryRow>
+          <SummaryRow label="Verification">
+            {selectedWallet === undefined ? '—' : 'Verified · EVM'}
+          </SummaryRow>
+          <SummaryRow label="Settlement">Arc Testnet · USDC</SummaryRow>
         </dl>
       </SummarySection>
 

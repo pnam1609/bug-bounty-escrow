@@ -35,7 +35,8 @@ Feature hoàn chỉnh sẽ cho researcher:
 - Xem reward sau khi human reviewer hoàn tất review và owner approve durable settlement intent.
 - Theo dõi settlement từ `reward_approved` tới `payment_pending` và `paid`.
 - Xem transaction evidence do backend xác nhận.
-- Cấu hình hoặc xác nhận payout wallet chỉ khi reward flow thực sự cần.
+- Xem và quản lý nhiều verified Arc EVM payout wallets; mỗi report đã chọn một verified wallet ở
+  Submit bug và giữ một server-controlled snapshot trước settlement.
 
 ### Không thuộc phạm vi
 
@@ -92,6 +93,11 @@ Các trạng thái `rejected` và `duplicate` đóng report mà không đi vào 
 - Reward approval và payment time không thuộc `medianResolutionSeconds`; metric đó chỉ đo tốc độ
   ra quyết định review.
 - Researcher chỉ xem reward gắn với report của chính mình.
+- A researcher may own multiple verified Arc EVM wallets, but each report has exactly one immutable
+  current payout-wallet snapshot. Reward settlement uses that snapshot, never a mutable profile
+  default or client-supplied address.
+- Wallet proof uses MetaMask/OKX via RainbowKit/Wagmi and a short-lived, single-use server challenge
+  signed with `personal_sign`; it is proof of address control, not authentication or a transaction.
 - Report body, PoC và private attachment không xuất hiện trong reward list.
 
 ### Design system
@@ -183,7 +189,7 @@ Page future preview gồm:
 4. Future hero.
 5. Planned capability cards.
 6. Payout lifecycle.
-7. Wallet boundary note.
+7. Verified wallet and per-report locked-recipient boundary note.
 8. Current-feature guidance.
 
 Hierarchy:
@@ -229,7 +235,9 @@ flowchart TD
   B -->|Rewards found| E[Reward list]
   E --> F[Select reward]
   F --> G[/reports/:id reward and transaction detail]
-  G -->|Reward approved and wallet required| H[Confirm payout wallet]
+  G -->|Before settlement| H[View server-locked report payout wallet]
+  H -->|Server capability still allows edit| K[Select another verified wallet in report detail]
+  H -->|Settlement evidence exists| L[Wallet read-only]
   G -->|Payment pending| I[View pending transaction]
   G -->|Paid| J[Verify confirmed transaction evidence]
 ```
@@ -257,9 +265,10 @@ Các state dưới đây là requirement tương lai, không được trộn và
 | RW-04 | Load error              | Retry request, không dựng dữ liệu giả       |
 | RW-05 | Session expired         | Sign in lại với safe internal return path   |
 | RW-06 | Wrong role              | Safe forbidden state                        |
-| RW-07 | Wallet not set          | Giải thích lý do cần wallet trước khi lưu   |
-| RW-08 | Wallet validation error | Địa chỉ không hợp lệ hoặc network mismatch  |
-| RW-09 | Wallet saved            | Xác nhận masked address                     |
+| RW-07 | Wallet not set          | Legacy recovery: quay về report để add/select verified wallet |
+| RW-08 | Wallet verification error | Account/chain/signature/challenge failure, retry safely       |
+| RW-09 | Wallet verified/selected | Xác nhận masked address và report snapshot                    |
+| RW-09L | Wallet locked          | Read-only snapshot after server settlement/funding evidence    |
 | RW-10 | Payment pending         | Hiển thị transaction đang chờ confirmations |
 | RW-11 | Paid                    | Hiển thị confirmed settlement evidence      |
 
@@ -354,7 +363,7 @@ Icon: `external-link`.
 #### Manage payout wallet
 
 ```text
-Add or update a payout destination only when a reward is ready.
+Manage verified Arc EVM wallets and see which server-locked destination each report uses.
 ```
 
 Icon: `wallet`.
@@ -386,8 +395,9 @@ là đã nhận tiền.
 Wallet boundary note:
 
 ```text
-Wallet is never required to browse programs or submit a report. It is requested only for receiving
-an approved reward.
+A verified wallet is not required to browse programs. Submit report requires selecting one verified
+Arc EVM wallet; settlement later uses the report's server-locked snapshot and never asks an owner to
+enter the researcher's address.
 ```
 
 ### Current guidance
@@ -642,22 +652,40 @@ Rules:
 
 ## 14. Wallet rules
 
-Wallet không thuộc onboarding, browsing hoặc submit-bug flow.
+Wallet không thuộc onboarding hoặc browsing. Nó là một required recipient-selection step trong
+Submit bug và là read-only/conditional-edit metadata trong researcher report/reward detail.
 
-Khi reward flow cần payout wallet:
-
-1. Giải thích tại sao địa chỉ cần thiết.
-2. Chỉ chấp nhận EVM address hợp lệ.
-3. Hiển thị network/token cố định của MVP: Arc và USDC.
-4. Mask address trong summary; vẫn cho copy đầy đủ bằng explicit action.
-5. Yêu cầu confirmation trước khi thay wallet nếu đang có reward approved/pending.
-6. Backend phải kiểm tra ownership/role và ghi audit trail.
-7. Không lưu private key, seed phrase hoặc wallet signature không cần thiết.
-8. Không dùng connected wallet address làm authorization identity.
+1. Một researcher có thể lưu nhiều wallets; một report chọn đúng một durable verified wallet ID.
+2. MVP chỉ hỗ trợ `EVM · Arc Testnet` (`chainId = 5042002`) và USDC. Add-wallet UI không có wallet
+   type dropdown; address lấy read-only từ active MetaMask/OKX connector qua RainbowKit/Wagmi.
+3. Sau connect, server cấp short-lived single-use challenge bind authenticated researcher, normalized
+   address, Arc chain, domain/origin, environment, purpose, nonce, issued-at và expiry. Browser ký
+   exact message bằng `personal_sign`; đây không phải transaction/token approval và không tốn gas.
+4. Server recover signer, verify mọi binding và atomically consume nonce + persist/upsert verified
+   wallet. Replay, expired/used nonce, wrong signer/account/chain/domain và concurrent double consume
+   đều fail closed; retry sau ambiguous state phải refetch và dùng challenge mới.
+5. Không lưu private key/seed phrase. Raw message/signature không vào report, URL, localStorage,
+   analytics hoặc application logs; chỉ giữ verification provenance/audit tối thiểu cần thiết.
+6. Connected address/signature không phải authentication identity. JWT principal và server ownership
+   authorization vẫn là boundary; wallet ID/address của user khác không được list/select/update.
+7. Submit chỉ gửi verified wallet ID. Server atomically re-authorize và snapshot wallet ID,
+   checksummed address, Arc chain, verification time/version vào report; arbitrary address và mutable
+   profile default không phải recipient authority.
+8. Summary mask address nhưng explicit copy có accessible full value. Owner/reviewer chỉ nhận report
+   snapshot cần cho settlement, không nhận toàn bộ wallet registry hoặc verification proof.
+9. Researcher detail chỉ cho `Edit wallet` khi server capability cho phép. Server atomically deny khi
+   report `duplicate`, `rejected` hoặc `paid`, program ended/closed, hoặc đã có report-specific reward
+   settlement intent, approval, payout/funding evidence. Allowed edit writes snapshot history/audit
+   without changing report content revision/hash or AI run.
+10. Edit-vs-intent race uses the same report lock/version: exactly one snapshot wins. Intent creation
+    locks current recipient; once settlement evidence exists no role can swap it.
+11. Owner reward request/body never accepts a researcher address override. Missing legacy snapshot
+    returns `researcher_payout_wallet_required`, keeps report validated and directs researcher to fix
+    their report; owner cannot type a replacement.
 
 `PATCH /api/me` hiện chỉ cho sửa `displayName`. Không được âm thầm mở rộng endpoint đó để update
-wallet. Wallet write cần một contract/backend task riêng với validation, authorization và audit
-được review.
+wallet. Wallet registry/challenge and per-report wallet update require dedicated contracts with
+validation, authorization, atomic locking and audit review.
 
 ## 15. Loading, empty và error states tương lai
 
@@ -733,6 +761,10 @@ Không dựng cached amount thành current truth nếu request refresh thất b�
 - Status luôn có text; không dùng màu đơn lẻ.
 - Icon decorative dùng `aria-hidden="true"`.
 - Transaction hash có accessible label đầy đủ.
+- Wallet selection uses radio semantics; verified/selected/locked states include text. A masked
+  address has an accessible full-value copy label.
+- Add-wallet dialog traps/restores focus and connect/switch/sign/reject/error states are announced
+  without repeated polling spam.
 - Copy action thông báo thành công bằng live region nhưng không tự move focus.
 - Loading/error được announce hợp lý.
 - Focus order đi theo document flow.
@@ -754,6 +786,11 @@ Không dựng cached amount thành current truth nếu request refresh thất b�
 8. Không cho AI output trigger settlement transition hoặc durable settlement-intent mutation.
 9. Không gọi legacy `410` routes hoặc owner-only settlement-intent endpoints từ researcher UI.
 10. Không hiển thị private total paid của program nếu visibility policy không cho phép.
+11. Không gửi wallet address, challenge, signature hoặc verification provenance vào AI provider.
+12. Challenge endpoint có rate limit/TTL/single-use atomic consume; verification and report-wallet
+    writes are CSRF/origin protected as applicable and emit privacy-safe audit events.
+13. Settlement recipient is a server-locked report snapshot. Client cache, connected owner wallet,
+    report owner input or a mutable researcher default cannot override it.
 
 ## 18. Figma component mapping
 
@@ -803,8 +840,18 @@ Không dựng icon bằng rotated line primitives. Dùng Lucide component hoặc
 8. Session expired → không flash data.
 9. Owner/reviewer mở researcher-only route → safe forbidden hoặc role-appropriate redirect.
 10. Researcher cố xem reward của report khác → API trả forbidden/not found theo security policy.
-11. Invalid wallet → inline error có `aria-describedby`.
-12. Wallet update trong lúc reward pending → explicit confirmation và audit.
+11. Researcher có nhiều verified wallets → report/reward detail chỉ hiển thị đúng selected snapshot.
+12. Setup new wallet → MetaMask/OKX connect, Arc network, address read-only, single-use challenge +
+    `personal_sign`; success persists a verified wallet without transaction/gas.
+13. User reject, wrong account/chain, expired/used/replayed nonce, invalid signature → inline recovery
+    có `aria-describedby`; retry uses a new challenge and never loses report data.
+14. Allowed pre-settlement report wallet update → atomic snapshot history/audit; content revision/hash
+    and AI run unchanged.
+15. Duplicate/rejected/paid, ended/closed program or report-specific settlement/funding evidence →
+    edit disabled by server capability and direct mutation returns stable conflict.
+16. Edit races owner intent creation → one atomic winner and one coherent locked recipient.
+17. Owner tries to submit recipient override or legacy report lacks snapshot → override rejected;
+    legacy returns `researcher_payout_wallet_required`, owner gets no address input.
 
 ## 20. Acceptance criteria
 
@@ -815,7 +862,8 @@ Không dựng icon bằng rotated line primitives. Dùng Lucide component hoặc
 - [ ] Copy phân biệt human review, reward approval và blockchain settlement.
 - [ ] Lifecycle dùng đúng `validated → reward_approved → payment_pending → paid`.
 - [ ] `Paid` chỉ xuất hiện khi settlement đã được backend xác nhận.
-- [ ] Wallet không xuất hiện như requirement của browsing hoặc submit flow.
+- [ ] Wallet không là requirement của browsing/onboarding; Submit bug bắt buộc chọn một verified
+      Arc EVM wallet và reward detail dùng đúng report snapshot.
 - [ ] CTA hiện tại chỉ đưa user về Programs hoặc My reports.
 - [ ] Card, nested surface và action tuân thủ BBE spacing/containment rules.
 - [ ] Mobile frame dài đủ để không clip content.
@@ -823,6 +871,12 @@ Không dựng icon bằng rotated line primitives. Dùng Lucide component hoặc
 - [ ] Future implementation có loading, empty, error, auth và wrong-role states.
 - [ ] Researcher UI không gọi owner-only settlement actions (legacy `410` routes cũng không được gọi).
 - [ ] API tương lai không lộ private report content hoặc reward của researcher khác.
+- [ ] Researcher lưu được nhiều wallets; add/verify chỉ dùng MetaMask/OKX, fixed Arc EVM,
+      server-issued single-use challenge + `personal_sign`, không manual address/type/private key.
+- [ ] Submit và allowed edit atomically authorize/snapshot recipient; edit capability is server-derived
+      and locks on terminal/program-ended/report-specific settlement-funding evidence.
+- [ ] Owner settlement uses only the server-locked report snapshot and cannot accept recipient
+      override; edit/intent race, replay, stale capability and legacy missing-wallet paths are tested.
 
 ## 21. Known limitations
 
@@ -830,5 +884,7 @@ Không dựng icon bằng rotated line primitives. Dùng Lucide component hoặc
 - Account menu vẫn hiển thị `Rewards · Future` disabled.
 - Figma CTA không thể prototype navigate cross-page tới Programs/Reports.
 - Report response hiện chưa đủ transaction evidence để dựng Reward center hoàn chỉnh.
-- Wallet write flow chưa có API contract được review.
+- Wallet registry/challenge, report snapshot/edit capability and recipient-lock contracts remain an
+  implementation gap; target security/behavior contract is defined in §14 and must be reviewed in
+  shared schema/OpenAPI/database tasks before release.
 - Page hiện tại là visual/product handoff; chưa phải cam kết feature đã triển khai.

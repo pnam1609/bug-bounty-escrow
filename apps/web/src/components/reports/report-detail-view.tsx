@@ -34,6 +34,7 @@ import {
 import { ReportDetailSkeleton, ReportStateBlock } from './report-states';
 import { ResubmitReportAction } from './resubmit-report-action';
 import { ReportTimeline } from './report-timeline';
+import { ReportRewardWallet } from './report-reward-wallet';
 import { ASSET_TYPE_LABELS } from '@/components/programs/program-format';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
@@ -137,7 +138,6 @@ function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
           )}
         </RailRow>
         <RailRow label="Visibility">Authorized reviewers</RailRow>
-        <RailRow label="Wallet">Not required</RailRow>
         {report.approvedReward === undefined ? null : (
           <RailRow label="Approved reward">{`${report.approvedReward} USDC`}</RailRow>
         )}
@@ -374,6 +374,8 @@ export function ReportDetailView({ id }: ReportDetailViewProps) {
 
         <DisclosureSummary report={report} />
       </div>
+
+      <ReportRewardWallet principalId={principalId} report={report} token={token} />
 
       <ReportAiReviewCard
         audience="researcher"

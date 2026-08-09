@@ -30,6 +30,8 @@ execute audited emergency support calls. The controller's fee withdrawal destina
 same immutable on-chain address and must never be substituted for a program owner wallet.
 
 - Security researcher gửi vulnerability report.
+- Researcher connects MetaMask or OKX Wallet, proves control of an Arc EVM payout address and
+  selects one verified wallet for the report before submission.
 - Reviewer kiểm tra và xác nhận report.
 - Khi report được chấp nhận, smart contract thanh toán USDC trực tiếp cho researcher.
 - AI chỉ hỗ trợ triage, không tự quyết định report hợp lệ hay mức payout.
@@ -144,6 +146,8 @@ TRIAGED
 - Xem scope và reward.
 - Gửi vulnerability report.
 - Upload PoC hoặc attachment.
+- Lưu nhiều Arc EVM payout wallet đã verify bằng server-issued, single-use signing challenge và
+  chọn đúng một wallet cho mỗi report.
 - Trả lời yêu cầu bổ sung.
 - Theo dõi trạng thái.
 - Nhận USDC.
@@ -327,6 +331,32 @@ the browser wallet session and wallet-bound transient readiness only; it never l
 Supabase or clears durable server evidence. A reconnect must rehydrate the same server intent and
 must never replay a transaction with an existing hash.
 
+### Researcher payout-wallet verification and report binding
+
+Researcher payout wallets use the same RainbowKit/Wagmi connector allowlist (MetaMask and OKX
+Wallet), but they are a separate proof-of-control flow from owner funding. A researcher may keep
+multiple verified wallets. The product does not show a wallet-type selector: the MVP type/network
+is fixed to EVM on Arc Testnet (`chainId = 5042002`) and the connected account supplies the address.
+
+Verification is server-authoritative. After authentication and wallet connection, the server issues
+a short-lived, single-use nonce/challenge bound to the authenticated researcher, normalized address,
+Arc chain, application domain/origin, purpose, issued-at and expiry. The same connected address signs
+the exact server message with `personal_sign` (a SIWE-like proof; no transaction or token approval).
+The server verifies the EIP-191 signature, all bindings, expiry and unused nonce before atomically
+consuming the challenge and persisting the verified wallet. A signature, connected address or client
+boolean alone is never proof. Challenges cannot be reused across account, address, chain, domain,
+environment or purpose; concurrent verify attempts may produce at most one successful durable result.
+
+The Submit bug composer has five steps: `Assets & Impact / Severity / Main Report / Wallet / Review`.
+Submission requires one researcher-owned verified payout-wallet ID. The server resolves it and
+atomically snapshots wallet ID, checksummed address, Arc chain and verification provenance on the
+report; settlement never follows a mutable profile default or a later wallet-row edit. The researcher
+may replace a report snapshot from their private report detail only when the server returns the
+capability. The server must deny replacement for `duplicate`, `rejected` or `paid`, when the program
+is ended/closed, or after any report-specific reward-settlement, approval, payout or funding evidence
+exists. UI state is advisory; authorization, ownership, lock policy and race checks remain atomic on
+the server.
+
 ### Funding intent lifecycle and expiry
 
 `funding_intent` is a short-lived server funding session, not the program itself. Saving a program as
@@ -378,7 +408,8 @@ dành riêng cho escrow và trạng thái hoàn tất, đỏ chỉ dùng cho err
 Hai chỗ Figma và flow doc lệch nhau, đã theo flow doc:
 
 - **Submit bug**: Figma còn 4 bước cũ `Scope/Details/Proof/Review` với textarea `Impact` free
-  text. Đã build theo doc: `Assets & Impact / Severity / Main Report / Review`. Dựng đúng Figma sẽ
+  text. Target flow là `Assets & Impact / Severity / Main Report / Wallet / Review`. Dựng đúng
+  Figma cũ sẽ
   ra UI không gọi được API.
 - **Bounty table caption**: §11 ghi "Active bounty programs" nhưng §6 nói list gồm cả ended.
 
@@ -739,6 +770,10 @@ type VulnerabilityReport = {
   finalSeverity?: Severity;
   status: ReportStatus;
   contentHash: string; // hash gồm cả impact selection
+  payoutWalletId: string; // researcher-owned verified wallet selected for this report
+  payoutWalletAddress: string; // immutable checksummed snapshot used by settlement
+  payoutWalletChainId: '5042002'; // Arc Testnet snapshot; client cannot override
+  payoutWalletVerifiedAt: string; // verification provenance snapshot
   approvedReward?: string;
   submittedAt?: string;
   paidAt?: string;
@@ -763,6 +798,13 @@ exposes the exact local timestamp through the design-system tooltip and an acces
 including seconds. The row must not expose report body, PoC, comments or private attachment data.
 
 `draft` chỉ tồn tại trong `localStorage` của browser; server tạo thẳng `submitted`.
+
+Payout wallet is a required submission association but is not part of `contentHash`: changing an
+eligible payout destination must not create a vulnerability-content revision or rerun AI. The server
+stores every permitted replacement as an audited report-wallet snapshot history and exposes a
+server-derived `canChangePayoutWallet` capability plus a denial reason. Reward settlement locks and
+uses the latest eligible snapshot at intent creation; owner/reviewer cannot enter or override the
+recipient.
 
 ### Program metrics
 
@@ -804,6 +846,8 @@ implicit public, bulk auto-public hay public-by-timeout.
 
 ```text
 profiles
+researcher_payout_wallets
+wallet_verification_challenges
 programs
 program_scopes
 program_reward_tiers
@@ -813,6 +857,7 @@ program_impacts
 program_prohibited_activities
 program_reviewers
 reports
+report_payout_wallet_snapshots
 report_impacts
 report_disclosures
 report_attachments
@@ -1133,6 +1178,9 @@ Mọi protected endpoint phải đi qua Supabase JWT auth guard và role/ownersh
 GET    /api/me
 PATCH  /api/me
 PATCH  /api/me/onboarding
+GET    /api/me/payout-wallets
+POST   /api/me/payout-wallet-verification-challenges
+POST   /api/me/payout-wallets
 ```
 
 `PATCH /api/me` chỉ sửa được `displayName`. Role cố định sau onboarding — cho sửa ở Account
@@ -1140,6 +1188,14 @@ settings sẽ thành đường vòng để đổi quyền. Email thuộc auth pr
 flow riêng.
 
 `GET /api/me` trả profile an toàn của user đã xác thực. Onboarding chỉ cho phép user tự chọn role `owner` hoặc `researcher`; role `reviewer` chỉ được cấp qua trusted admin workflow.
+
+Payout-wallet routes are researcher-only and separate from profile writes. Challenge creation takes
+the connected checksummed EVM address and Arc chain; wallet creation takes the challenge ID, exact
+`personal_sign` signature and optional label. The server derives the researcher from the JWT, verifies
+and consumes the nonce atomically, and returns a durable verified-wallet ID. Re-adding the same
+normalized address for one researcher is idempotent; another user's proof never grants access to it.
+Private keys and seed phrases are never requested. Raw signatures are not retained beyond what the
+verification/audit policy strictly requires.
 
 ### Notifications
 
@@ -1227,6 +1283,7 @@ POST   /api/reports/:id/reject
 POST   /api/reports/:id/mark-duplicate
 POST   /api/reports/:id/reopen-duplicate
 POST   /api/reports/:id/send-back-for-review
+PATCH  /api/reports/:id/payout-wallet
 POST   /api/reports/:id/approve-reward
 POST   /api/reports/:id/pay
 POST   /api/reports/:id/confirm-payment
@@ -1241,6 +1298,13 @@ chặn direct request fail-closed. Researcher khác vẫn được submit khi pr
 `GET /api/reports` trả dữ liệu theo quyền của user hiện tại và hỗ trợ filter `programId`, `status`,
 `severity` và `researcherId`. Researcher chỉ thấy report của mình; owner/reviewer chỉ thấy report
 thuộc program được phép review.
+
+`PATCH /api/reports/:id/payout-wallet` accepts only a verified wallet ID owned by the authenticated
+researcher. The atomic policy rechecks report/program status and report-specific settlement evidence,
+updates the report snapshot and writes audit history. It returns a stable conflict when the report is
+`duplicate`, `rejected` or `paid`, the program is ended/closed, or any reward settlement/approval,
+payout or funding evidence already locks the recipient. A stale client capability cannot bypass this
+check.
 
 `approve-reward` reserve số tiền vào `programs.reserved_pool`; `pay` ghi nhận transaction và
 chuyển sang `payment_pending`; `confirm-payment` chuyển reserved → paid và đóng report.

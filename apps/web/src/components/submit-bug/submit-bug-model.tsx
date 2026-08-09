@@ -2,7 +2,7 @@
  * Shared model for the researcher Submit Bug composer.
  *
  * The structure follows docs/flow/submit-bug-researcher-flow-for-figma.md, which supersedes the
- * Figma composer frames: the four steps are Assets & Impact → Severity → Main Report → Review and
+ * Figma composer frames: the five steps are Assets & Impact → Severity → Main Report → Reward Wallet → Review and
  * there is no free-text `impact` field anywhere. Impact selection is relational
  * (`programImpactIds` + `customImpacts`) and proposed severity is an independent field.
  *
@@ -19,10 +19,11 @@ import {
   SAFE_UPLOAD_MIME_TYPES,
   type AssetType,
   type Program,
+  type ResearcherPayoutWallet,
   type Severity,
 } from '@bug-bounty-escrow/shared';
 import { SEVERITY_LABELS } from '@bug-bounty-escrow/ui';
-import { ClipboardCheck, Crosshair, FileText, Gauge } from 'lucide-react';
+import { ClipboardCheck, Crosshair, FileText, Gauge, Wallet } from 'lucide-react';
 import { z } from 'zod';
 
 import type { StepperStep } from '@bug-bounty-escrow/ui';
@@ -38,25 +39,28 @@ export const SUBMIT_BUG_STEPS: readonly StepperStep[] = Object.freeze([
   { id: 'assets', icon: Crosshair, label: 'Assets & Impact' },
   { id: 'severity', icon: Gauge, label: 'Severity' },
   { id: 'report', icon: FileText, label: 'Main Report' },
+  { id: 'wallet', icon: Wallet, label: 'Reward Wallet' },
   { id: 'review', icon: ClipboardCheck, label: 'Review' },
 ]);
 
 export const STEP_COUNT = SUBMIT_BUG_STEPS.length;
 
-export type StepIndex = 0 | 1 | 2 | 3;
+export type StepIndex = 0 | 1 | 2 | 3 | 4;
 
 export const STEP_HEADINGS: Readonly<Record<StepIndex, string>> = Object.freeze({
   0: 'Choose the affected asset and impact',
   1: 'Choose your proposed severity',
   2: 'Write the vulnerability report',
-  3: 'Review your private report',
+  3: 'Select your reward wallet',
+  4: 'Review your private report',
 });
 
 export const STEP_SUBTITLES: Readonly<Record<StepIndex, string>> = Object.freeze({
   0: 'Select the in-scope asset where you found the vulnerability, then choose every program impact that applies.',
   1: 'Use the highest severity that matches the impacts you selected. This is your assessment; the reviewer makes the final decision.',
   2: 'Provide enough detail for the program to reproduce and assess the vulnerability.',
-  3: 'Confirm the private report and submission policy before sending.',
+  3: 'Choose a verified EVM wallet where an eligible Arc USDC reward for this report will be sent.',
+  4: 'Confirm the private report, reward wallet and submission policy before sending.',
 });
 
 /* ── Draft ──────────────────────────────────────────────────────────────────────────────── */
@@ -75,6 +79,8 @@ export interface ReportDraft {
   readonly description: string;
   readonly reproductionSteps: string;
   readonly secretGistUrl: string;
+  /** The only wallet datum persisted in the browser draft. */
+  readonly payoutWalletId: string;
 }
 
 /** The free-text draft fields, i.e. everything Step 3 edits through a plain string control. */
@@ -90,6 +96,7 @@ export const EMPTY_DRAFT: ReportDraft = Object.freeze({
   description: '',
   reproductionSteps: '',
   secretGistUrl: '',
+  payoutWalletId: '',
 });
 
 const draftSchema = z
@@ -103,6 +110,8 @@ const draftSchema = z
     description: z.string(),
     reproductionSteps: z.string(),
     secretGistUrl: z.string(),
+    // Default migrates drafts written by the previous four-step composer.
+    payoutWalletId: z.string().default(''),
   })
   .strict();
 
@@ -149,7 +158,8 @@ export function isDraftDirty(draft: ReportDraft, hasFile: boolean): boolean {
     draft.title.trim() !== '' ||
     draft.description.trim() !== '' ||
     draft.reproductionSteps.trim() !== '' ||
-    draft.secretGistUrl.trim() !== ''
+    draft.secretGistUrl.trim() !== '' ||
+    draft.payoutWalletId !== ''
   );
 }
 
@@ -650,11 +660,36 @@ export function validateMainReportStep(input: MainReportStepInput): FieldErrors 
   return errors;
 }
 
+export type RewardWalletAvailability = 'error' | 'loading' | 'ready';
+
+export function validateRewardWalletStep(
+  payoutWalletId: string,
+  wallets: readonly ResearcherPayoutWallet[],
+  availability: RewardWalletAvailability,
+): FieldErrors {
+  if (availability === 'loading') {
+    return { payoutWalletId: 'Wait for your verified wallets to finish loading.' };
+  }
+  if (availability === 'error') {
+    return { payoutWalletId: 'Retry loading your verified wallets before continuing.' };
+  }
+  if (payoutWalletId === '') {
+    return { payoutWalletId: 'Select a verified reward wallet before continuing.' };
+  }
+  if (!wallets.some((wallet) => wallet.id === payoutWalletId)) {
+    return {
+      payoutWalletId: 'This wallet is no longer available. Select another verified wallet.',
+    };
+  }
+  return {};
+}
+
 export const STEP_ERROR_SUMMARIES: Readonly<Record<StepIndex, string>> = Object.freeze({
   0: 'Choose an in-scope asset and at least one applicable impact before continuing.',
   1: 'Review your severity assessment before continuing.',
   2: 'Review the highlighted fields before continuing.',
-  3: 'Confirm the disclosure statement before submitting.',
+  3: 'Select an available verified reward wallet before continuing.',
+  4: 'Confirm the disclosure statement before submitting.',
 });
 
 /** Focus order used to jump to the first invalid control after a failed Continue. */
@@ -669,6 +704,7 @@ export const FIELD_FOCUS_ORDER: readonly string[] = Object.freeze([
   'reproductionSteps',
   'secretGistUrl',
   'attachment',
+  'payoutWalletId',
   'confirmed',
 ]);
 

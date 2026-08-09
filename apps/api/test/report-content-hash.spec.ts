@@ -49,4 +49,13 @@ describe('reportContentHash', () => {
   it('treats an absent optional field and an empty one consistently', () => {
     expect(reportContentHash({ ...base, secretGistUrl: undefined })).toBe(reportContentHash(base));
   });
+
+  it('keeps payout-wallet metadata outside the vulnerability content hash', () => {
+    const reportWithWallet = {
+      ...base,
+      payoutWalletId: '10000000-0000-4000-8000-000000000500',
+    };
+
+    expect(reportContentHash(reportWithWallet)).toBe(reportContentHash(base));
+  });
 });

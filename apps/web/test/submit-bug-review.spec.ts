@@ -1,3 +1,4 @@
+import type { ResearcherPayoutWallet } from '@bug-bounty-escrow/shared';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -32,6 +33,20 @@ const draft: ReportDraft = {
     'A retried message can increment the settlement nonce before the original transfer finishes.',
   reproductionSteps: '1. Queue the transfer.\n2. Retry the message.\n3. Observe the frozen reward.',
   secretGistUrl: 'https://gist.github.com/researcher/secret-proof',
+  payoutWalletId: '10000000-0000-4000-8000-000000000099',
+};
+
+const selectedWallet: ResearcherPayoutWallet = {
+  id: draft.payoutWalletId,
+  label: 'Research wallet',
+  address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  maskedAddress: '0xaaaa…aaaa',
+  walletType: 'evm',
+  network: 'Arc Testnet',
+  chainId: 5_042_002,
+  verificationMethod: 'eip191_personal_sign',
+  verifiedAt: '2026-08-10T08:00:00.000Z',
+  createdAt: '2026-08-10T08:00:00.000Z',
 };
 
 function renderReview(overrides: Partial<StepReviewProps> = {}): string {
@@ -45,6 +60,7 @@ function renderReview(overrides: Partial<StepReviewProps> = {}): string {
     programName: 'Aegis Protocol',
     scope,
     selectedImpactTitles: ['Direct theft of user funds', 'Permanent freezing of user funds'],
+    selectedWallet,
     suggestedSeverity: 'critical',
     ...overrides,
   };
@@ -99,7 +115,10 @@ describe('SR-09 review summary', () => {
 
   it('renders the vulnerability report fields as full-width stacked content', () => {
     const markup = renderReview();
-    const vulnerabilitySection = markup.slice(markup.indexOf('Vulnerability report'));
+    const vulnerabilitySection = markup.slice(
+      markup.indexOf('Vulnerability report'),
+      markup.indexOf('Reward wallet'),
+    );
 
     expect(vulnerabilitySection).toContain('>Description</dt>');
     expect(vulnerabilitySection).toContain('>PoC / reproduction</dt>');
@@ -140,11 +159,14 @@ describe('SR-09 review summary', () => {
     expect(markup).toContain('No attachment');
   });
 
-  it('does not introduce KYC, wallet, disclosure opt-in, save or publish controls', () => {
+  it('confirms the verified reward wallet without KYC, disclosure opt-in, save or publish controls', () => {
     const markup = renderReview();
 
     expect(markup).not.toMatch(/\bKYC\b/);
-    expect(markup).not.toContain('Wallet address');
+    expect(markup).toContain('Reward wallet');
+    expect(markup).toContain('0xaaaa…aaaa');
+    expect(markup).toContain('the full reward wallet address');
+    expect(markup).not.toContain(selectedWallet.address);
     expect(markup).not.toContain('Make this report public');
     expect(markup).not.toContain('Save draft');
     expect(markup).not.toContain('>Publish<');

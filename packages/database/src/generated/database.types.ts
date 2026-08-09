@@ -2023,6 +2023,89 @@ export type Database = {
           },
         ]
       }
+      report_payout_wallet_snapshots: {
+        Row: {
+          address: string
+          chain_id: number
+          id: string
+          report_id: string
+          researcher_id: string
+          researcher_payout_wallet_id: string | null
+          selected_at: string
+          selected_by: string
+          source: string
+          source_settlement_intent_id: string | null
+          verification_message_hash: string | null
+          verification_method: string
+          version: number
+          wallet_label: string | null
+          wallet_verified_at: string | null
+        }
+        Insert: {
+          address: string
+          chain_id: number
+          id?: string
+          report_id: string
+          researcher_id: string
+          researcher_payout_wallet_id?: string | null
+          selected_at?: string
+          selected_by: string
+          source: string
+          source_settlement_intent_id?: string | null
+          verification_message_hash?: string | null
+          verification_method: string
+          version: number
+          wallet_label?: string | null
+          wallet_verified_at?: string | null
+        }
+        Update: {
+          address?: string
+          chain_id?: number
+          id?: string
+          report_id?: string
+          researcher_id?: string
+          researcher_payout_wallet_id?: string | null
+          selected_at?: string
+          selected_by?: string
+          source?: string
+          source_settlement_intent_id?: string | null
+          verification_message_hash?: string | null
+          verification_method?: string
+          version?: number
+          wallet_label?: string | null
+          wallet_verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_payout_wallet_snapshots_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_payout_wallet_snapshots_researcher_id_fkey"
+            columns: ["researcher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_payout_wallet_snapshots_researcher_payout_wallet_id_fkey"
+            columns: ["researcher_payout_wallet_id"]
+            isOneToOne: false
+            referencedRelation: "researcher_payout_wallets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_payout_wallet_snapshots_selected_by_fkey"
+            columns: ["selected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_revisions: {
         Row: {
           content_hash: string
@@ -2074,6 +2157,8 @@ export type Database = {
           final_severity: string | null
           id: string
           paid_at: string | null
+          payout_wallet_snapshot_id: string | null
+          payout_wallet_version: number
           program_id: string
           proposed_severity: string
           reproduction_steps: string | null
@@ -2095,6 +2180,8 @@ export type Database = {
           final_severity?: string | null
           id?: string
           paid_at?: string | null
+          payout_wallet_snapshot_id?: string | null
+          payout_wallet_version?: number
           program_id: string
           proposed_severity: string
           reproduction_steps?: string | null
@@ -2116,6 +2203,8 @@ export type Database = {
           final_severity?: string | null
           id?: string
           paid_at?: string | null
+          payout_wallet_snapshot_id?: string | null
+          payout_wallet_version?: number
           program_id?: string
           proposed_severity?: string
           reproduction_steps?: string | null
@@ -2144,6 +2233,13 @@ export type Database = {
             referencedColumns: ["id", "program_id"]
           },
           {
+            foreignKeyName: "reports_payout_wallet_snapshot_id_fkey"
+            columns: ["payout_wallet_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "report_payout_wallet_snapshots"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "reports_program_id_fkey"
             columns: ["program_id"]
             isOneToOne: false
@@ -2152,6 +2248,124 @@ export type Database = {
           },
           {
             foreignKeyName: "reports_researcher_id_fkey"
+            columns: ["researcher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      researcher_payout_wallets: {
+        Row: {
+          address: string
+          chain_id: number
+          created_at: string
+          id: string
+          label: string | null
+          researcher_id: string
+          revoked_at: string | null
+          source: string
+          status: string
+          updated_at: string
+          verification_message_hash: string | null
+          verification_method: string | null
+          verified_at: string | null
+        }
+        Insert: {
+          address: string
+          chain_id?: number
+          created_at?: string
+          id?: string
+          label?: string | null
+          researcher_id: string
+          revoked_at?: string | null
+          source: string
+          status: string
+          updated_at?: string
+          verification_message_hash?: string | null
+          verification_method?: string | null
+          verified_at?: string | null
+        }
+        Update: {
+          address?: string
+          chain_id?: number
+          created_at?: string
+          id?: string
+          label?: string | null
+          researcher_id?: string
+          revoked_at?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+          verification_message_hash?: string | null
+          verification_method?: string | null
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "researcher_payout_wallets_researcher_id_fkey"
+            columns: ["researcher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      researcher_wallet_verification_challenges: {
+        Row: {
+          address: string
+          chain_id: number
+          consumed_at: string | null
+          created_at: string
+          domain: string
+          expires_at: string
+          id: string
+          invalidated_at: string | null
+          issued_at: string
+          message: string
+          message_hash: string
+          nonce: string
+          purpose: string
+          researcher_id: string
+          uri: string
+        }
+        Insert: {
+          address: string
+          chain_id?: number
+          consumed_at?: string | null
+          created_at?: string
+          domain: string
+          expires_at: string
+          id?: string
+          invalidated_at?: string | null
+          issued_at: string
+          message: string
+          message_hash: string
+          nonce: string
+          purpose: string
+          researcher_id: string
+          uri: string
+        }
+        Update: {
+          address?: string
+          chain_id?: number
+          consumed_at?: string | null
+          created_at?: string
+          domain?: string
+          expires_at?: string
+          id?: string
+          invalidated_at?: string | null
+          issued_at?: string
+          message?: string
+          message_hash?: string
+          nonce?: string
+          purpose?: string
+          researcher_id?: string
+          uri?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "researcher_wallet_verification_challenges_researcher_id_fkey"
             columns: ["researcher_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -2179,8 +2393,14 @@ export type Database = {
           percentage_bps: number | null
           program_id: string
           recipient_address: string
+          recipient_chain_id: number | null
+          recipient_verification_message_hash: string | null
+          recipient_verification_method: string | null
+          recipient_wallet_verified_at: string | null
           report_id: string
           report_key: string
+          report_payout_wallet_snapshot_id: string | null
+          researcher_payout_wallet_id: string | null
           status: string
           updated_at: string
         }
@@ -2203,8 +2423,14 @@ export type Database = {
           percentage_bps?: number | null
           program_id: string
           recipient_address: string
+          recipient_chain_id?: number | null
+          recipient_verification_message_hash?: string | null
+          recipient_verification_method?: string | null
+          recipient_wallet_verified_at?: string | null
           report_id: string
           report_key: string
+          report_payout_wallet_snapshot_id?: string | null
+          researcher_payout_wallet_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -2227,8 +2453,14 @@ export type Database = {
           percentage_bps?: number | null
           program_id?: string
           recipient_address?: string
+          recipient_chain_id?: number | null
+          recipient_verification_message_hash?: string | null
+          recipient_verification_method?: string | null
+          recipient_wallet_verified_at?: string | null
           report_id?: string
           report_key?: string
+          report_payout_wallet_snapshot_id?: string | null
+          researcher_payout_wallet_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -2252,6 +2484,20 @@ export type Database = {
             columns: ["program_id"]
             isOneToOne: false
             referencedRelation: "programs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_intents_report_payout_wallet_snapshot_id_fkey"
+            columns: ["report_payout_wallet_snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "report_payout_wallet_snapshots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reward_settlement_intents_researcher_payout_wallet_id_fkey"
+            columns: ["researcher_payout_wallet_id"]
+            isOneToOne: false
+            referencedRelation: "researcher_payout_wallets"
             referencedColumns: ["id"]
           },
           {
@@ -2947,6 +3193,22 @@ export type Database = {
         Args: { actor_id: string; input: Json }
         Returns: string
       }
+      create_researcher_wallet_verification_challenge_atomic: {
+        Args: {
+          actor_id: string
+          challenge_message: string
+          challenge_message_hash: string
+          challenge_nonce: string
+          expires_at: string
+          issued_at: string
+          target_address: string
+          target_challenge_id: string
+          target_domain: string
+          target_purpose: string
+          target_uri: string
+        }
+        Returns: string
+      }
       create_reward_settlement_intent_atomic: {
         Args: {
           actor_id: string
@@ -3082,6 +3344,20 @@ export type Database = {
         Args: { received_after: string; subscription_id: string }
         Returns: boolean
       }
+      get_report_payout_wallet_state: {
+        Args: { actor_id: string; target_report_id: string }
+        Returns: {
+          blocked_reason: string | null
+          can_edit: boolean
+          chain_id: number | null
+          snapshot_id: string | null
+          verified_at: string | null
+          version: number
+          wallet_address: string | null
+          wallet_id: string | null
+          wallet_label: string | null
+        }[]
+      }
       ingest_circle_gateway_deposit_finalized_atomic: {
         Args: {
           amount_base_units: number
@@ -3131,6 +3407,16 @@ export type Database = {
           target_payer_address: string
           target_program_id: string
           target_quote_id: string
+        }
+        Returns: string
+      }
+      complete_researcher_wallet_verification_atomic: {
+        Args: {
+          actor_id: string
+          target_challenge_id: string
+          verified_address: string
+          verified_message_hash: string
+          wallet_label: string
         }
         Returns: string
       }
@@ -3594,6 +3880,15 @@ export type Database = {
           status: string
           submission_revision: number
         }[]
+      }
+      set_report_payout_wallet_atomic: {
+        Args: {
+          actor_id: string
+          expected_version: number
+          target_report_id: string
+          target_wallet_id: string
+        }
+        Returns: string
       }
       claim_ai_triage_run_for_program: {
         Args: { lease_seconds?: number; target_program_id: string; worker_id: string }

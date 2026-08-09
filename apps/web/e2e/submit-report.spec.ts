@@ -2,7 +2,7 @@ import { AEGIS_SUMMARY, IDS, expect, test } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /*
- * The four-step Submit Bug composer: Assets & Impact -> Severity -> Main Report -> Review.
+ * The five-step Submit Bug composer: Assets & Impact -> Severity -> Main Report -> Reward Wallet -> Review.
  *
  * The navigation buttons are never disabled; a step refuses to advance by keeping its heading on
  * screen and showing an error. Both are asserted, because a `disabled` assertion would silently
@@ -16,7 +16,9 @@ const PROOF = {
 };
 
 async function chooseAssetAndImpact(page: Page): Promise<void> {
-  await expect(page.getByRole('heading', { name: '1. Choose an asset' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Choose the affected asset and impact' }),
+  ).toBeVisible();
   await page.getByRole('radio', { name: /Aegis Core Contract/ }).check();
   await page.getByRole('checkbox', { name: /Direct theft of user funds/ }).check();
   await page.getByRole('button', { name: 'Continue to severity' }).click();
@@ -26,14 +28,21 @@ async function writeReport(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Write the vulnerability report' })).toBeVisible();
   await page.getByLabel('Report title').fill('Re-entrancy can drain the staking pool');
   await page
-    .getByLabel('Vulnerability description')
+    .locator('#description')
     .fill('The vault withdraw path re-enters before the balance is written back.');
   await page
-    .getByLabel('Reproduction steps / PoC')
+    .locator('#reproductionSteps')
     .fill('1. Deposit\n2. Re-enter withdraw from a malicious receiver\n3. Observe the drain');
 }
 
-test('QA-E2E-005 the composer walks four steps and blocks a severity mismatch until acknowledged', async ({
+async function selectRewardWallet(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Continue to reward wallet' }).click();
+  await expect(page.getByRole('heading', { name: 'Select your reward wallet' })).toBeVisible();
+  await page.getByRole('radio', { name: /Research wallet/ }).check();
+  await page.getByRole('button', { name: 'Review report' }).click();
+}
+
+test('QA-E2E-005 the composer walks five steps and blocks a severity mismatch until acknowledged', async ({
   researcherPage: page,
   api,
 }) => {
@@ -62,7 +71,7 @@ test('QA-E2E-005 the composer walks four steps and blocks a severity mismatch un
 
   // ------------------------------------------------------------ main report
   await writeReport(page);
-  await page.getByRole('button', { name: 'Review report' }).click();
+  await selectRewardWallet(page);
 
   // ------------------------------------------------------------ review and submit
   await expect(page.getByRole('heading', { name: 'Review your private report' })).toBeVisible();
@@ -79,6 +88,7 @@ test('QA-E2E-005 the composer walks four steps and blocks a severity mismatch un
     title: 'Re-entrancy can drain the staking pool',
     proposedSeverity: 'low',
     severityMismatchAcknowledged: true,
+    payoutWalletId: IDS.payoutWallet,
   });
 });
 
@@ -98,7 +108,7 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
 
   await writeReport(page);
   await page.getByLabel('Private attachment (optional)').setInputFiles(PROOF);
-  await page.getByRole('button', { name: 'Review report' }).click();
+  await selectRewardWallet(page);
 
   await page.getByRole('checkbox', { name: /I confirm this report is accurate/ }).check();
   await page.getByRole('button', { name: 'Submit private report' }).click();
@@ -108,7 +118,9 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
     page.getByRole('heading', { name: 'The attachment did not finish uploading' }),
   ).toBeVisible();
   await expect(page.getByText('Your report was submitted')).toBeVisible();
-  await expect(page.getByText('Your report is safe. Retry only the file upload, or continue without it.')).toBeVisible();
+  await expect(
+    page.getByText('Your report is safe. Retry only the file upload, or continue without it.'),
+  ).toBeVisible();
 
   const createPath = `/api/programs/${IDS.aegis}/reports`;
   expect(api.calls('POST', createPath)).toHaveLength(1);
@@ -116,9 +128,7 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
   // ------------------------------------------------------------ retry uploads only
   await page.getByRole('button', { name: 'Retry attachment' }).click();
 
-  await expect
-    .poll(() => api.calls('POST', '/attachments/upload-url').length)
-    .toBeGreaterThan(1);
+  await expect.poll(() => api.calls('POST', '/attachments/upload-url').length).toBeGreaterThan(1);
   await expect(
     page.getByRole('heading', { name: 'The attachment did not finish uploading' }),
   ).toBeVisible();

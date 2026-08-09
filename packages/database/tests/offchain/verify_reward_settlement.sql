@@ -8,6 +8,54 @@ set wallet_address = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     wallet_updated_at = now()
 where id = '30000000-0000-4000-8000-000000000002';
 
+insert into public.researcher_payout_wallets (
+  id, researcher_id, chain_id, address, label, status, verification_method,
+  verification_message_hash, verified_at, source
+) values (
+  '38000000-0000-4000-8000-000000000001',
+  '30000000-0000-4000-8000-000000000002',
+  5042002,
+  '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  'Settlement test wallet',
+  'verified',
+  'eip191_personal_sign',
+  '0x' || repeat('ab', 32),
+  now(),
+  'signature'
+);
+
+with inserted as (
+  insert into public.report_payout_wallet_snapshots (
+    report_id, researcher_id, researcher_payout_wallet_id, wallet_label, address, chain_id,
+    verification_method, verification_message_hash, wallet_verified_at, version, source,
+    selected_by
+  )
+  select
+    report.id,
+    report.researcher_id,
+    '38000000-0000-4000-8000-000000000001'::uuid,
+    'Settlement test wallet',
+    '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    5042002,
+    'eip191_personal_sign',
+    '0x' || repeat('ab', 32),
+    now(),
+    1,
+    'submission',
+    report.researcher_id
+  from public.reports report
+  where report.id in (
+    '33000000-0000-4000-8000-000000000029',
+    '33000000-0000-4000-8000-000000000005'
+  )
+  returning id, report_id, version
+)
+update public.reports report
+set payout_wallet_snapshot_id = inserted.id,
+    payout_wallet_version = inserted.version
+from inserted
+where report.id = inserted.report_id;
+
 insert into public.escrow_contracts (
   id, program_id, chain_id, contract_address, deployment_transaction_hash,
   deployment_status, deployed_at, program_key, contract_version, artifact_checksum,

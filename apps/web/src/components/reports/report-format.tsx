@@ -230,6 +230,8 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   insufficient_available_pool:
     'The program pool no longer has enough unreserved USDC to cover this reward.',
   reward_already_paid: 'This reward has already been paid.',
+  researcher_payout_wallet_required:
+    'The researcher must select a verified reward wallet before approval can begin.',
   attachment_not_accessible: 'That attachment is no longer available.',
   not_found: 'That record no longer exists.',
   forbidden: 'You are not allowed to do that.',

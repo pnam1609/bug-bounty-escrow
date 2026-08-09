@@ -126,8 +126,8 @@ export interface ComposerStepperProps {
 }
 
 /**
- * Desktop draws the four-node stepper inside its own raised surface, 32px below the subtitle and
- * 32px above the content card. Mobile drops to "Step N of 4" plus a progress bar, per flow doc §5.
+ * Desktop draws the five-node stepper inside its own raised surface, 32px below the subtitle and
+ * 32px above the content card. Mobile drops to "Step N of 5" plus a progress bar, per flow doc §5.
  */
 export function ComposerStepper({ currentStep }: ComposerStepperProps) {
   const step = SUBMIT_BUG_STEPS[currentStep];

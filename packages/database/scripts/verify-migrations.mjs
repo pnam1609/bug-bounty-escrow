@@ -73,6 +73,7 @@ const expectedMigrations = [
   '20260810000100_rr_flow_validated_send_back.sql',
   '20260810000200_sr_owner_submit_guard.sql',
   '20260810000300_ai_manual_review_recovery.sql',
+  '20260810000400_verified_researcher_payout_wallets.sql',
 ];
 
 const tableMigrations = new Map([
@@ -304,6 +305,25 @@ for (const requiredFragment of [
 ]) {
   if (!manualAiRecovery.includes(requiredFragment)) {
     fail(`AI manual-review recovery migration is missing ${requiredFragment}`);
+  }
+}
+const verifiedResearcherWallets = migrationContents.get(
+  '20260810000400_verified_researcher_payout_wallets.sql',
+);
+for (const requiredFragment of [
+  'create table public.researcher_payout_wallets',
+  'create table public.researcher_wallet_verification_challenges',
+  'create table public.report_payout_wallet_snapshots',
+  'create or replace function public.create_researcher_wallet_verification_challenge_atomic',
+  'create or replace function public.complete_researcher_wallet_verification_atomic',
+  'create or replace function public.set_report_payout_wallet_atomic',
+  'create or replace function public.get_report_payout_wallet_state',
+  "input ->> 'payoutWalletId'",
+  'snapshot_record.address',
+  'grant execute on function public.create_reward_settlement_intent_atomic',
+]) {
+  if (!verifiedResearcherWallets.includes(requiredFragment)) {
+    fail(`Verified researcher-wallet migration is missing ${requiredFragment}`);
   }
 }
 for (const functionName of [

@@ -30,6 +30,8 @@ export const queryKeys = {
     ['private', principalId, 'rewards', filters] as const,
   payoutWallet: (principalId: string) =>
     ['private', principalId, 'rewards', 'payout-wallet'] as const,
+  payoutWallets: (principalId: string) =>
+    ['private', principalId, 'rewards', 'payout-wallets'] as const,
   comments: (principalId: string, reportId: string) =>
     ['private', principalId, 'report', reportId, 'comments'] as const,
 };

@@ -4,7 +4,7 @@
  * Researcher Submit Bug composer — orchestrates SR-00 through SR-11.
  *
  * Structure comes from docs/flow/submit-bug-researcher-flow-for-figma.md, which supersedes the
- * Figma composer frames: four steps (Assets & Impact → Severity → Main Report → Review), no
+ * Figma composer frames: five steps (Assets & Impact → Severity → Main Report → Reward Wallet → Review), no
  * free-text impact, severity proposed independently of the selected impacts.
  *
  * Two rules shape the whole state machine:
@@ -25,6 +25,7 @@ import {
   type CreateReportRequest,
   type Program,
   type ReportResponse,
+  type ResearcherPayoutWallet,
   type Severity,
 } from '@bug-bounty-escrow/shared';
 import { Button, Callout } from '@bug-bounty-escrow/ui';
@@ -56,6 +57,7 @@ import { SessionExpired } from './session-expired';
 import { StepAssetsImpact } from './step-assets-impact';
 import { StepMainReport } from './step-main-report';
 import { StepReview } from './step-review';
+import { StepRewardWallet } from './step-reward-wallet';
 import { StepSeverity } from './step-severity';
 import { finishSubmittedReport } from './submission-finish';
 import { SubmissionProgress, type ProgressState } from './submission-progress';
@@ -84,10 +86,12 @@ import {
   validateAssetsStep,
   validateAttachment,
   validateMainReportStep,
+  validateRewardWalletStep,
   validateSeverityStep,
   writeDraft,
   type FieldErrors,
   type ReportDraft,
+  type RewardWalletAvailability,
   type StepIndex,
   type TextDraftField,
 } from './submit-bug-model';
@@ -108,7 +112,7 @@ type Phase =
   | { readonly kind: 'program-closed' }
   | { readonly kind: 'session-expired' };
 
-const STEP_ORDER: readonly StepIndex[] = [0, 1, 2, 3];
+const STEP_ORDER: readonly StepIndex[] = [0, 1, 2, 3, 4];
 
 /** Moves keyboard focus to the first control the failed step complained about. */
 function focusField(field: string | undefined): void {
@@ -153,6 +157,8 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
   const [touchedFields, setTouchedFields] = useState<readonly string[]>([]);
   /** The picked file, valid or not: a refused file has to stay visible to stay removable. */
   const [file, setFile] = useState<File | null>(null);
+  const [verifiedWallets, setVerifiedWallets] = useState<readonly ResearcherPayoutWallet[]>([]);
+  const [walletAvailability, setWalletAvailability] = useState<RewardWalletAvailability>('loading');
   const [confirmed, setConfirmed] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: 'composing' });
@@ -290,6 +296,10 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
         .map((impact) => impact.title),
     [draft.programImpactIds, impacts],
   );
+  const selectedWallet = useMemo(
+    () => verifiedWallets.find((wallet) => wallet.id === draft.payoutWalletId),
+    [draft.payoutWalletId, verifiedWallets],
+  );
 
   const allowCustomImpact = program?.rules.allowCustomImpact ?? false;
   /** SR-03 AC 4: the PoC rule is the published program's, never a constant baked into the form. */
@@ -315,6 +325,8 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
       case 2:
         return validateMainReportStep({ attachmentError, draft, proofRequired });
       case 3:
+        return validateRewardWalletStep(draft.payoutWalletId, verifiedWallets, walletAvailability);
+      case 4:
         return confirmed
           ? {}
           : { confirmed: 'Confirm the statement above before submitting this report.' };
@@ -332,6 +344,8 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
     scopes,
     step,
     suggestedSeverity,
+    verifiedWallets,
+    walletAvailability,
   ]);
 
   const showErrors = attemptedSteps.includes(step);
@@ -596,6 +610,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
         [0, validateAssetsStep({ allowCustomImpact, draft, impacts, scopes })],
         [1, validateSeverityStep(draft, suggestedSeverity)],
         [2, validateMainReportStep({ attachmentError, draft, proofRequired })],
+        [3, validateRewardWalletStep(draft.payoutWalletId, verifiedWallets, walletAvailability)],
       ];
       const invalid = earlier.find(([, stepIssues]) => Object.keys(stepIssues).length > 0);
 
@@ -607,7 +622,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
         return;
       }
 
-      markAttempted(3);
+      markAttempted(4);
       if (!confirmed) {
         focusField('confirmed');
         return;
@@ -625,6 +640,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
         ...(secretGistUrl === '' ? {} : { secretGistUrl }),
         proposedSeverity: draft.proposedSeverity,
         severityMismatchAcknowledged: draft.severityMismatchAcknowledged,
+        payoutWalletId: draft.payoutWalletId,
       });
 
       if (!parsed.success) {
@@ -655,6 +671,22 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
       // A closed program is a terminal state, never a retry loop; the local draft stays put.
       if (error instanceof ApiClientError && error.code === 'program_not_accepting_reports') {
         setPhase({ kind: 'program-closed' });
+        return;
+      }
+      if (
+        error instanceof ApiClientError &&
+        [
+          'researcher_payout_wallet_not_accessible',
+          'researcher_payout_wallet_not_verified',
+          'researcher_payout_wallet_required',
+        ].includes(error.code)
+      ) {
+        failedCreatePayloadRef.current = null;
+        setPhase({ kind: 'composing' });
+        setWalletAvailability('loading');
+        markAttempted(3);
+        goToStep(3);
+        setSubmitError('Your selected wallet changed. Review and select a verified wallet again.');
         return;
       }
 
@@ -711,6 +743,8 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
     session?.access_token,
     suggestedSeverity,
     uploadAttachment,
+    verifiedWallets,
+    walletAvailability,
   ]);
 
   const [retrying, setRetrying] = useState(false);
@@ -936,6 +970,18 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
             ) : null}
 
             {step === 3 ? (
+              <StepRewardWallet
+                accessToken={session?.access_token}
+                error={errors['payoutWalletId']}
+                onAvailabilityChange={setWalletAvailability}
+                onChange={(payoutWalletId) => updateDraft({ payoutWalletId })}
+                onWalletsChange={setVerifiedWallets}
+                principalId={session?.user.id ?? 'no-session'}
+                value={draft.payoutWalletId}
+              />
+            ) : null}
+
+            {step === 4 ? (
               <StepReview
                 confirmError={errors['confirmed']}
                 confirmed={confirmed}
@@ -946,6 +992,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
                 programName={program.name}
                 scope={scope}
                 selectedImpactTitles={selectedImpactTitles}
+                selectedWallet={selectedWallet}
                 suggestedSeverity={suggestedSeverity}
               />
             ) : null}
@@ -953,7 +1000,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
 
           <ComposerActions
             primary={
-              step === 3 ? (
+              step === 4 ? (
                 <Button onClick={() => void runSubmit()} size="lg">
                   {submitError === null ? 'Submit private report' : 'Try again'}
                 </Button>
@@ -963,7 +1010,9 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
                     ? 'Continue to severity'
                     : step === 1
                       ? 'Continue to main report'
-                      : 'Review report'}
+                      : step === 2
+                        ? 'Continue to reward wallet'
+                        : 'Review report'}
                 </Button>
               )
             }
@@ -972,7 +1021,7 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
                 <Button onClick={handleCancel} size="lg" variant="secondary">
                   Cancel
                 </Button>
-              ) : step === 3 && submitError !== null ? (
+              ) : step === 4 && submitError !== null ? (
                 <Button
                   onClick={() => {
                     failedCreatePayloadRef.current = null;
@@ -991,10 +1040,10 @@ export function SubmitBugComposer({ programSlug }: { readonly programSlug: strin
             }
           />
 
-          {step === 3 ? (
+          {step === 4 ? (
             <p className="text-label-sm text-text-muted">
-              Report content is never written to analytics or application logs, and no wallet is
-              needed to submit.
+              Report content, wallet challenges and signatures are never written to analytics or
+              application logs.
             </p>
           ) : null}
         </div>

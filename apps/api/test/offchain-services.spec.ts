@@ -108,6 +108,7 @@ describe('off-chain application services', () => {
     const service = new ReportService(repository as never);
     const input = {
       affectedScopeId: report.affectedScopeId,
+      payoutWalletId: '10000000-0000-4000-8000-000000000500',
       title: report.title,
       description: report.description,
       reproductionSteps: report.reproductionSteps,
@@ -139,6 +140,7 @@ describe('off-chain application services', () => {
     };
     const input = {
       affectedScopeId: '10000000-0000-4000-8000-000000000200',
+      payoutWalletId: '10000000-0000-4000-8000-000000000500',
       title: 'Owner self-submission',
       description: 'Synthetic description',
       reproductionSteps: 'Synthetic steps',

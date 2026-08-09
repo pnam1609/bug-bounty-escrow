@@ -28889,6 +28889,11 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "payoutWalletId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
                   "programImpactIds": {
                     "default": [],
                     "items": {
@@ -28931,6 +28936,7 @@
                 },
                 "required": [
                   "affectedScopeId",
+                  "payoutWalletId",
                   "programImpactIds",
                   "customImpacts",
                   "title",
@@ -30853,6 +30859,53 @@
         },
         "responses": {
           "201": {
+            "description": ""
+          }
+        },
+        "tags": ["Report"]
+      }
+    },
+    "/reports/{id}/payout-wallet": {
+      "put": {
+        "operationId": "ReportController_updatePayoutWallet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedSelectionVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "walletId": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  }
+                },
+                "required": ["walletId", "expectedSelectionVersion"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
             "description": ""
           }
         },
@@ -32835,6 +32888,333 @@
               }
             },
             "description": "Saved Arc USDC payout destination for the authenticated researcher",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
+      }
+    },
+    "/rewards/payout-wallet-challenges": {
+      "post": {
+        "operationId": "RewardController_createPayoutWalletChallenge",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "address": {
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "type": "string"
+                  }
+                },
+                "required": ["address"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "address": {
+                          "pattern": "^0x[a-fA-F0-9]{40}$",
+                          "type": "string"
+                        },
+                        "chainId": {
+                          "const": 5042002,
+                          "type": "number"
+                        },
+                        "expiresAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                          "type": "string"
+                        },
+                        "issuedAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        "message": {
+                          "maxLength": 2048,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "address",
+                        "chainId",
+                        "message",
+                        "issuedAt",
+                        "expiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Short-lived single-use Arc payout-wallet verification challenge",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
+      }
+    },
+    "/rewards/payout-wallet-challenges/{id}/verify": {
+      "post": {
+        "operationId": "RewardController_verifyPayoutWallet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "signature": {
+                    "pattern": "^0x(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$",
+                    "type": "string"
+                  }
+                },
+                "required": ["signature"],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "address": {
+                          "pattern": "^0x[a-fA-F0-9]{40}$",
+                          "type": "string"
+                        },
+                        "chainId": {
+                          "const": 5042002,
+                          "type": "number"
+                        },
+                        "createdAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maskedAddress": {
+                          "pattern": "^0x[a-f0-9]{4}…[a-f0-9]{4}$",
+                          "type": "string"
+                        },
+                        "network": {
+                          "const": "Arc Testnet",
+                          "type": "string"
+                        },
+                        "verificationMethod": {
+                          "const": "eip191_personal_sign",
+                          "type": "string"
+                        },
+                        "verifiedAt": {
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "type": "string"
+                        },
+                        "walletType": {
+                          "const": "evm",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "address",
+                        "maskedAddress",
+                        "walletType",
+                        "network",
+                        "chainId",
+                        "verificationMethod",
+                        "verifiedAt",
+                        "createdAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Verified and durably saved Arc payout wallet",
+            "headers": {
+              "x-correlation-id": {
+                "description": "Safe request correlation identifier",
+                "schema": {
+                  "maxLength": 128,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Reward"]
+      }
+    },
+    "/rewards/payout-wallets": {
+      "get": {
+        "operationId": "RewardController_listPayoutWallets",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "address": {
+                            "pattern": "^0x[a-fA-F0-9]{40}$",
+                            "type": "string"
+                          },
+                          "chainId": {
+                            "const": 5042002,
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "label": {
+                            "maxLength": 80,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maskedAddress": {
+                            "pattern": "^0x[a-f0-9]{4}…[a-f0-9]{4}$",
+                            "type": "string"
+                          },
+                          "network": {
+                            "const": "Arc Testnet",
+                            "type": "string"
+                          },
+                          "verificationMethod": {
+                            "const": "eip191_personal_sign",
+                            "type": "string"
+                          },
+                          "verifiedAt": {
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                            "type": "string"
+                          },
+                          "walletType": {
+                            "const": "evm",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "address",
+                          "maskedAddress",
+                          "walletType",
+                          "network",
+                          "chainId",
+                          "verificationMethod",
+                          "verifiedAt",
+                          "createdAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "success": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success", "data"],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Verified Arc payout wallets owned by the authenticated researcher",
             "headers": {
               "x-correlation-id": {
                 "description": "Safe request correlation identifier",

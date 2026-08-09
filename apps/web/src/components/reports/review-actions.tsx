@@ -771,6 +771,7 @@ function ApproveRewardAction({
   const [basis, setBasis] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const selectedTier = tiers[selectedTierIndex];
+  const recipientReady = report.payoutWallet?.maskedAddress !== undefined;
   const mode: RewardMode =
     selectedTier?.calculationType === 'percentage' ? 'percentage' : 'decided';
   const form = useActionForm(() => {
@@ -845,15 +846,27 @@ function ApproveRewardAction({
       onOpenChange={form.change}
       open={form.open}
       title="Approve the reward"
-      trigger={<Button>Approve reward</Button>}
+      trigger={<Button disabled={!recipientReady}>Approve reward</Button>}
       warning="Approval reserves USDC from the pool and cannot be reversed from this screen."
       confirmDisabled={
         selectedTier === undefined ||
+        !recipientReady ||
         rangeOutOfBounds ||
         flatAmountInvalid ||
         (mode === 'decided' && amount.trim() === '')
       }
     >
+      {report.payoutWallet?.maskedAddress === undefined ? (
+        <Callout title="Researcher reward wallet required" variant="warning">
+          The researcher must select a verified wallet from their private report before a reward can
+          be approved. Program owners cannot choose or override this destination.
+        </Callout>
+      ) : (
+        <Callout title="Researcher reward destination" variant="info">
+          <span className="font-mono">{report.payoutWallet.maskedAddress}</span>
+          <span className="text-text-muted"> · Arc Testnet · verified read-only</span>
+        </Callout>
+      )}
       <Callout title={`Final severity: ${report.finalSeverity ?? 'Unavailable'}`} variant="info">
         <p>
           All active tiers for {report.affectedScope.name} ({report.affectedScope.assetType}) are
@@ -1430,6 +1443,24 @@ export function ReviewActions({
 
       {viewerRole === 'owner' && settlement.data !== undefined ? (
         <SettlementPreflight intent={settlement.data.data} />
+      ) : null}
+
+      {viewerRole === 'owner' && report.status === 'validated' ? (
+        report.payoutWallet?.maskedAddress === undefined ? (
+          <Callout title="Researcher reward wallet required" variant="warning">
+            <p>
+              Reward approval is disabled until the researcher selects a verified wallet for this
+              report. The owner cannot enter or replace the recipient address.
+            </p>
+          </Callout>
+        ) : (
+          <Callout title="Verified researcher recipient" variant="info">
+            <p>
+              <span className="font-mono">{report.payoutWallet.maskedAddress}</span>
+              <span className="text-text-muted"> · Arc Testnet · read-only</span>
+            </p>
+          </Callout>
+        )
       ) : null}
 
       {reviewerWaitingForOwner ? (

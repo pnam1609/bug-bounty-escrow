@@ -16,6 +16,18 @@ const reviewer = {
   role: 'reviewer' as const,
 };
 
+const editableLegacyPayoutWalletState = {
+  snapshot_id: null,
+  wallet_id: null,
+  wallet_label: null,
+  wallet_address: null,
+  chain_id: null,
+  version: 0,
+  verified_at: null,
+  can_edit: true,
+  blocked_reason: null,
+};
+
 function reportRow(researcherId: string = researcher.userId) {
   return {
     id: '10000000-0000-4000-8000-000000000010',
@@ -78,7 +90,10 @@ function reportRow(researcherId: string = researcher.userId) {
   };
 }
 
-function repositoryFor(row: ReturnType<typeof reportRow>) {
+function repositoryFor(
+  row: ReturnType<typeof reportRow>,
+  payoutWalletState: Record<string, unknown> = editableLegacyPayoutWalletState,
+) {
   const query = {
     select: vi.fn(),
     eq: vi.fn(),
@@ -89,6 +104,7 @@ function repositoryFor(row: ReturnType<typeof reportRow>) {
 
   return new ReportRepository({
     from: vi.fn().mockReturnValue(query),
+    rpc: vi.fn().mockResolvedValue({ data: [payoutWalletState], error: null }),
   } as never);
 }
 
@@ -149,10 +165,10 @@ describe('SR-12 private report detail projection', () => {
     query.select.mockReturnValue(query);
     query.eq.mockReturnValue(query);
 
-    await new ReportRepository({ from: vi.fn().mockReturnValue(query) } as never).findAccessible(
-      researcher,
-      '10000000-0000-4000-8000-000000000010',
-    );
+    await new ReportRepository({
+      from: vi.fn().mockReturnValue(query),
+      rpc: vi.fn().mockResolvedValue({ data: [editableLegacyPayoutWalletState], error: null }),
+    } as never).findAccessible(researcher, '10000000-0000-4000-8000-000000000010');
 
     expect(query.select).toHaveBeenCalledWith(
       expect.stringContaining('escrow_transactions!escrow_transactions_report_program_fkey('),
@@ -182,6 +198,36 @@ describe('SR-12 private report detail projection', () => {
       canReopenDuplicate: false,
       canSendBackForReview: false,
     });
+    expect(detail?.payoutWallet).toBeUndefined();
+    expect(detail?.payoutWalletCapability).toEqual({ canEdit: true });
+    expect(detail?.payoutWalletSelectionVersion).toBe(0);
+  });
+
+  it('projects the full selected wallet only to its researcher and exposes the edit version', async () => {
+    const address = '0x1111111111111111111111111111111111111111';
+    const detail = await repositoryFor(reportRow(), {
+      snapshot_id: '10000000-0000-4000-8000-000000000080',
+      wallet_id: '10000000-0000-4000-8000-000000000081',
+      wallet_label: 'Rewards',
+      wallet_address: address,
+      chain_id: 5_042_002,
+      version: 2,
+      verified_at: '2026-07-25T10:00:00.000Z',
+      can_edit: false,
+      blocked_reason: 'report_payout_wallet_settlement_started',
+    }).findAccessible(researcher, '10000000-0000-4000-8000-000000000010');
+
+    expect(detail?.payoutWallet).toMatchObject({
+      walletId: '10000000-0000-4000-8000-000000000081',
+      address,
+      maskedAddress: '0x1111…1111',
+      selectionVersion: 2,
+    });
+    expect(detail?.payoutWalletCapability).toEqual({
+      canEdit: false,
+      blockedReason: 'settlement_started',
+    });
+    expect(detail?.payoutWalletSelectionVersion).toBe(2);
   });
 
   it('returns the same not-found boundary for another researcher before mapping private data', async () => {
@@ -420,5 +466,35 @@ describe('SR-12 private report detail projection', () => {
     });
     const detail = await repositoryForReviewer(row).findAccessible(reviewer, row.id);
     expect(detail).not.toHaveProperty('paidSettlementProof');
+  });
+
+  it('shows reviewers only the masked immutable payout snapshot', async () => {
+    const row = reportRow();
+    Object.assign(row, {
+      payout_wallet_snapshot: {
+        id: '10000000-0000-4000-8000-000000000080',
+        researcher_payout_wallet_id: '10000000-0000-4000-8000-000000000081',
+        wallet_label: 'Rewards',
+        address: '0x1234567890abcdef1234567890abcdef12345678',
+        chain_id: 5_042_002,
+        wallet_verified_at: '2026-07-25T10:00:00.000Z',
+        version: 2,
+        selected_at: '2026-07-26T10:00:00.000Z',
+      },
+    });
+
+    const detail = await repositoryForReviewer(row).findAccessible(reviewer, row.id);
+
+    expect(detail?.payoutWallet).toEqual({
+      label: 'Rewards',
+      maskedAddress: '0x1234…5678',
+      chainId: 5_042_002,
+      network: 'Arc Testnet',
+      verifiedAt: '2026-07-25T10:00:00.000Z',
+      selectedAt: '2026-07-26T10:00:00.000Z',
+      selectionVersion: 2,
+    });
+    expect(detail).not.toHaveProperty('payoutWalletCapability');
+    expect(detail).not.toHaveProperty('payoutWalletSelectionVersion');
   });
 });

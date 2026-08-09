@@ -26,6 +26,7 @@ import type {
   SendBackForReviewRequest,
   StartPaymentRequest,
   UpdateReportRequest,
+  UpdateReportPayoutWalletRequest,
   ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
 
@@ -192,6 +193,16 @@ export class ReportService {
 
     await this.repository.update(principal.userId, reportId, input, reportContentHash(merged));
 
+    return this.get(principal, reportId);
+  }
+
+  public async updatePayoutWallet(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: UpdateReportPayoutWalletRequest,
+  ): Promise<ReportDetail> {
+    if (principal.role !== 'researcher') throw new ForbiddenException();
+    await this.repository.setPayoutWallet(principal.userId, reportId, input);
     return this.get(principal, reportId);
   }
 

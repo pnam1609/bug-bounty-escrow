@@ -2,10 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   payoutWalletSchema,
+  researcherPayoutWalletSchema,
   researcherRewardSummarySchema,
   type PayoutWallet,
   type ResearcherRewardListQuery,
   type ResearcherRewardSummary,
+  type ResearcherPayoutWallet,
   type UpdatePayoutWalletRequest,
 } from '@bug-bounty-escrow/shared';
 
@@ -36,6 +38,40 @@ interface PayoutWalletRpcRow {
   readonly wallet_address: string | null;
   readonly wallet_updated_at: string | null;
   readonly has_active_rewards: boolean;
+}
+
+export interface ResearcherPayoutWalletRow {
+  readonly id: string;
+  readonly researcher_id: string;
+  readonly chain_id: number | string;
+  readonly address: string;
+  readonly label: string | null;
+  readonly status: 'unverified' | 'verified' | 'revoked';
+  readonly verification_method: string | null;
+  readonly verification_message_hash: string | null;
+  readonly verified_at: string | null;
+  readonly revoked_at: string | null;
+  readonly source: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface ResearcherWalletChallengeRow {
+  readonly id: string;
+  readonly researcher_id: string;
+  readonly address: string;
+  readonly chain_id: number | string;
+  readonly domain: string;
+  readonly uri: string;
+  readonly purpose: string;
+  readonly nonce: string;
+  readonly message: string;
+  readonly message_hash: string;
+  readonly issued_at: string;
+  readonly expires_at: string;
+  readonly consumed_at: string | null;
+  readonly invalidated_at: string | null;
+  readonly created_at: string;
 }
 
 type RewardDataRow = RewardRpcRow & {
@@ -114,6 +150,32 @@ function mapPayoutWallet(row: PayoutWalletRpcRow): PayoutWallet {
   });
 }
 
+function mapResearcherPayoutWallet(row: ResearcherPayoutWalletRow): ResearcherPayoutWallet {
+  if (
+    row.status !== 'verified' ||
+    row.verification_method !== 'eip191_personal_sign' ||
+    row.verified_at === null ||
+    row.revoked_at !== null ||
+    Number(row.chain_id) !== 5_042_002
+  ) {
+    throw new Error('The database returned a payout wallet without valid verification evidence');
+  }
+
+  const address = row.address.toLowerCase();
+  return researcherPayoutWalletSchema.parse({
+    id: row.id,
+    ...(row.label === null ? {} : { label: row.label }),
+    address,
+    maskedAddress: maskWalletAddress(address),
+    walletType: 'evm',
+    network: 'Arc Testnet',
+    chainId: 5_042_002,
+    verificationMethod: 'eip191_personal_sign',
+    verifiedAt: row.verified_at,
+    createdAt: row.created_at,
+  });
+}
+
 @Injectable()
 export class RewardRepository {
   public constructor(@Inject(SUPABASE_CLIENT) private readonly supabase: SupabaseClient) {}
@@ -178,5 +240,135 @@ export class RewardRepository {
     }
 
     return mapPayoutWallet(row);
+  }
+
+  public async listVerifiedPayoutWallets(researcherId: string): Promise<ResearcherPayoutWallet[]> {
+    const { data, error } = await this.supabase
+      .from('researcher_payout_wallets')
+      .select(
+        'id,researcher_id,chain_id,address,label,status,verification_method,verification_message_hash,verified_at,revoked_at,source,created_at,updated_at',
+      )
+      .eq('researcher_id', researcherId)
+      .eq('status', 'verified')
+      .is('revoked_at', null)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true });
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    return ((data ?? []) as ResearcherPayoutWalletRow[]).map(mapResearcherPayoutWallet);
+  }
+
+  public async createPayoutWalletChallenge(input: {
+    challengeId: string;
+    researcherId: string;
+    address: string;
+    domain: string;
+    uri: string;
+    purpose: string;
+    nonce: string;
+    message: string;
+    messageHash: string;
+    issuedAt: string;
+    expiresAt: string;
+  }): Promise<string> {
+    const { data, error } = await this.supabase.rpc(
+      'create_researcher_wallet_verification_challenge_atomic',
+      {
+        target_challenge_id: input.challengeId,
+        actor_id: input.researcherId,
+        target_address: input.address.toLowerCase(),
+        target_domain: input.domain,
+        target_uri: input.uri,
+        target_purpose: input.purpose,
+        challenge_nonce: input.nonce,
+        challenge_message: input.message,
+        challenge_message_hash: input.messageHash.toLowerCase(),
+        issued_at: input.issuedAt,
+        expires_at: input.expiresAt,
+      },
+    );
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    if (typeof data !== 'string') throw new Error('The database returned no wallet challenge ID');
+    return data;
+  }
+
+  public async findPayoutWalletChallenge(
+    challengeId: string,
+  ): Promise<ResearcherWalletChallengeRow | null> {
+    const { data, error } = await this.supabase
+      .from('researcher_wallet_verification_challenges')
+      .select(
+        'id,researcher_id,address,chain_id,domain,uri,purpose,nonce,message,message_hash,issued_at,expires_at,consumed_at,invalidated_at,created_at',
+      )
+      .eq('id', challengeId)
+      .maybeSingle();
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    return data as ResearcherWalletChallengeRow | null;
+  }
+
+  public async completePayoutWalletVerification(input: {
+    researcherId: string;
+    challengeId: string;
+    verifiedAddress: string;
+    verifiedMessageHash: string;
+    label?: string;
+  }): Promise<string> {
+    const { data, error } = await this.supabase.rpc(
+      'complete_researcher_wallet_verification_atomic',
+      {
+        actor_id: input.researcherId,
+        target_challenge_id: input.challengeId,
+        verified_address: input.verifiedAddress.toLowerCase(),
+        verified_message_hash: input.verifiedMessageHash.toLowerCase(),
+        wallet_label: input.label ?? null,
+      },
+    );
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    if (typeof data !== 'string') throw new Error('The database returned no verified wallet ID');
+    return data;
+  }
+
+  public async findVerifiedPayoutWallet(
+    researcherId: string,
+    walletId: string,
+  ): Promise<ResearcherPayoutWallet | null> {
+    const { data, error } = await this.supabase
+      .from('researcher_payout_wallets')
+      .select(
+        'id,researcher_id,chain_id,address,label,status,verification_method,verification_message_hash,verified_at,revoked_at,source,created_at,updated_at',
+      )
+      .eq('id', walletId)
+      .eq('researcher_id', researcherId)
+      .eq('status', 'verified')
+      .is('revoked_at', null)
+      .maybeSingle();
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    if (data === null) return null;
+    return mapResearcherPayoutWallet(data as ResearcherPayoutWalletRow);
+  }
+
+  public async findVerifiedPayoutWalletByAddress(
+    researcherId: string,
+    address: string,
+  ): Promise<ResearcherPayoutWallet | null> {
+    const { data, error } = await this.supabase
+      .from('researcher_payout_wallets')
+      .select(
+        'id,researcher_id,chain_id,address,label,status,verification_method,verification_message_hash,verified_at,revoked_at,source,created_at,updated_at',
+      )
+      .eq('researcher_id', researcherId)
+      .eq('chain_id', 5_042_002)
+      .eq('address', address.toLowerCase())
+      .eq('status', 'verified')
+      .is('revoked_at', null)
+      .maybeSingle();
+
+    if (error !== null) throw normalizeDatabaseError(error);
+    if (data === null) return null;
+    return mapResearcherPayoutWallet(data as ResearcherPayoutWalletRow);
   }
 }

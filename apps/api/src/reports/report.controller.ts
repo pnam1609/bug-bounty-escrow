@@ -5,6 +5,7 @@ import {
   Inject,
   Patch,
   Post,
+  Put,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -25,6 +26,7 @@ import {
   sendBackForReviewRequestSchema,
   startPaymentRequestSchema,
   updateReportRequestSchema,
+  updateReportPayoutWalletRequestSchema,
   validateReportRequestSchema,
   type ApproveRewardRequest,
   type ConfirmPaymentRequest,
@@ -45,6 +47,7 @@ import {
   type StartPaymentRequest,
   type SendBackForReviewRequest,
   type UpdateReportRequest,
+  type UpdateReportPayoutWalletRequest,
   type ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
 
@@ -127,6 +130,21 @@ export class ReportController {
     return {
       success: true,
       data: await this.service.update(requirePrincipal(principal), params.id, input),
+    };
+  }
+
+  @Roles('researcher')
+  @Put(':id/payout-wallet')
+  @RateLimit({ limit: 20, windowMs: 60_000 })
+  public async updatePayoutWallet(
+    @ZodParam(reportIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(updateReportPayoutWalletRequestSchema)
+    input: UpdateReportPayoutWalletRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<ReportResponse> {
+    return {
+      success: true,
+      data: await this.service.updatePayoutWallet(requirePrincipal(principal), params.id, input),
     };
   }
 

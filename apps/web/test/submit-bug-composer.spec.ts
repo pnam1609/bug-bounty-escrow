@@ -4,7 +4,7 @@ import {
   SEVERITIES,
   type Program,
 } from '@bug-bounty-escrow/shared';
-import { ClipboardCheck, Crosshair, FileText, Gauge } from 'lucide-react';
+import { ClipboardCheck, Crosshair, FileText, Gauge, Wallet } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -64,7 +64,7 @@ import {
  * attribute would have made unreachable.
  *
  * These are the parts of the composer that are contracts rather than layout: the localStorage key
- * other surfaces read, the four steps the API payload depends on (Figma still shows the retired
+ * other surfaces read, the five steps the API payload depends on (Figma still shows the retired
  * Scope / Details / Proof / Review set), the field-level blur check, and above all the rule that
  * `programImpactIds` may never hold an id the form is not offering — the server rejects those with
  * `impact_not_eligible`, and the researcher can neither see nor clear them.
@@ -81,12 +81,13 @@ describe('local autosave key', () => {
 });
 
 describe('stepper model', () => {
-  it('is the four steps from the flow doc, not the Figma set', () => {
-    expect(STEP_COUNT).toBe(4);
+  it('places reward wallet after the main report and before review', () => {
+    expect(STEP_COUNT).toBe(5);
     expect(SUBMIT_BUG_STEPS.map((step) => step.label)).toEqual([
       'Assets & Impact',
       'Severity',
       'Main Report',
+      'Reward Wallet',
       'Review',
     ]);
   });
@@ -96,6 +97,7 @@ describe('stepper model', () => {
       Crosshair,
       Gauge,
       FileText,
+      Wallet,
       ClipboardCheck,
     ]);
     for (const step of SUBMIT_BUG_STEPS) {

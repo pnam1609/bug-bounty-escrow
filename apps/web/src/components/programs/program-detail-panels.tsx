@@ -231,7 +231,7 @@ export function InformationPanel({ program }: { readonly program: Program }) {
               <BulletList
                 items={[
                   POC_POLICY_LABELS[rules.pocPolicy],
-                  'No wallet connection required to browse or submit',
+                  'Browse without a wallet; select a verified reward wallet when submitting',
                   'A human reviewer decides the final severity and the reward',
                 ]}
               />
@@ -257,9 +257,7 @@ export function InformationPanel({ program }: { readonly program: Program }) {
             <CardHeader>
               <CardTitle>Reward and eligibility policy</CardTitle>
             </CardHeader>
-            <p className="whitespace-pre-line text-body-sm text-text-muted">
-              {rules.rewardPolicy}
-            </p>
+            <p className="whitespace-pre-line text-body-sm text-text-muted">{rules.rewardPolicy}</p>
           </Card>
         )}
 
@@ -450,7 +448,8 @@ export function ScopePanel({
                             In scope
                           </span>
                         </div>
-                        {scope.assetUrl === undefined && scope.contractAddress === undefined ? null : (
+                        {scope.assetUrl === undefined &&
+                        scope.contractAddress === undefined ? null : (
                           <p className="truncate text-label-md text-text-muted">
                             {scope.assetUrl ?? scope.contractAddress}
                           </p>
@@ -527,9 +526,7 @@ export function ScopePanel({
                             aria-hidden="true"
                             className="size-2 shrink-0 rounded-full bg-error"
                           />
-                          <p className="text-label-lg font-semibold text-text">
-                            {scope.assetName}
-                          </p>
+                          <p className="text-label-lg font-semibold text-text">{scope.assetName}</p>
                           <span className="rounded-full border border-border px-md py-xs text-label-sm uppercase text-text-muted">
                             {ASSET_TYPE_LABELS[scope.assetType]}
                           </span>
@@ -538,7 +535,8 @@ export function ScopePanel({
                             Out of scope
                           </span>
                         </div>
-                        {scope.assetUrl === undefined && scope.contractAddress === undefined ? null : (
+                        {scope.assetUrl === undefined &&
+                        scope.contractAddress === undefined ? null : (
                           <p className="truncate text-label-md text-text-muted">
                             {scope.assetUrl ?? scope.contractAddress}
                           </p>

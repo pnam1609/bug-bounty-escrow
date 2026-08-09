@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthenticationGuard } from '../src/auth/authentication.guard.js';
 import { RolesGuard } from '../src/auth/roles.guard.js';
 import { ApiExceptionFilter } from '../src/common/filters/api-exception.filter.js';
+import { API_CONFIG } from '../src/config/api-config.module.js';
 import type { AppLogger } from '../src/logging/app-logger.service.js';
 import { RewardController } from '../src/rewards/reward.controller.js';
 import { RewardRepository } from '../src/rewards/reward.repository.js';
@@ -62,7 +63,11 @@ describe('RW-02 researcher reward HTTP contract', () => {
     const repository = new RewardRepository({ rpc } as never);
     const module = await Test.createTestingModule({
       controllers: [RewardController],
-      providers: [RewardService, { provide: RewardRepository, useValue: repository }],
+      providers: [
+        RewardService,
+        { provide: RewardRepository, useValue: repository },
+        { provide: API_CONFIG, useValue: { WEB_APP_ORIGIN: 'https://web.example.test' } },
+      ],
     }).compile();
 
     app = module.createNestApplication();
@@ -292,32 +297,13 @@ describe('RW-02 researcher reward HTTP contract', () => {
     });
   });
 
-  it('updates through the dedicated wallet RPC and never accepts a client-selected identity', async () => {
+  it('retires the arbitrary-address singleton write in favor of signed verification', async () => {
     const replacement = `0x${'B'.repeat(40)}`;
-    rpc.mockResolvedValue({
-      data: [
-        {
-          wallet_address: replacement.toLowerCase(),
-          wallet_updated_at: '2026-07-27T13:00:00.000Z',
-          has_active_rewards: true,
-        },
-      ],
-      error: null,
-    });
-
     const response = await walletUpdate()
       .send({ address: replacement, confirmActiveRewardChange: true })
-      .expect(200);
+      .expect(410);
 
-    expect(response.body.data.maskedAddress).toBe('0xbbbb…bbbb');
-    expect(rpc).toHaveBeenCalledWith('set_researcher_payout_wallet', {
-      actor_id: RESEARCHER_ID,
-      new_wallet_address: replacement.toLowerCase(),
-      confirm_active_reward_change: true,
-    });
-
-    rpc.mockClear();
-    await walletUpdate().send({ address: replacement, researcherId: PROGRAM_ID }).expect(400);
+    expect(response.body.error.code).toBe('payout_wallet_verification_required');
     expect(rpc).not.toHaveBeenCalled();
   });
 
@@ -326,21 +312,6 @@ describe('RW-02 researcher reward HTTP contract', () => {
     await walletUpdate().send({ address: PAYOUT_WALLET, privateKey: 'never' }).expect(400);
 
     expect(rpc).not.toHaveBeenCalled();
-  });
-
-  it('surfaces the race-safe replacement confirmation requirement as a stable conflict', async () => {
-    rpc.mockResolvedValue({
-      data: null,
-      error: {
-        code: '22023',
-        details: 'wallet_change_confirmation_required',
-        message: 'Business rule violation',
-      },
-    });
-
-    const response = await walletUpdate().send({ address: PAYOUT_WALLET }).expect(409);
-
-    expect(response.body.error.code).toBe('wallet_change_confirmation_required');
   });
 
   it('rejects anonymous and wrong-role wallet reads and writes before any RPC', async () => {

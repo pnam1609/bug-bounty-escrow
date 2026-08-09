@@ -29,6 +29,8 @@ ký approval và khởi động reward settlement.
 - Kết quả AI review đã được tự động tạo từ lần submit/resubmit hiện hành, persist theo report revision
   và content hash, rồi hiển thị read-only như thông tin tư vấn cho human reviewer.
 - Owner-only reward approval cho tier range, flat và percentage.
+- Read-only researcher payout-wallet snapshot and server lock/capability state; settlement recipient
+  is never owner-entered or client-overridden.
 - Durable Arc reward settlement, recovery và terminal presentation.
 - Desktop, tablet và mobile tại 1440 px, 768 px và 390 px.
 - Loading, empty, filtered-empty, retry, unavailable và access-denied states.
@@ -37,6 +39,8 @@ ký approval và khởi động reward settlement.
 ### Ngoài phạm vi
 
 - Researcher submit/edit flow; xem `submit-bug-researcher-flow-for-figma.md`.
+- Researcher wallet add/verify/change UI; owner review only consumes the server-authorized report
+  snapshot and cannot manage a researcher's wallet registry.
 - Researcher My Reports; xem `my-reports-researcher-flow-for-figma.md`.
 - Tạo, deploy hoặc fund program escrow; xem `create-program-owner-flow-for-figma.md`.
 - Public disclosure/Known Issues sau khi program end.
@@ -137,6 +141,8 @@ Sample report IDs, wallet, reward, comments và timestamps chỉ là fixture rev
 - Được request information, validate, reject và mark duplicate ở transition hợp lệ.
 - Là role duy nhất được tạo/cancel reward settlement intent, kết nối owner wallet, ký
   `approveReward` và resume/reconcile payout.
+- Không được nhập, thay hoặc chọn researcher recipient. Intent creation resolves the locked payout
+  snapshot from the report on the server.
 - Không được review report của program owner khác dù biết UUID.
 
 ### Assigned reviewer
@@ -153,6 +159,8 @@ Sample report IDs, wallet, reward, comments và timestamps chỉ là fixture rev
 - Chỉ đọc report của chính mình ở `/reports/:id`, trả lời comment và resubmit khi
   `needs_information`.
 - Không thấy internal reviewer identity/assignment, private review note hoặc settlement control.
+- Có thể đổi report payout wallet ở researcher detail chỉ khi server capability cho phép; owner và
+  reviewer không có action đó.
 
 ### Privacy boundary
 
@@ -164,6 +172,9 @@ Sample report IDs, wallet, reward, comments và timestamps chỉ là fixture rev
   console, error tracker, notification preview hoặc public cache.
 - 403 và 404 dùng cùng safe detail `This report is not available` để tránh enumeration.
 - Logout hoặc principal change phải clear/invalidate toàn bộ private query cache.
+- Researcher payout address is private settlement metadata: do not place it in inbox rows, analytics,
+  notifications, public cache or AI input. Owner/reviewer see it only where settlement authorization
+  requires it, masked by default with an explicit accessible copy action.
 
 ## 5. Routes và navigation
 
@@ -227,6 +238,14 @@ khả dụng.
 `resolvedAt` là human review đầu tiên chuyển sang `validated | rejected | duplicate`; thời gian
 reward/payout không thuộc resolution metric. Không tạo status UI mới để biểu diễn modal, wallet
 prompt hoặc provider progress.
+
+Every newly submitted report has one verified Arc EVM payout-wallet snapshot. A researcher may
+replace it before settlement only through the server capability in their private detail. Creating a
+reward-settlement intent atomically locks the current eligible snapshot with the report/program/pool;
+after this point no client role can swap the recipient. Legacy reports without a valid snapshot may
+still be reviewed/validated, but owner approval is fail-closed with
+`researcher_payout_wallet_required` and a researcher-directed recovery message; the owner must never
+type or supply a replacement address.
 
 ### 6.2 Action availability
 
@@ -329,6 +348,9 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - PoC/reproduction steps; Secret Gist mở tab mới với `noopener noreferrer`.
 - Chỉ attachment status `uploaded` được render.
 - Content hash hiển thị đầy đủ để đối chiếu, không dùng làm public identifier.
+- Researcher payout wallet appears only in the authorized settlement summary: masked/checksummed
+  report snapshot, `Verified`, `EVM · Arc Testnet` and accessible copy. It is read-only for both owner
+  and reviewer and is not sent to AI.
 - Private comments dùng chung giữa researcher và authorized owner/reviewer.
 
 ### Persisted AI summary
@@ -492,7 +514,15 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
   context-only and visibly marked not applicable; only the exact final-severity tier can be chosen.
   If no exact tier is returned, the owner cannot submit an approval.
 - Escrow/chain `Arc Testnet`, token `USDC`.
-- Available pool, reserved pool, amount/basis và recipient wallet được server derive/verify.
+- Available pool, reserved pool, amount/basis và recipient wallet được server derive/verify. Recipient
+  comes only from the current immutable report payout-wallet snapshot; no owner field, request body
+  address, connected owner address or mutable researcher default may override it.
+- Preflight shows masked/checksummed researcher address, `Verified`, `EVM · Arc Testnet`, snapshot
+  timestamp/version and `Locked for this reward` once intent creation succeeds.
+- A legacy/malformed report without a valid snapshot blocks intent creation with
+  `researcher_payout_wallet_required`. UI says `The researcher must add a verified payout wallet to
+  this report before a reward can be approved`, keeps the report `validated`, offers no arbitrary
+  address input and allows status refresh after the researcher fixes it.
 - Connected wallet phải đúng locked owner/admin wallet; account/network mismatch fail closed.
 - Reviewer không phải owner chỉ thấy waiting state, không thấy connect/sign controls.
 - Owner approval phải dùng RainbowKit Connect/account modal và Wagmi connector đã chọn. Nếu chưa
@@ -522,18 +552,26 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 
 ### Reserve semantics
 
-- Create intent dùng idempotency key UUID v4 và owner wallet.
+- Create intent dùng idempotency key UUID v4 và owner wallet. Request includes no researcher address;
+  the server locks and snapshots the report recipient atomically with intent creation.
 - Database atomically khóa report/program pool, snapshot content hash/tier/recipient và reserve đúng
   một amount. Retry cùng intent/key không reserve lần hai.
 - `Approve reward` không đồng nghĩa `Paid`; chỉ sau exact Arc settlement proof report mới tới paid.
 - Intent còn `awaiting_approval` và chắc chắn chưa submit có thể cancel để release reservation sau
   server Arc scan. Có known/uncertain submission thì không cho cancel mù quáng.
+- A race between researcher `Edit wallet` and owner intent creation is serialized under the same
+  report lock/optimistic version. Exactly one snapshot wins: a successful edit is what the intent
+  locks, or a successful intent returns a stable lock conflict to the edit. No intent may combine an
+  old wallet ID with a new address or observe a half-updated snapshot.
 
 ## 13. RR-06 — Owner-only durable Arc reward settlement
 
 ### 13.1 Nguyên tắc
 
 - Browser owner chỉ ký **một** `approveReward` cho immutable report key/content hash/recipient/amount.
+- `recipient` is the server-locked researcher wallet snapshot from the durable intent. Before signing,
+  client compares the displayed intent recipient with fresh server intent data but cannot edit it;
+  the contract call is built from that server payload and backend verifies the exact same address.
 - `Approve reward` và `Continue approval` đều dùng đúng RainbowKit/Wagmi account/provider bridge;
   chúng không mở wallet provider legacy hoặc tự động chọn wallet cài trong browser.
 - Sau approval confirmed, Circle developer-controlled wallet gọi permissionless `payReward`.
@@ -881,6 +919,17 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - Author lấy từ token; client không gửi author ID.
 - Notification failure không được tạo duplicate comment khi retry.
 
+### Payout wallet snapshot
+
+- Owner/reviewer receive only the report-authorized settlement projection, never the researcher's
+  complete saved-wallet list or verification signature/challenge.
+- Snapshot is masked by default; copy reveals the exact address intentionally and has an accessible
+  full-address label. Do not add it to inbox rows, comments, notifications or AI context.
+- Owner/reviewer controls are read-only. Any request containing a client researcher address is
+  ignored/rejected fail-closed; server settlement policy resolves the locked report snapshot.
+- Missing/invalid/changed/locked recipient errors are stable and safe. UI refetches report + current
+  intent after timeout/conflict and never substitutes the connected owner wallet.
+
 ### AI
 
 - AI review tự động được queue ngay sau mỗi successful submit/resubmit; không tự chạy lại do mở,
@@ -939,6 +988,8 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - Filter sheet/dialog có accessible name, focus trap, close semantics và restore focus.
 - `aria-live="polite"` cho load count/progress; error cần chú ý dùng `role="alert"` có kiểm soát.
 - Wallet/settlement progress không announce lặp theo mỗi poll.
+- Masked researcher address retains an accessible exact value for copy; read-only/locked semantics
+  are conveyed with text, not disabled styling or color alone.
 - Relative time có exact datetime trong title/accessible description.
 - Icon decorative là `aria-hidden`; icon-only control có accessible label.
 - `prefers-reduced-motion` tắt animation không thiết yếu; spinner vẫn có text loading.
@@ -999,6 +1050,13 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
       `> 0.40` and current sequence `> 1`; exactly 40%, `possible`, first/missing sequence hide it.
       Clicking only opens the existing human confirmation dialog; server role/status/program/cycle
       authorization remains authoritative and AI cannot mutate lifecycle or payout.
+- [ ] AC-20 — Reward preflight/intent uses only the server-authorized report payout-wallet snapshot.
+      Owner/reviewer cannot type, select or override researcher recipient; request-body address,
+      connected owner wallet and mutable profile/default are never recipient authority.
+- [ ] AC-21 — Missing/invalid legacy snapshot keeps report validated and returns
+      `researcher_payout_wallet_required` with researcher-directed recovery. Intent creation and
+      researcher wallet edit share an atomic race policy; exactly one locked snapshot wins and every
+      post-intent edit is rejected without partial reservation/signature/payout.
 
 ## 20. Test matrix
 
@@ -1018,6 +1076,10 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 | Reward      | Range/flat ngoài tier hoặc pool thiếu          | Inline range error/disabled confirm; không tạo/reserve intent                   |
 | Reward      | Percentage basis                               | Server derive amount/cap đúng; client không override amount                     |
 | Wallet      | Wrong owner wallet/network                     | Fail closed trước signature; không reserve/sign sai account                     |
+| Recipient   | Report has verified wallet snapshot             | Intent locks exact server snapshot; owner request has no researcher address      |
+| Recipient   | Legacy report missing/invalid snapshot           | `researcher_payout_wallet_required`; validated remains; no owner address input   |
+| Race        | Researcher edits wallet as owner creates intent  | One atomic winner; intent has one coherent recipient; losing client refetches    |
+| Recipient   | Owner forges/overrides researcher address        | Server rejects/ignores fail-closed; no reserve/sign/payout to forged address     |
 | Recovery    | Wallet reject chắc chắn trước submit           | Continue/cancel theo safe scan; không report paid                               |
 | Recovery    | Unknown wallet outcome hoặc reload sau tx      | Resume/reconcile only; không prompt approval lần hai                            |
 | Payout      | Circle accepts nhưng Arc chưa confirmed        | Chưa paid; tiếp tục provider/Arc reconciliation                                 |
@@ -1050,7 +1112,8 @@ Không chuyển ticket sang Done trước khi đủ các gate sau:
    off-chain settlement endpoints không được frontend gọi; AI run/result provenance và status có
    canonical read contract.
 4. Security review: authorization/RLS, non-enumeration, private cache clearing, attachment signed URL,
-   analytics/log redaction và owner-wallet enforcement có automated evidence.
+   analytics/log redaction, owner-wallet enforcement and immutable researcher-recipient binding có
+   automated evidence.
 5. State-machine review: invalid/racing/retry/uncertain/replacement paths có integration tests và
    không double decision, reserve, approval signature hoặc payout.
 6. Arc settlement review: exact receipt/event/token/address/amount/accounting proofs có unit,

@@ -296,6 +296,9 @@ export {
   reportInformationRequestSchema,
   reportReviewEventSchema,
   reportPaidSettlementProofSchema,
+  reportPayoutWalletBlockedReasonSchema,
+  reportPayoutWalletCapabilitySchema,
+  reportPayoutWalletSchema,
   reportListQuerySchema,
   reportListResponseSchema,
   reportProgramFilterOptionSchema,
@@ -311,6 +314,7 @@ export {
   signedUploadResponseSchema,
   startPaymentRequestSchema,
   updateReportRequestSchema,
+  updateReportPayoutWalletRequestSchema,
   validateReportRequestSchema,
 } from './contracts/report.js';
 export {
@@ -353,6 +357,9 @@ export type {
   ReportAiReview,
   ReportReviewEvent,
   ReportPaidSettlementProof,
+  ReportPayoutWallet,
+  ReportPayoutWalletBlockedReason,
+  ReportPayoutWalletCapability,
   ReportDetail,
   ReportImpact,
   ReportListQuery,
@@ -366,6 +373,7 @@ export type {
   SignedUploadResponse,
   StartPaymentRequest,
   UpdateReportRequest,
+  UpdateReportPayoutWalletRequest,
   ValidateReportRequest,
 } from './contracts/report.js';
 export {
@@ -390,8 +398,19 @@ export {
   researcherRewardSummarySchema,
   updatePayoutWalletRequestSchema,
   updatePayoutWalletResponseSchema,
+  createPayoutWalletChallengeRequestSchema,
+  payoutWalletChallengePurposeSchema,
+  payoutWalletChallengeResponseSchema,
+  payoutWalletChallengeSchema,
+  researcherPayoutWalletListResponseSchema,
+  researcherPayoutWalletResponseSchema,
+  researcherPayoutWalletSchema,
+  verifyPayoutWalletRequestSchema,
 } from './contracts/reward.js';
 export type {
+  CreatePayoutWalletChallengeRequest,
+  PayoutWalletChallenge,
+  PayoutWalletChallengeResponse,
   PayoutWallet,
   PayoutWalletResponse,
   ResearcherRewardListQuery,
@@ -400,8 +419,12 @@ export type {
   ResearcherRewardPaymentStatus,
   ResearcherRewardStatus,
   ResearcherRewardSummary,
+  ResearcherPayoutWallet,
+  ResearcherPayoutWalletListResponse,
+  ResearcherPayoutWalletResponse,
   UpdatePayoutWalletRequest,
   UpdatePayoutWalletResponse,
+  VerifyPayoutWalletRequest,
 } from './contracts/reward.js';
 export { apiEnvironmentSchema, parseApiEnvironment } from './env/api.js';
 export type { AiProvider, ApiEnvironment, LogLevel, RuntimeMode } from './env/api.js';

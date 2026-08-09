@@ -72,6 +72,8 @@ function assertAtLeastOneImpact(
 export const createReportRequestSchema = z
   .object({
     affectedScopeId: uuidSchema,
+    /** Opaque server-issued ID; report creation never accepts a payout address. */
+    payoutWalletId: uuidSchema,
     ...impactSelectionShape,
     title: nonEmptyTrimmedTextSchema.max(300),
     description: nonEmptyTrimmedTextSchema.max(50_000),
@@ -348,6 +350,51 @@ export const reportCapabilitiesSchema = z
   })
   .strict();
 
+export const reportPayoutWalletBlockedReasonSchema = z.enum([
+  'report_closed',
+  'program_ended',
+  'settlement_started',
+]);
+
+export const reportPayoutWalletCapabilitySchema = z
+  .object({
+    canEdit: z.boolean(),
+    blockedReason: reportPayoutWalletBlockedReasonSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.canEdit === (value.blockedReason !== undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['blockedReason'],
+        message: 'A payout-wallet block reason is required exactly when editing is unavailable',
+      });
+    }
+  });
+
+export const reportPayoutWalletSchema = z
+  .object({
+    /** Present only in the owning researcher's private projection. */
+    walletId: uuidSchema.optional(),
+    label: z.string().trim().min(1).max(80).optional(),
+    /** Present only in the owning researcher's private projection. */
+    address: evmAddressSchema.optional(),
+    maskedAddress: z.string().regex(/^0x[a-f0-9]{4}…[a-f0-9]{4}$/),
+    chainId: z.literal(5_042_002),
+    network: z.literal('Arc Testnet'),
+    verifiedAt: isoDateTimeSchema,
+    selectedAt: isoDateTimeSchema.optional(),
+    selectionVersion: z.number().int().positive(),
+  })
+  .strict();
+
+export const updateReportPayoutWalletRequestSchema = z
+  .object({
+    walletId: uuidSchema,
+    expectedSelectionVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
 export const reportInformationRequestSchema = z
   .object({
     message: z.string(),
@@ -498,6 +545,10 @@ export const reportDetailSchema = reportSummarySchema
     aiReview: reportAiReviewSchema.optional(),
     /** Active program tiers for this report's asset/severity preflight. */
     rewardTiers: z.array(rewardTierSchema).optional(),
+    /** Optional during expand/contract rollout; missing state is treated as fail-closed. */
+    payoutWallet: reportPayoutWalletSchema.optional(),
+    payoutWalletCapability: reportPayoutWalletCapabilitySchema.optional(),
+    payoutWalletSelectionVersion: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -562,6 +613,14 @@ export type GenerateAiReviewRequest = z.output<typeof generateAiReviewRequestSch
 export type UpdateReportRequest = z.output<typeof updateReportRequestSchema>;
 export type RequestInformationRequest = z.output<typeof requestInformationRequestSchema>;
 export type ValidateReportRequest = z.output<typeof validateReportRequestSchema>;
+export type ReportPayoutWalletBlockedReason = z.output<
+  typeof reportPayoutWalletBlockedReasonSchema
+>;
+export type ReportPayoutWalletCapability = z.output<typeof reportPayoutWalletCapabilitySchema>;
+export type ReportPayoutWallet = z.output<typeof reportPayoutWalletSchema>;
+export type UpdateReportPayoutWalletRequest = z.output<
+  typeof updateReportPayoutWalletRequestSchema
+>;
 export type RejectReportRequest = z.output<typeof rejectReportRequestSchema>;
 export type MarkDuplicateRequest = z.output<typeof markDuplicateRequestSchema>;
 export type ReopenDuplicateRequest = z.output<typeof reopenDuplicateRequestSchema>;

@@ -294,7 +294,7 @@ export function ProgramDetailView({ slug }: { readonly slug: string }) {
             {!canSubmitReports
               ? 'Program owner accounts cannot submit reports'
               : isAcceptingReports
-                ? 'Private by default · No wallet required'
+                ? 'Private by default · Verified reward wallet required'
                 : hasEnded
                   ? 'Program ended · Browse approved disclosures'
                   : 'This program is not accepting reports right now'}

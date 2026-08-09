@@ -168,11 +168,20 @@ describe('off-chain shared contracts', () => {
   it('requires at least one structured impact on a report submission', () => {
     const base = {
       affectedScopeId: '10000000-0000-4000-8000-000000000001',
+      payoutWalletId: '10000000-0000-4000-8000-000000000003',
       title: 'Issue',
       description: 'Description',
       reproductionSteps: 'Steps',
       proposedSeverity: 'high',
     };
+
+    expect(
+      createReportRequestSchema.safeParse({
+        ...base,
+        payoutWalletId: undefined,
+        programImpactIds: ['10000000-0000-4000-8000-000000000002'],
+      }).success,
+    ).toBe(false);
 
     // No free-text fallback exists: the selection is relational or researcher-proposed.
     expect(createReportRequestSchema.safeParse(base).success).toBe(false);
@@ -189,9 +198,9 @@ describe('off-chain shared contracts', () => {
       }).success,
     ).toBe(true);
     // Whitespace does not count as a custom impact.
-    expect(
-      createReportRequestSchema.safeParse({ ...base, customImpacts: ['   '] }).success,
-    ).toBe(false);
+    expect(createReportRequestSchema.safeParse({ ...base, customImpacts: ['   '] }).success).toBe(
+      false,
+    );
   });
 
   it('parses a complete create-program payload and applies the rules defaults', () => {
@@ -313,7 +322,12 @@ describe('off-chain shared contracts', () => {
       (program: ReturnType<typeof validCreateProgram>) => ({
         rewardTiers: [
           ...program.rewardTiers,
-          { assetType: 'smart_contract', severity: 'critical', calculationType: 'flat', flatAmount: '10' },
+          {
+            assetType: 'smart_contract',
+            severity: 'critical',
+            calculationType: 'flat',
+            flatAmount: '10',
+          },
         ],
       }),
     ],
@@ -321,7 +335,13 @@ describe('off-chain shared contracts', () => {
       'a range tier whose minimum exceeds its maximum',
       () => ({
         rewardTiers: [
-          { assetType: 'smart_contract', severity: 'critical', calculationType: 'range', minReward: '100', maxReward: '10' },
+          {
+            assetType: 'smart_contract',
+            severity: 'critical',
+            calculationType: 'range',
+            minReward: '100',
+            maxReward: '10',
+          },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
         ],
       }),
@@ -330,7 +350,12 @@ describe('off-chain shared contracts', () => {
       'a flat tier without a positive amount',
       () => ({
         rewardTiers: [
-          { assetType: 'smart_contract', severity: 'critical', calculationType: 'flat', flatAmount: '0' },
+          {
+            assetType: 'smart_contract',
+            severity: 'critical',
+            calculationType: 'flat',
+            flatAmount: '0',
+          },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
         ],
       }),
@@ -339,7 +364,13 @@ describe('off-chain shared contracts', () => {
       'a percentage tier with out-of-range basis points',
       () => ({
         rewardTiers: [
-          { assetType: 'smart_contract', severity: 'critical', calculationType: 'percentage', percentageBps: 10_001, maxRewardCap: '1000' },
+          {
+            assetType: 'smart_contract',
+            severity: 'critical',
+            calculationType: 'percentage',
+            percentageBps: 10_001,
+            maxRewardCap: '1000',
+          },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
         ],
       }),
@@ -348,7 +379,12 @@ describe('off-chain shared contracts', () => {
       'a percentage tier without a cap',
       () => ({
         rewardTiers: [
-          { assetType: 'smart_contract', severity: 'critical', calculationType: 'percentage', percentageBps: 1_000 },
+          {
+            assetType: 'smart_contract',
+            severity: 'critical',
+            calculationType: 'percentage',
+            percentageBps: 1_000,
+          },
           { assetType: 'website', severity: 'high', calculationType: 'flat', flatAmount: '2500' },
         ],
       }),
@@ -365,9 +401,9 @@ describe('off-chain shared contracts', () => {
   ] as const)('rejects reward tiers with %s', (_case, override) => {
     const program = validCreateProgram();
 
-    expect(
-      createProgramRequestSchema.safeParse({ ...program, ...override(program) }).success,
-    ).toBe(false);
+    expect(createProgramRequestSchema.safeParse({ ...program, ...override(program) }).success).toBe(
+      false,
+    );
   });
 
   it('rejects impact titles that collide after database normalization', () => {

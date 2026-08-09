@@ -31,6 +31,7 @@ const firstPayload: CreateReportRequest = {
   severityMismatchAcknowledged: false,
   title: 'Original title',
   description: 'Original report body',
+  payoutWalletId: '10000000-0000-4000-8000-000000000099',
 };
 
 afterEach(() => {
@@ -89,9 +90,9 @@ describe('SR-11 post-create attachment recovery', () => {
     const upload = vi.fn(async () => true);
     const file = new File(['proof'], 'poc.pdf', { type: 'application/pdf' });
 
-    await expect(
-      retryAttachmentOnly({ file, reportId: 'report-existing', upload }),
-    ).resolves.toBe(true);
+    await expect(retryAttachmentOnly({ file, reportId: 'report-existing', upload })).resolves.toBe(
+      true,
+    );
     expect(upload).toHaveBeenCalledOnce();
     expect(upload).toHaveBeenCalledWith('report-existing', file);
   });
@@ -166,9 +167,7 @@ describe('SR-11 discard and terminal states', () => {
     );
 
     expect(markup).toContain('Your session expired before the report was submitted.');
-    expect(markup).toContain(
-      'Sign in again to continue with the draft saved in this browser.',
-    );
+    expect(markup).toContain('Sign in again to continue with the draft saved in this browser.');
     expect(markup).toContain('Sign in again');
     expect(composerReturnTo('program/a?unsafe=true')).toBe(
       '/reports/new?programSlug=program%2Fa%3Funsafe%3Dtrue',
