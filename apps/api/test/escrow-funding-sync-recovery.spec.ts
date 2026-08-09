@@ -185,9 +185,14 @@ describe('funding sync terminal recovery', () => {
       role: 'owner' as const,
     };
 
-    await expect(service.reconcileFunding(principal, PROGRAM_ID, INTENT_ID)).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
+    const syncFailure = await service
+      .reconcileFunding(principal, PROGRAM_ID, INTENT_ID)
+      .catch((error: unknown) => error);
+    expect(syncFailure).toBeInstanceOf(ServiceUnavailableException);
+    expect((syncFailure as ServiceUnavailableException).getResponse()).toMatchObject({
+      success: false,
+      error: { code: 'funding_sync_failed' },
+    });
     await expect(service.reconcileFunding(principal, PROGRAM_ID, INTENT_ID)).rejects.toBeInstanceOf(
       ConflictException,
     );

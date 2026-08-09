@@ -830,6 +830,7 @@ describe('CP-12 wallet and retry safety', () => {
     expect(canStartDestinationOperation('sync_failed')).toBe(false);
     expect(fundingRecoveryAction('delivery_pending')).toBe('Continue delivery');
     expect(fundingRecoveryAction('source_submitted')).toBe('Check delivery recovery');
+    expect(fundingRecoveryAction('syncing_pool')).toBe('Continue verification');
     expect(fundingSourceSubmittedRecoveryMessage('send')).toContain('never submit another Send');
     expect(fundingSourceSubmittedRecoveryMessage('bridge')).toContain(
       'original in-memory BridgeResult',

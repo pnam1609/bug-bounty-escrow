@@ -1213,7 +1213,12 @@ export class EscrowService {
           circleResult.failureCode ?? 'circle_sync_failed',
           leaseId,
         );
-        throw new ServiceUnavailableException('funding_sync_failed');
+        throw new ServiceUnavailableException(
+          createApiErrorResponse(
+            'funding_sync_failed',
+            'Arc funding was verified, but the reward-pool sync did not complete. Retry sync; no new wallet transaction is required.',
+          ),
+        );
       }
       const sync = await this.arc.verifyFundingSync({
         escrowAddress: escrow.contract_address,
@@ -1254,7 +1259,10 @@ export class EscrowService {
           leaseId,
         );
       }
-      this.rethrowProviderError(error);
+      this.rethrowProviderError(
+        error,
+        'Funding was verified, but the reward-pool sync is temporarily unavailable. Retry sync; no new wallet transaction is required.',
+      );
     }
   }
 
@@ -1540,9 +1548,15 @@ export class EscrowService {
     return row;
   }
 
-  private rethrowProviderError(error: unknown): never {
+  private rethrowProviderError(error: unknown, retryableMessage?: string): never {
     if (error instanceof EscrowProviderError) {
-      if (error.retryable) throw new ServiceUnavailableException(error.code);
+      if (error.retryable) {
+        throw new ServiceUnavailableException(
+          retryableMessage === undefined
+            ? error.code
+            : createApiErrorResponse(error.code, retryableMessage),
+        );
+      }
       throw new ConflictException(error.code);
     }
     throw error;

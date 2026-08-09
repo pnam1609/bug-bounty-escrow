@@ -690,6 +690,11 @@ export function ProgramLifecycle({
   const [formError, setFormError] = useState<Record<string, string>>({});
   const walletWasConnected = useRef(false);
   const walletIdentity = useRef<string | undefined>(undefined);
+  const verifiedFundingIntentRef = useRef<VerifiedFundingIntent | undefined>(undefined);
+
+  // Keep the latest durable intent available to the wallet bridge without making the
+  // connector effect re-run after every funding-status update.
+  verifiedFundingIntentRef.current = verifiedFundingIntent;
 
   const chainLabel = 'Arc Testnet';
   const escrowAddress = confirmedEscrowAddress ?? program.escrowAddress;
@@ -753,9 +758,9 @@ export function ProgramLifecycle({
         if (cancelled) return;
         setWalletSession(connected);
         const lockedIntent =
-          verifiedFundingIntent !== undefined &&
-          !isExpiredEvidenceFreeFundingIntent(verifiedFundingIntent)
-            ? verifiedFundingIntent
+          verifiedFundingIntentRef.current !== undefined &&
+          !isExpiredEvidenceFreeFundingIntent(verifiedFundingIntentRef.current)
+            ? verifiedFundingIntentRef.current
             : undefined;
         if (
           lockedIntent !== undefined &&
@@ -785,7 +790,7 @@ export function ProgramLifecycle({
     return () => {
       cancelled = true;
     };
-  }, [connector, isConnected, rainbowAddress, rainbowChainId, verifiedFundingIntent]);
+  }, [connector, isConnected, rainbowAddress, rainbowChainId]);
 
   useEffect(() => {
     if (session?.access_token === undefined || deployed) return;
@@ -2146,9 +2151,42 @@ export function ProgramLifecycle({
     } catch (error) {
       if (
         !(error instanceof ApiClientError) ||
-        error.code !== 'funding_reconciliation_in_progress'
+        (error.code !== 'funding_reconciliation_in_progress' && error.status !== 503)
       ) {
         throw error;
+      }
+
+      if (error.status === 503) {
+        // Destination evidence is already durable before reconcile starts. A transient Circle
+        // sync failure must restore the same intent and never send the owner back to a wallet
+        // signature step. The server may still hold the reconciliation lease, so hydrate the
+        // current status and let the existing recovery action retry only sync.
+        try {
+          const current = await apiRequest(
+            `/api/programs/${program.id}/funding-intents/${intent.id}`,
+            fundingIntentResponseSchema,
+            { token: session?.access_token },
+          );
+          const restored = verifiedIntentFromApi(current.data);
+          setVerifiedFundingIntent(restored);
+          setFundingPhase(fundingPhaseFromApi(current.data.status));
+          setFundingError(
+            current.data.status === 'failed' || current.data.status === 'sync_failed'
+              ? 'Arc funding was verified, but reward-pool sync failed. Retry sync; no new wallet transaction is required.'
+              : undefined,
+          );
+          setFundingNotice(
+            current.data.status === 'syncing_pool'
+              ? 'Reward-pool sync is still in progress. Continue verification; no new wallet transaction is required.'
+              : undefined,
+          );
+          await client.invalidateQueries({
+            queryKey: queryKeys.ownerProgram(session?.user.id ?? 'no-session', program.id),
+          });
+          return;
+        } catch {
+          // Preserve the original provider error when the durable intent cannot be hydrated.
+        }
       }
 
       // A second tab/request must never replay the wallet transaction. The first request owns

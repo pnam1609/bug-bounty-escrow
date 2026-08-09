@@ -27,6 +27,7 @@ interface FundingPendingProbeProps {
   readonly onContinue: () => void;
   readonly onBack: () => void;
   readonly error?: string;
+  readonly notice?: string;
 }
 
 const mocks = vi.hoisted(() => ({
@@ -1206,6 +1207,115 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     );
 
     await act(async () => renderer.unmount());
+  });
+
+  it('restores sync failure without returning the owner to wallet signing', async () => {
+    const activeIntent = intent('unified_balance', 'syncing_pool', 'ready_for_destination');
+    const endpointCalls: Array<{ path: string; method: string }> = [];
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+    const execute = vi.fn();
+    mocks.connectCircleWallet.mockResolvedValue({
+      address: WALLET,
+      wallet: { id: 'test-wallet', name: 'Test wallet', provider: {} },
+      executor: { execute },
+    });
+    const renderer = await renderLifecycle(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        endpointCalls.push({ path, method: init?.method ?? 'GET' });
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents/active`)) {
+          return new Response(JSON.stringify({ success: true, data: activeIntent }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}/gateway-readiness`)) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              data: {
+                intentId: INTENT_ID,
+                ready: true,
+                requiredConfirmedTotal: '10',
+                confirmedSelectedTotal: '10',
+                sources: activeIntent.sources.map((source) => ({
+                  network: source.network,
+                  hasFeeHeadroom: false,
+                  allocation: source.amount,
+                  feeReserve: '0',
+                  requiredConfirmed: source.amount,
+                  confirmed: source.amount,
+                  deficit: '0',
+                })),
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}/reconcile`)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: 'funding_sync_failed',
+                message: 'Reward-pool sync did not complete.',
+              },
+            }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}`)) {
+          return new Response(JSON.stringify({ success: true, data: activeIntent }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/withdrawal-intents/active`)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: { code: 'not_found', message: 'No active withdrawal.' },
+            }),
+            { status: 404, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        throw new Error(`Unexpected lifecycle request: ${path}`);
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await connectPendingWallet();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const connectCallsBeforeContinue = mocks.connectCircleWallet.mock.calls.length;
+    const providerConnectCallsBeforeContinue =
+      mocks.connectCircleWalletFromProvider.mock.calls.length;
+    await act(async () => latestFundingPendingProps().onContinue());
+
+    expect(endpointCalls).toContainEqual({
+      path: `/api/programs/${PROGRAM_ID}/funding-intents/${INTENT_ID}/reconcile`,
+      method: 'POST',
+    });
+    expect(endpointCalls).toContainEqual({
+      path: `/api/programs/${PROGRAM_ID}/funding-intents/${INTENT_ID}`,
+      method: 'GET',
+    });
+    expect(latestFundingPendingProps().phase).toBe('syncing_pool');
+    expect(latestFundingPendingProps().error).toBeUndefined();
+    expect(latestFundingPendingProps().notice).toContain('no new wallet transaction');
+    expect(mocks.connectCircleWallet.mock.calls.length).toBe(connectCallsBeforeContinue);
+    expect(mocks.connectCircleWalletFromProvider.mock.calls.length).toBe(
+      providerConnectCallsBeforeContinue,
+    );
+    expect(execute).not.toHaveBeenCalled();
+
+    await act(async () => renderer.unmount());
+    vi.unstubAllGlobals();
   });
 
   it('locks the first sufficient-balance Unified Balance submit in CP-11 and prepares CP-12 only on the second submit', async () => {

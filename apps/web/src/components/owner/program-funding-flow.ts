@@ -711,6 +711,7 @@ export function fundingRecoveryAction(phase: FundingOperationPhase): string | un
   if (phase === 'source_submitted') return 'Check delivery recovery';
   if (phase === 'destination_submitted' || phase === 'delivery_pending') return 'Continue delivery';
   if (phase === 'verifying_destination') return 'Continue verification';
+  if (phase === 'syncing_pool') return 'Continue verification';
   if (phase === 'sync_failed') return 'Retry sync';
   return undefined;
 }
