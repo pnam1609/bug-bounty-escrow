@@ -72,26 +72,28 @@ export interface FundingFeeAllocationRow {
   }[];
 }
 
+type DatabaseNumeric = string | number | bigint;
+
 export interface FundingIntentRow {
   id: string;
   program_id: string;
   escrow_contract_id: string;
   wallet_address: `0x${string}`;
   route_mode: 'send' | 'bridge' | 'unified_balance';
-  gross_amount_base_units: string;
-  estimated_fee_reserve_base_units: string;
+  gross_amount_base_units: DatabaseNumeric;
+  estimated_fee_reserve_base_units: DatabaseNumeric;
   fee_allocations: FundingFeeAllocationRow[];
   quote_quoted_at?: string | null;
   quote_expires_at?: string | null;
   sources: { network: FundingSource['network']; amountBaseUnits: string }[];
   destination_address: `0x${string}`;
-  pre_balance_base_units: string;
-  pre_total_funded_base_units: string;
+  pre_balance_base_units: DatabaseNumeric;
+  pre_total_funded_base_units: DatabaseNumeric;
   funding_phase: FundingIntent['fundingPhase'];
   status: FundingIntent['status'];
   destination_transaction_hash: `0x${string}` | null;
   transfer_id: string | null;
-  net_received_base_units: string | null;
+  net_received_base_units: DatabaseNumeric | null;
   failure_code: string | null;
   expires_at: string;
   sync_idempotency_key: string;
@@ -122,17 +124,17 @@ export interface FundingConfirmationArtifactRow {
   sync_log_index: number | null;
   sync_block_number: string | number | bigint;
   sync_block_hash: `0x${string}`;
-  gross_amount_base_units: string;
-  estimated_fee_reserve_base_units: string;
-  net_received_base_units: string;
-  pre_total_funded_base_units: string;
-  required_total_funded_base_units: string;
-  post_total_funded_base_units: string;
-  total_pool: string;
-  reserved_pool: string;
-  paid_pool: string;
-  withdrawn_pool: string;
-  available_pool: string;
+  gross_amount_base_units: DatabaseNumeric;
+  estimated_fee_reserve_base_units: DatabaseNumeric;
+  net_received_base_units: DatabaseNumeric;
+  pre_total_funded_base_units: DatabaseNumeric;
+  required_total_funded_base_units: DatabaseNumeric;
+  post_total_funded_base_units: DatabaseNumeric;
+  total_pool: string | number;
+  reserved_pool: string | number;
+  paid_pool: string | number;
+  withdrawn_pool: string | number;
+  available_pool: string | number;
   reconciled_at: string;
 }
 
@@ -587,11 +589,11 @@ function mapFundingConfirmationArtifact(
     requiredTotalFundedAmount: formatUsdcBaseUnits(BigInt(row.required_total_funded_base_units)),
     postTotalFundedAmount: formatUsdcBaseUnits(BigInt(row.post_total_funded_base_units)),
     accounting: {
-      totalPool: row.total_pool,
-      totalPaid: row.paid_pool,
-      totalWithdrawn: row.withdrawn_pool,
-      approvedOutstanding: row.reserved_pool,
-      availablePool: row.available_pool,
+      totalPool: String(row.total_pool),
+      totalPaid: String(row.paid_pool),
+      totalWithdrawn: String(row.withdrawn_pool),
+      approvedOutstanding: String(row.reserved_pool),
+      availablePool: String(row.available_pool),
     },
     reconciledAt: row.reconciled_at,
   };

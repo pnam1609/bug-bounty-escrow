@@ -230,6 +230,59 @@ describe('durable bridge recovery response', () => {
       },
     });
   });
+
+  it('normalizes numeric Supabase accounting values in a canonical confirmation artifact', () => {
+    const response = fundingIntentResponseSchema.parse({
+      success: true,
+      data: repository.toFundingIntent(
+        row({
+          status: 'complete',
+          destination_transaction_hash: MINT_HASH,
+          net_received_base_units: 10000000,
+          funding_operations: [],
+          funding_confirmation_artifacts: {
+            funding_intent_id: '31000000-0000-4000-8000-000000000001',
+            program_id: '31000000-0000-4000-8000-000000000002',
+            escrow_contract_id: '31000000-0000-4000-8000-000000000003',
+            route_mode: 'bridge',
+            escrow_address: `0x${'d'.repeat(40)}`,
+            artifact_version: '1.1.0',
+            artifact_checksum: `0x${'1'.repeat(64)}`,
+            token_address: '0x3600000000000000000000000000000000000000',
+            token_decimals: 6,
+            destination_transaction_hash: MINT_HASH,
+            destination_log_index: 7,
+            destination_block_number: 42,
+            destination_block_hash: `0x${'2'.repeat(64)}`,
+            sync_transaction_hash: `0x${'3'.repeat(64)}`,
+            sync_log_index: 8,
+            sync_block_number: 43,
+            sync_block_hash: `0x${'4'.repeat(64)}`,
+            gross_amount_base_units: '10000000',
+            estimated_fee_reserve_base_units: '0',
+            net_received_base_units: '10000000',
+            pre_total_funded_base_units: '0',
+            required_total_funded_base_units: '10000000',
+            post_total_funded_base_units: '10000000',
+            total_pool: 10,
+            reserved_pool: 1.25,
+            paid_pool: 2,
+            withdrawn_pool: 3,
+            available_pool: 4.75,
+            reconciled_at: '2026-07-29T00:02:00.000Z',
+          },
+        }),
+      ),
+    });
+
+    expect(response.data.confirmationArtifact?.accounting).toEqual({
+      totalPool: '10',
+      totalPaid: '2',
+      totalWithdrawn: '3',
+      approvedOutstanding: '1.25',
+      availablePool: '4.75',
+    });
+  });
 });
 
 describe('complete funding operation history', () => {
