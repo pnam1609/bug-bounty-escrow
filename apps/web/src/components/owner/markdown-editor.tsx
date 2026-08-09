@@ -30,6 +30,65 @@ export function safeMarkdownUrl(url: string): string {
   return value === '' || SAFE_URL_PATTERN.test(value) ? value : '';
 }
 
+export interface MarkdownPreviewProps {
+  readonly className?: string;
+  readonly emptyText?: string;
+  readonly value: string;
+}
+
+/** Render Markdown with the same safe, tokenized surface used by the editor Preview tab. */
+export function MarkdownPreview({
+  className,
+  emptyText = 'Nothing to preview yet.',
+  value,
+}: MarkdownPreviewProps) {
+  if (value.trim() === '') {
+    return (
+      <p
+        className={cn(
+          'min-h-28 rounded-md border border-dashed border-border bg-input p-lg text-body-sm text-text-muted',
+          className,
+        )}
+      >
+        {emptyText}
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'min-h-28 rounded-md border border-border bg-surface-raised p-lg text-body-sm text-text',
+        '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2',
+        '[&_blockquote]:border-s-2 [&_blockquote]:border-border-brand [&_blockquote]:ps-lg [&_blockquote]:text-text-muted',
+        '[&_code]:rounded-sm [&_code]:bg-input [&_code]:px-xs [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-label-md',
+        '[&_h1]:mb-md [&_h1]:text-h3 [&_h2]:mb-sm [&_h2]:mt-lg [&_h2]:text-h4 [&_h3]:mb-sm [&_h3]:mt-md [&_h3]:text-label-lg',
+        '[&_li]:ms-lg [&_ol]:list-decimal [&_ol]:ps-lg [&_p]:mb-md [&_p:last-child]:mb-0 [&_pre]:mb-md [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-input [&_pre]:p-md',
+        '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:mb-md [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:p-sm [&_th]:border [&_th]:border-border [&_th]:bg-input [&_th]:p-sm [&_ul]:list-disc [&_ul]:ps-lg',
+        className,
+      )}
+    >
+      <ReactMarkdown
+        components={{
+          a: ({ children, href }) =>
+            href === undefined || safeMarkdownUrl(href) === '' ? (
+              <span>{children}</span>
+            ) : (
+              <a href={safeMarkdownUrl(href)} rel="noreferrer" target="_blank">
+                {children}
+              </a>
+            ),
+        }}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        urlTransform={safeMarkdownUrl}
+      >
+        {value}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export interface MarkdownEditorProps extends Omit<TextareaProps, 'onChange' | 'value'> {
   readonly onChange: ChangeEventHandler<HTMLTextAreaElement>;
   readonly value: string;
@@ -92,41 +151,7 @@ export function MarkdownEditor({
 
       {mode === 'preview' ? (
         <TabsContent className="mt-sm" value="preview">
-          {value.trim() === '' ? (
-            <p className="min-h-28 rounded-md border border-dashed border-border bg-input p-lg text-body-sm text-text-muted">
-              {previewEmptyText}
-            </p>
-          ) : (
-            <div
-              className={cn(
-                'min-h-28 rounded-md border border-border bg-surface-raised p-lg text-body-sm text-text',
-                '[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2',
-                '[&_blockquote]:border-s-2 [&_blockquote]:border-border-brand [&_blockquote]:ps-lg [&_blockquote]:text-text-muted',
-                '[&_code]:rounded-sm [&_code]:bg-input [&_code]:px-xs [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-label-md',
-                '[&_h1]:mb-md [&_h1]:text-h3 [&_h2]:mb-sm [&_h2]:mt-lg [&_h2]:text-h4 [&_h3]:mb-sm [&_h3]:mt-md [&_h3]:text-label-lg',
-                '[&_li]:ms-lg [&_ol]:list-decimal [&_ol]:ps-lg [&_p]:mb-md [&_p:last-child]:mb-0 [&_pre]:mb-md [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-input [&_pre]:p-md',
-                '[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:mb-md [&_table]:w-full [&_td]:border [&_td]:border-border [&_td]:p-sm [&_th]:border [&_th]:border-border [&_th]:bg-input [&_th]:p-sm [&_ul]:list-disc [&_ul]:ps-lg',
-              )}
-            >
-              <ReactMarkdown
-                components={{
-                  a: ({ children, href }) =>
-                    href === undefined || safeMarkdownUrl(href) === '' ? (
-                      <span>{children}</span>
-                    ) : (
-                      <a href={safeMarkdownUrl(href)} rel="noreferrer" target="_blank">
-                        {children}
-                      </a>
-                    ),
-                }}
-                remarkPlugins={[remarkGfm]}
-                skipHtml
-                urlTransform={safeMarkdownUrl}
-              >
-                {value}
-              </ReactMarkdown>
-            </div>
-          )}
+          <MarkdownPreview emptyText={previewEmptyText} value={value} />
         </TabsContent>
       ) : null}
     </Tabs>

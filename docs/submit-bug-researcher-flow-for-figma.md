@@ -581,10 +581,14 @@ Fields:
    - Placeholder: `e.g. Re-entrancy can drain the staking pool`.
    - Counter: `0 / 300`.
 2. `Vulnerability description`
+   - Shared GitHub-style Markdown editor with `Edit` and `Preview` tabs.
+   - Edit mode preserves the raw Markdown submitted to the API, shows at least 20 visible rows and allows vertical resize.
+   - Preview mode safely renders the draft (raw HTML and unsafe link protocols are not enabled) and hides the textarea.
    - Placeholder: `Explain the vulnerable behavior, root cause and affected component.`
    - Counter: `0 / 50,000`.
 3. `Proof of concept / reproduction steps`
-   - Multiline textarea hoặc code-friendly editor treatment.
+   - The same shared GitHub-style Markdown editor as the vulnerability description; the two fields remain separate in the submit payload.
+   - Edit mode preserves raw Markdown and shows at least 20 visible rows; Preview mode renders safe Markdown and hides the textarea.
    - Required/optional state lấy từ program PoC policy; không hardcode cùng một rule cho mọi program.
    - Placeholder có cấu trúc:
 
@@ -963,7 +967,7 @@ Không tạo KYC, Wallet Address hoặc disclosure-consent screen trong bất k�
 | Primary/secondary/ghost action  | `Button` variants                                                  |
 | Composer sections               | `Card`, `CardHeader`, `CardContent`, `CardFooter`                  |
 | Title                           | `Input`                                                            |
-| Vulnerability description / PoC | `Textarea`                                                         |
+| Vulnerability description / PoC | Shared Markdown editor (`Edit` / `Preview`) backed by a `Textarea` |
 | Affected asset                  | searchable `Select` hoặc `RadioGroup` cards                        |
 | Program impacts                 | `Checkbox` list trong scrollable `Card`                            |
 | Proposed severity               | segmented `RadioGroup`                                             |

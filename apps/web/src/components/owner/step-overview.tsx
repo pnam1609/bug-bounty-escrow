@@ -34,6 +34,7 @@ import {
   StepLayout,
   ValidationSummary,
 } from './wizard-parts';
+import { DatePicker } from './date-picker';
 import { MarkdownEditor } from './markdown-editor';
 
 const LOGO_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
@@ -322,11 +323,9 @@ export function StepOverview({ draft, errors, onCancel, onContinue, update }: St
           htmlFor={fieldId('deadline')}
           label="Submission deadline"
         >
-          <Input
+          <DatePicker
             id={fieldId('deadline')}
-            onChange={(event) => update({ deadline: event.target.value })}
-            size="lg"
-            type="date"
+            onChange={(value) => update({ deadline: value })}
             value={draft.deadline}
           />
         </Field>

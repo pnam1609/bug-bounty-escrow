@@ -575,6 +575,12 @@ raw value submitted to the API, skips raw HTML and rejects unsafe URL schemes. P
 such as `shortSummary`, scope/impact descriptions and reward `calculationNote` do not use the
 Markdown editor.
 
+The optional owner `deadline` field uses the BBE dark date picker (Radix Popover with BBE design
+tokens) rather than a browser-native calendar. It presents `MM/DD/YYYY` to the owner while the
+draft and API payload preserve the date-only `YYYY-MM-DD` value. The picker supports keyboard
+navigation, month changes, `Today` and `Clear`, disables dates before today, and keeps an empty
+value as an open-ended program. The existing future-date validation remains the source of truth.
+
 ### Scope
 
 MVP chỉ render `smart_contract` và `website`. `api` và `mobile` vẫn nằm trong `ASSET_TYPES`
@@ -699,6 +705,11 @@ type VulnerabilityReport = {
   paidAt?: string;
 };
 ```
+
+`VulnerabilityReport.description` and `reproductionSteps` are long-form Markdown source fields in
+the researcher composer. Both use the shared GitHub-style `Edit` / `Preview` editor (minimum 20
+visible rows, active panel only); the API receives the untouched Markdown source. Review renders
+both fields with the same safe preview policy (raw HTML disabled and unsafe URL schemes rejected).
 
 `draft` chỉ tồn tại trong `localStorage` của browser; server tạo thẳng `submitted`.
 

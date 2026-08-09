@@ -1428,6 +1428,11 @@ Fields:
    - Placeholder: `Describe the product, security goals and what researchers should know.`
    - Character counter: `0 / 20,000`.
 8. `Submission deadline` — optional.
+   - Use the BBE dark date picker anchored to the field (Radix Popover + BBE tokens), not the
+     browser-native calendar popup. The field displays `MM/DD/YYYY` while the draft keeps the
+     date-only value as `YYYY-MM-DD`.
+   - Month navigation, `Today` and `Clear` actions are keyboard accessible; dates before today are
+     disabled and choosing a date closes the popover. Leave it empty for an open-ended program.
    - Helper: `Leave empty for an open-ended program.`
 9. `Resources` — optional repeatable rows.
    - Type, title và HTTPS URL.

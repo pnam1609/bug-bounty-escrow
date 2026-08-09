@@ -33,6 +33,7 @@ import {
   type ReportDraft,
   type StepIndex,
 } from './submit-bug-model';
+import { MarkdownPreview } from '@/components/owner/markdown-editor';
 
 export const REVIEW_PRIVACY_NOTICE =
   "Submitting shares this report with the program's authorized owner and reviewers. It will not be public by default.";
@@ -137,7 +138,11 @@ export function StepReview({
         </dl>
       </SummarySection>
 
-      <SummarySection editLabel="Edit impacts" onEdit={() => onEditStep(0)} title="Impacts and severity">
+      <SummarySection
+        editLabel="Edit impacts"
+        onEdit={() => onEditStep(0)}
+        title="Impacts and severity"
+      >
         <dl className="flex flex-col gap-md">
           <SummaryRow label="Program impacts">
             {selectedImpactTitles.length === 0 ? (
@@ -206,15 +211,13 @@ export function StepReview({
         <dl className="flex flex-col gap-md">
           <SummaryRow label="Title">{draft.title.trim()}</SummaryRow>
           <SummaryRow label="Description">
-            <p className="line-clamp-4 whitespace-pre-wrap break-words">{draft.description.trim()}</p>
+            <MarkdownPreview value={draft.description.trim()} />
           </SummaryRow>
           <SummaryRow label="PoC / reproduction">
             {draft.reproductionSteps.trim() === '' ? (
               <span className="text-text-muted">Not provided</span>
             ) : (
-              <p className="line-clamp-4 whitespace-pre-wrap break-words font-mono text-label-md">
-                {draft.reproductionSteps.trim()}
-              </p>
+              <MarkdownPreview value={draft.reproductionSteps.trim()} />
             )}
           </SummaryRow>
           {draft.secretGistUrl.trim() === '' ? null : (

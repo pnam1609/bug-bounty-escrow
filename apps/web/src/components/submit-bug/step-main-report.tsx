@@ -27,7 +27,6 @@ import {
   Field,
   Input,
   Label,
-  Textarea,
 } from '@bug-bounty-escrow/ui';
 import { CircleAlert, Paperclip, Upload, X } from 'lucide-react';
 import { useId, useRef, useState, type DragEvent } from 'react';
@@ -48,6 +47,7 @@ import {
   type ReportDraft,
   type TextDraftField,
 } from './submit-bug-model';
+import { MarkdownEditor } from '@/components/owner/markdown-editor';
 
 export interface StepMainReportProps {
   readonly draft: ReportDraft;
@@ -158,12 +158,12 @@ export function StepMainReport({
         label="Vulnerability description"
         required
       >
-        <Textarea
+        <MarkdownEditor
           id="description"
           name="description"
           onChange={(event) => onChangeField('description', event.target.value)}
           placeholder="Explain the vulnerable behavior, root cause and affected component."
-          rows={8}
+          rows={20}
           value={draft.description}
         />
       </Field>
@@ -189,14 +189,14 @@ export function StepMainReport({
         label="Proof of concept / reproduction steps"
         required={proofRequired}
       >
-        <Textarea
+        <MarkdownEditor
           aria-describedby={pocPolicyId}
           className="font-mono"
           id="reproductionSteps"
           name="reproductionSteps"
           onChange={(event) => onChangeField('reproductionSteps', event.target.value)}
           placeholder={POC_PLACEHOLDER}
-          rows={10}
+          rows={20}
           value={draft.reproductionSteps}
         />
       </Field>

@@ -140,6 +140,25 @@ function repositoryForReviewer(row: ReturnType<typeof reportRow>) {
 }
 
 describe('SR-12 private report detail projection', () => {
+  it('pins the composite report/program escrow relationship for PostgREST hydration', async () => {
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: reportRow(), error: null }),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+
+    await new ReportRepository({ from: vi.fn().mockReturnValue(query) } as never).findAccessible(
+      researcher,
+      '10000000-0000-4000-8000-000000000010',
+    );
+
+    expect(query.select).toHaveBeenCalledWith(
+      expect.stringContaining('escrow_transactions!escrow_transactions_report_program_fkey('),
+    );
+  });
+
   it('returns the selected scope, latest information request and only uploaded attachments', async () => {
     const detail = await repositoryFor(reportRow()).findAccessible(
       researcher,

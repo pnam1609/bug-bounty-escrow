@@ -157,7 +157,10 @@ const REPORT_DETAIL_PROJECTION = [
   'report_impacts(id,program_impact_id,source,custom_title,impact_title_snapshot,impact_severity_snapshot,asset_type_snapshot)',
   'report_attachments(id,original_filename,mime_type,size_bytes,created_at,upload_status)',
   'report_reviews(id,reviewer_id,action,from_status,to_status,reason,metadata,created_at,reviewer:profiles!report_reviews_reviewer_id_fkey(role))',
-  'escrow_transactions(transaction_hash,chain_id,token_address,amount,block_number,block_hash,confirmations,log_index,status,transaction_type,confirmed_at)',
+  // Reports have both a single-column and a composite report/program FK to escrow_transactions.
+  // PostgREST cannot infer the relationship from the bare table name (PGRST201), which made a
+  // successful report submission look like a 500 when ReportService hydrated the new detail.
+  'escrow_transactions!escrow_transactions_report_program_fkey(transaction_hash,chain_id,token_address,amount,block_number,block_hash,confirmations,log_index,status,transaction_type,confirmed_at)',
   'reward_settlement_intents(status,amount,recipient_address,escrow_contracts(chain_id,token_address),reward_settlement_operations(operation_type,status,transaction_hash,event_log_index,transfer_log_index,block_number,block_hash,updated_at))',
 ].join(',');
 
@@ -176,10 +179,7 @@ function mapReviewActorRole(review: ReportReviewRow): ReportReviewActorRole {
     return review.reviewer?.role === 'researcher' ? 'researcher' : 'system';
   }
 
-  if (
-    review.reviewer?.role === 'owner' ||
-    review.reviewer?.role === 'reviewer'
-  ) {
+  if (review.reviewer?.role === 'owner' || review.reviewer?.role === 'reviewer') {
     return review.reviewer.role;
   }
 
