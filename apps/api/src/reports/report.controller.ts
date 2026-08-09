@@ -21,6 +21,7 @@ import {
   reportListQuerySchema,
   reportProgramFilterOptionsResponseSchema,
   requestInformationRequestSchema,
+  sendBackForReviewRequestSchema,
   startPaymentRequestSchema,
   updateReportRequestSchema,
   validateReportRequestSchema,
@@ -40,6 +41,7 @@ import {
   type RequestInformationRequest,
   type RequestPrincipal,
   type StartPaymentRequest,
+  type SendBackForReviewRequest,
   type UpdateReportRequest,
   type ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
@@ -171,6 +173,21 @@ export class ReportController {
     return {
       success: true,
       data: await this.service.reopenDuplicate(requirePrincipal(principal), params.id, input),
+    };
+  }
+
+  @Roles('owner')
+  @Post(':id/send-back-for-review')
+  @RateLimit({ limit: 20, windowMs: 60_000 })
+  public async sendBackForReview(
+    @ZodParam(reportIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(sendBackForReviewRequestSchema)
+    input: SendBackForReviewRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<ReportResponse> {
+    return {
+      success: true,
+      data: await this.service.sendBackForReview(requirePrincipal(principal), params.id, input),
     };
   }
 

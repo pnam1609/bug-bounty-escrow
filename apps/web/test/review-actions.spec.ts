@@ -50,7 +50,12 @@ const report = reportDetailSchema.parse({
   severityMismatchAcknowledged: false,
   impacts: [],
   attachments: [],
-  capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: false },
+  capabilities: {
+    canEdit: false,
+    canResubmit: false,
+    canReopenDuplicate: false,
+    canSendBackForReview: false,
+  },
   contentHash: `0x${'a'.repeat(64)}`,
 });
 
@@ -197,6 +202,17 @@ describe('ReviewActions reward ownership boundary', () => {
     expect(markup).not.toContain('Waiting for the program owner to approve the reward.');
   });
 
+  it('shows the owner send-back action before reward settlement evidence exists', async () => {
+    const markup = text(
+      await renderActions('owner', 'absent', {
+        ...report,
+        capabilities: { ...report.capabilities, canSendBackForReview: true },
+      }),
+    );
+
+    expect(markup).toContain('Send back for review');
+  });
+
   it('renders owner continuation controls for a loaded durable reservation', async () => {
     const markup = text(await renderActions('owner', 'loaded'));
 
@@ -216,7 +232,12 @@ describe('ReviewActions reward ownership boundary', () => {
     const duplicateReport = reportDetailSchema.parse({
       ...report,
       status: 'duplicate',
-      capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: true },
+      capabilities: {
+        canEdit: false,
+        canResubmit: false,
+        canReopenDuplicate: true,
+        canSendBackForReview: false,
+      },
     });
     const ownerMarkup = text(await renderActions('owner', 'absent', duplicateReport));
     const reviewerMarkup = text(await renderActions('reviewer', 'absent', duplicateReport));

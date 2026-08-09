@@ -180,6 +180,7 @@ describe('SR-12 private report detail projection', () => {
       canEdit: true,
       canResubmit: true,
       canReopenDuplicate: false,
+      canSendBackForReview: false,
     });
   });
 

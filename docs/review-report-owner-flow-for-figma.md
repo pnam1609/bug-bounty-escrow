@@ -200,6 +200,7 @@ needs_information
   └─ researcher answers/edits and resubmits → submitted
 
 validated
+  ├─ owner send back for review (reason) → submitted
   └─ owner reward settlement approval confirmed → reward_approved
 
 reward_approved
@@ -234,7 +235,7 @@ prompt hoặc provider progress.
 | ------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------- |
 | `submitted`, `triaged`               | Validate, Request information, Reject, Mark duplicate                       | Cùng bốn review actions               |
 | `needs_information`                  | Comment/view; chờ researcher resubmit                                       | Comment/view; chờ researcher resubmit |
-| `validated`                          | Approve reward / continue or resume settlement                              | Chỉ xem, chờ owner                    |
+| `validated`                          | Send back for review (before settlement) or approve reward / continue settlement | Chỉ xem, chờ owner                    |
 | `reward_approved`, `payment_pending` | Resume/reconcile settlement khi cần                                         | Chỉ xem progress                      |
 | `rejected`, `paid`                   | Read-only terminal                                                          | Read-only terminal                    |
 | `duplicate`                          | Reopen duplicate only when server capability allows it; otherwise read-only | Read-only terminal                    |
@@ -433,6 +434,20 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
   selection. Server vẫn re-authorize target, client không thể submit arbitrary UUID để bypass selector.
 - Trước confirm hiển thị target title + short ID để owner đối chiếu; không lộ candidate ngoài quyền.
 - Success → `duplicate`, hiển thị linked original; duplicate không nhận reward.
+
+### Send validated report back for review
+
+- Chỉ program owner được dùng action này khi report đang `validated`; assigned reviewer và
+  researcher không thấy action và không thể gọi API.
+- Dialog yêu cầu reason (trim, 1–2,000 ký tự) và giải thích report sẽ quay lại hàng đợi `submitted`
+  để review lại. Không tạo reward, payout, AI run hoặc thay đổi nội dung report.
+- Server/RPC lock report và program atomically, yêu cầu `validated`, program vẫn reviewable và chưa
+  có `reward_approved`, `payment_pending`, `paid`, reward settlement intent/operation, payout,
+  disclosure hoặc escrow funding evidence. Nếu reward/settlement/payment evidence tồn tại, action
+  fail-closed với stable conflict dù client capability bị stale.
+- Success giữ nguyên review history, thêm audit action `send_back_for_review` với from/to status và
+  reason, chuyển report về `submitted`, rồi refetch inbox/detail. Double-click hoặc tab race trả
+  conflict và không ghi audit thứ hai.
 
 ### Reopen duplicate
 

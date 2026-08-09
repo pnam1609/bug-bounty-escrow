@@ -83,7 +83,12 @@ const report: ReportDetail = reportDetailSchema.parse({
       createdAt: '2026-07-26T10:01:00.000Z',
     },
   ],
-  capabilities: { canEdit: true, canResubmit: true, canReopenDuplicate: false },
+  capabilities: {
+    canEdit: true,
+    canResubmit: true,
+    canReopenDuplicate: false,
+    canSendBackForReview: false,
+  },
   latestInformationRequest: {
     message: 'Include the exact block number and failing transaction.',
     requestedAt: '2026-07-26T12:00:00.000Z',
@@ -555,7 +560,12 @@ describe('SR-12 report detail', () => {
         action,
         report: {
           ...report,
-          capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: false },
+          capabilities: {
+            canEdit: false,
+            canResubmit: false,
+            canReopenDuplicate: false,
+            canSendBackForReview: false,
+          },
         },
       }),
     );

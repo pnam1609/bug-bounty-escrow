@@ -1203,6 +1203,7 @@ POST   /api/reports/:id/validate
 POST   /api/reports/:id/reject
 POST   /api/reports/:id/mark-duplicate
 POST   /api/reports/:id/reopen-duplicate
+POST   /api/reports/:id/send-back-for-review
 POST   /api/reports/:id/approve-reward
 POST   /api/reports/:id/pay
 POST   /api/reports/:id/confirm-payment
@@ -1215,6 +1216,13 @@ thuộc program được phép review.
 
 `approve-reward` reserve số tiền vào `programs.reserved_pool`; `pay` ghi nhận transaction và
 chuyển sang `payment_pending`; `confirm-payment` chuyển reserved → paid và đóng report.
+
+`POST /api/reports/:id/send-back-for-review` là recovery action chỉ program owner được phép dùng
+cho report `validated` trước reward settlement. RPC yêu cầu reason, khóa report/program và chỉ cho
+`validated → submitted` khi chưa có reward approval, payout/settlement/payment/disclosure hoặc
+escrow funding evidence; reviewer/researcher và report đã có settlement đều bị chặn fail-closed.
+Action giữ nguyên lịch sử, ghi audit `send_back_for_review`, không tự chạy AI/reward/payout, và
+trả stable conflict nếu trạng thái đã đổi hoặc request bị lặp.
 
 `POST /api/reports/:id/reopen-duplicate` là recovery action chỉ program owner được phép dùng cho
 report đang `duplicate`. Database/RPC là authority: chỉ chuyển `duplicate → submitted` khi program

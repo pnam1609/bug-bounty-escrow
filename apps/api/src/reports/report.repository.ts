@@ -19,6 +19,7 @@ import type {
   ReportSummary,
   RequestInformationRequest,
   RequestPrincipal,
+  SendBackForReviewRequest,
   StartPaymentRequest,
   UpdateReportRequest,
   ValidateReportRequest,
@@ -270,6 +271,15 @@ function mapDetail(
     (row.escrow_transactions ?? []).length === 0 &&
     (row.reward_settlement_intents ?? []).length === 0 &&
     (row.report_disclosures ?? []).length === 0;
+  const canSendBackForReview =
+    principal.role === 'owner' &&
+    row.status === 'validated' &&
+    row.programs?.owner_id === principal.userId &&
+    row.approved_reward === null &&
+    row.paid_at === null &&
+    (row.escrow_transactions ?? []).length === 0 &&
+    (row.reward_settlement_intents ?? []).length === 0 &&
+    (row.report_disclosures ?? []).length === 0;
   const reviewEvents = isProgramSide
     ? (row.report_reviews ?? [])
         .filter(
@@ -394,6 +404,7 @@ function mapDetail(
       canEdit,
       canResubmit: canEdit && row.status === 'needs_information',
       canReopenDuplicate,
+      canSendBackForReview,
     },
     ...(latestInformationRequest === undefined
       ? {}
@@ -635,6 +646,18 @@ export class ReportRepository {
       actor_id: principal.userId,
       target_report_id: reportId,
       transition_reason: input.reason ?? '',
+    });
+  }
+
+  public sendBackForReview(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: SendBackForReviewRequest,
+  ): Promise<void> {
+    return this.transition('send_report_back_for_review_atomic', {
+      actor_id: principal.userId,
+      target_report_id: reportId,
+      transition_reason: input.reason,
     });
   }
 

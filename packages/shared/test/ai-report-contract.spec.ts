@@ -74,7 +74,11 @@ describe('persisted report AI contract', () => {
       },
       impacts: [],
       attachments: [],
-      capabilities: { canEdit: false, canResubmit: false },
+      capabilities: {
+        canEdit: false,
+        canResubmit: false,
+        canSendBackForReview: false,
+      },
       contentHash: '0xabc',
     });
 

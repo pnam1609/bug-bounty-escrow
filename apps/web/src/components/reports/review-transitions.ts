@@ -10,6 +10,7 @@ export type ActionId =
   | 'confirm-payment'
   | 'mark-duplicate'
   | 'reopen-duplicate'
+  | 'send-back-for-review'
   | 'pay'
   | 'reject'
   | 'request-information'
@@ -26,6 +27,7 @@ export const ACTION_RESULT_STATUS: Readonly<Record<ActionId, ReportStatus>> = Ob
   reject: 'rejected',
   'mark-duplicate': 'duplicate',
   'reopen-duplicate': 'submitted',
+  'send-back-for-review': 'submitted',
   'approve-reward': 'reward_approved',
   pay: 'payment_pending',
   'confirm-payment': 'paid',
@@ -40,7 +42,7 @@ export const ACTIONS_BY_STATUS: Readonly<Record<ReportStatus, readonly ActionId[
     needs_information: [],
     rejected: [],
     duplicate: ['reopen-duplicate'],
-    validated: ['approve-reward'],
+    validated: ['send-back-for-review', 'approve-reward'],
     reward_approved: ['pay'],
     payment_pending: ['confirm-payment'],
     paid: [],

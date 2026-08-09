@@ -9,6 +9,7 @@ import {
   reportResponseSchema,
   rewardSettlementIntentResponseSchema,
   requestInformationRequestSchema,
+  sendBackForReviewRequestSchema,
   validateReportRequestSchema,
   type ApproveRewardRequest,
   type AiDuplicateCandidate,
@@ -370,6 +371,55 @@ function ValidateAction({ busy, proposed, submit }: ActionProps & { readonly pro
             ))}
           </SelectContent>
         </Select>
+      </Field>
+    </ActionDialog>
+  );
+}
+
+/* ── Send validated report back for review ───────────────────────────────────────────────── */
+
+function SendBackForReviewAction({ busy, submit }: ActionProps) {
+  const [reason, setReason] = useState('');
+  const form = useActionForm(() => setReason(''));
+
+  async function confirm() {
+    const parsed = sendBackForReviewRequestSchema.safeParse({ reason });
+    if (!parsed.success) {
+      form.setError('Explain why this validated report needs another review pass.');
+      return;
+    }
+
+    const result = await submit('send-back-for-review', parsed.data);
+    if (result.ok) form.close();
+    else form.setError(result.message);
+  }
+
+  return (
+    <ActionDialog
+      busy={busy}
+      confirmLabel="Send back for review"
+      description="Returns this validated report to Submitted so the owner can review the evidence again before reward settlement."
+      error={form.error}
+      onConfirm={() => void confirm()}
+      onOpenChange={form.change}
+      open={form.open}
+      title="Send report back for review"
+      trigger={<Button variant="secondary">Send back for review</Button>}
+      warning="This action is available only before reward approval or settlement evidence exists. It does not start another AI run or payout."
+    >
+      <Field
+        counter={`${String(reason.length)} / 2,000`}
+        helperText="The reason is recorded in the private review timeline."
+        label="Reason"
+        required
+      >
+        <Textarea
+          maxLength={2000}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Recheck the final severity against the latest evidence before approving the reward."
+          rows={4}
+          value={reason}
+        />
       </Field>
     </ActionDialog>
   );
@@ -1204,8 +1254,11 @@ export function ReviewActions({
 
   const available = ACTIONS_BY_STATUS[report.status];
   const canRenderReopen = viewerRole === 'owner' && report.capabilities.canReopenDuplicate;
+  const canRenderSendBack = viewerRole === 'owner' && report.capabilities.canSendBackForReview;
   const hasVisibleAction = available.some(
-    (action) => action !== 'reopen-duplicate' || canRenderReopen,
+    (action) =>
+      (action !== 'reopen-duplicate' || canRenderReopen) &&
+      (action !== 'send-back-for-review' || canRenderSendBack),
   );
   const settlementAbsent =
     settlement.error instanceof ApiClientError &&
@@ -1259,6 +1312,9 @@ export function ReviewActions({
         <div className="flex flex-col items-stretch gap-md">
           {available.includes('validate') ? (
             <ValidateAction {...props} proposed={report.proposedSeverity} />
+          ) : null}
+          {available.includes('send-back-for-review') && canRenderSendBack ? (
+            <SendBackForReviewAction {...props} />
           ) : null}
           {viewerRole === 'owner' &&
           available.includes('approve-reward') &&

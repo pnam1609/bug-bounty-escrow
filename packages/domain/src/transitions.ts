@@ -24,7 +24,9 @@ export const REPORT_STATUS_TRANSITIONS: Readonly<Record<ReportStatus, readonly R
     // Owner-only reopen is guarded by the database RPC; this entry documents the audited
     // duplicate -> submitted edge without granting reviewers or clients authority.
     duplicate: reportTransitions('submitted'),
-    validated: reportTransitions('reward_approved'),
+    // The program owner may return an unfunded validated report to human review. The DB RPC
+    // enforces owner, settlement-evidence and idempotency guards for this edge.
+    validated: reportTransitions('submitted', 'reward_approved'),
     reward_approved: reportTransitions('payment_pending'),
     payment_pending: reportTransitions('paid'),
     paid: reportTransitions(),

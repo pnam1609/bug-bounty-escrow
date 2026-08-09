@@ -211,6 +211,9 @@ export const REPORT_STATUS_SUMMARY: Readonly<Record<ReportStatus, string>> = Obj
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   invalid_report_transition:
     'This report has already moved on. Refresh to see where it is now, then choose again.',
+  review_reason_required: 'Explain why this validated report needs another review pass.',
+  validated_report_settlement_started:
+    'This report already has reward or settlement evidence, so it cannot be sent back for review.',
   report_not_accessible: 'This report is not available to your account.',
   reviewer_role_required: 'Only an owner or an assigned reviewer can act on this report.',
   researcher_role_required: 'Only the researcher who filed this report can do that.',

@@ -21,6 +21,7 @@ import type {
   ReportProgramFilterOptionsResponse,
   RequestInformationRequest,
   RequestPrincipal,
+  SendBackForReviewRequest,
   StartPaymentRequest,
   UpdateReportRequest,
   ValidateReportRequest,
@@ -204,6 +205,20 @@ export class ReportService {
     }
 
     await this.repository.reopenDuplicate(principal, reportId, input);
+    return this.get(principal, reportId);
+  }
+
+  /** Sends a validated report back to the human review queue before settlement starts. */
+  public async sendBackForReview(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: SendBackForReviewRequest,
+  ): Promise<ReportDetail> {
+    if (principal.role !== 'owner') {
+      throw new ForbiddenException();
+    }
+
+    await this.repository.sendBackForReview(principal, reportId, input);
     return this.get(principal, reportId);
   }
 

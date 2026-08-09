@@ -70,6 +70,7 @@ const expectedMigrations = [
   '20260809000100_cp13_publish_canonical_escrow.sql',
   '20260809000200_cp01_short_summary_1000.sql',
   '20260809000300_rr_flow_reopen_duplicate.sql',
+  '20260810000100_rr_flow_validated_send_back.sql',
 ];
 
 const tableMigrations = new Map([
@@ -257,6 +258,24 @@ for (const requiredFragment of [
 ]) {
   if (!reopenDuplicate.includes(requiredFragment)) {
     fail(`RR-FLOW-008 reopen migration is missing ${requiredFragment}`);
+  }
+}
+const validatedSendBack = migrationContents.get('20260810000100_rr_flow_validated_send_back.sql');
+for (const requiredFragment of [
+  'create or replace function public.send_report_back_for_review_atomic',
+  "'send_back_for_review', 'validated', 'submitted'",
+  "'validated_report_settlement_started'",
+  "'review_reason_required'",
+  "report_record.status <> 'validated'",
+  'report_record.approved_reward is not null',
+  'reward_settlement_intents',
+  'escrow_transactions',
+  'report_disclosures',
+  "'report_resubmitted'",
+  'grant execute on function public.send_report_back_for_review_atomic',
+]) {
+  if (!validatedSendBack.includes(requiredFragment)) {
+    fail(`RR-FLOW validated send-back migration is missing ${requiredFragment}`);
   }
 }
 for (const functionName of [
