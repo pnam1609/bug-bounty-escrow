@@ -28,6 +28,7 @@ import {
   executeVerifiedFundingIntent,
   executePreparedFundingSubmission,
   fundingContinuationAction,
+  hasDurableFundingDestinationEvidence,
   fundingSubmissionFailurePhase,
   isExplicitWalletRejection,
   fundingSourceForLockedDeposit,
@@ -53,6 +54,29 @@ function source(rowId: string, network: FundingSource['network'], amount: string
 }
 
 describe('CP-11 funding selection', () => {
+  it('treats hydrated destination evidence as authoritative over stale local results', () => {
+    expect(hasDurableFundingDestinationEvidence({})).toBe(false);
+    expect(
+      hasDurableFundingDestinationEvidence({
+        destinationTransactionHash: `0x${'a'.repeat(64)}`,
+      }),
+    ).toBe(true);
+    expect(
+      hasDurableFundingDestinationEvidence({
+        recovery: {
+          operationRecordId: '31000000-0000-4000-8000-000000000090',
+          operationType: 'spend',
+          attemptNo: 1,
+          status: 'gateway_finalized',
+          retryable: false,
+          submissionUncertain: false,
+          sourceTransactionHashes: [],
+          steps: [],
+        },
+      }),
+    ).toBe(true);
+  });
+
   it('encodes the exact server-bound approveReward call without a payout prompt', () => {
     const data = encodeRewardApprovalCall(
       `0x${'1'.repeat(64)}`,

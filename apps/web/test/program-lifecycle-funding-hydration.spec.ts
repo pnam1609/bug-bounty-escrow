@@ -1059,6 +1059,89 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reconciles hydrated destination evidence instead of attaching a stale local result', async () => {
+    const destinationHash = `0x${'8'.repeat(64)}`;
+    const operationRecordId = '31000000-0000-4000-8000-000000000092';
+    const activeIntent: FundingIntent = {
+      ...intent('unified_balance', 'delivery_pending', 'ready_for_destination'),
+      destinationTransactionHash: destinationHash,
+      recovery: {
+        operationRecordId,
+        operationType: 'spend',
+        attemptNo: 1,
+        status: 'submitted',
+        retryable: false,
+        submissionUncertain: false,
+        sourceTransactionHashes: [],
+        steps: [{ name: 'destination', state: 'success', transactionHash: destinationHash }],
+      },
+    };
+    const completeIntent: FundingIntent = {
+      ...activeIntent,
+      status: 'complete',
+    };
+    const storage = new Map<string, string>([
+      [
+        `bounty-escrow:funding:${PROGRAM_ID}:${INTENT_ID}:destination`,
+        JSON.stringify({
+          routeMode: 'unified_balance',
+          destinationTransactionHash: `0x${'9'.repeat(64)}`,
+          sourceTransactionHashes: [],
+        }),
+      ],
+    ]);
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+    });
+    mocks.connectCircleWallet.mockResolvedValue({
+      address: WALLET,
+      wallet: { id: 'test-wallet', name: 'Test wallet', provider: {} },
+      executor: { execute: vi.fn() },
+    });
+    const calls: string[] = [];
+    const renderer = await renderLifecycle(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      calls.push(path);
+      if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents/active`)) {
+        return new Response(JSON.stringify({ success: true, data: activeIntent }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path.endsWith(`/funding-intents/${INTENT_ID}/reconcile`)) {
+        return new Response(JSON.stringify({ success: true, data: completeIntent }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path.endsWith(`/api/programs/${PROGRAM_ID}/withdrawal-intents/active`)) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: { code: 'not_found', message: 'No active withdrawal.' },
+          }),
+          { status: 404, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      throw new Error(`Unexpected lifecycle request: ${path}`);
+    });
+
+    await connectPendingWallet();
+    await act(async () => latestFundingPendingProps().onContinue());
+
+    expect(calls.some((path) => path.endsWith('/reconcile'))).toBe(true);
+    expect(calls.some((path) => path.endsWith('/destination-attempts/attach'))).toBe(false);
+    expect(calls.some((path) => path.endsWith('/destination-attempts/recovery-telemetry'))).toBe(
+      false,
+    );
+    await act(async () => renderer.unmount());
+    vi.unstubAllGlobals();
+  });
+
   it.each([
     ['send', 'ready_to_sign'],
     ['bridge', 'source_submitted'],

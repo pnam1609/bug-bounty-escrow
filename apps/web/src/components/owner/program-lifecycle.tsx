@@ -79,6 +79,7 @@ import {
   fundingRouteLabel,
   fundingSourceSubmittedRecoveryMessage,
   fundingContinuationAction,
+  hasDurableFundingDestinationEvidence,
   fundingSubmissionFailurePhase,
   fundingReadinessFingerprint,
   isExplicitWalletRejection,
@@ -2423,10 +2424,16 @@ export function ProgramLifecycle({
       const pendingDestinationResult =
         fundingResult ?? readPendingFundingResult(window.localStorage, program.id, activeIntent.id);
 
+      // The hydrated API intent is authoritative. A result left in localStorage can predate the
+      // durable CP-14 operation (or belong to a previous tab), so never attach it once the server
+      // already has destination evidence. Reconcile the locked intent instead; this path cannot
+      // create an operation or submit another wallet transaction.
+      const hasDurableDestinationEvidence = hasDurableFundingDestinationEvidence(activeIntent);
+
       const continuation = fundingContinuationAction(
-        fundingPhase,
+        hasDurableDestinationEvidence ? 'destination_submitted' : fundingPhase,
         bridgeRecoveryResult !== undefined && canRetryBridgeResult(bridgeRecoveryResult),
-        pendingDestinationResult !== undefined,
+        pendingDestinationResult !== undefined && !hasDurableDestinationEvidence,
       );
       const heldDestinationClaimToken =
         activeIntent.recovery?.operationRecordId === undefined

@@ -746,6 +746,23 @@ export function fundingContinuationAction(
   return 'reconcile';
 }
 
+/**
+ * A hydrated intent is authoritative over a volatile browser result. Once the server has a
+ * destination hash (or has advanced the recovery operation beyond the wallet boundary), a stale
+ * local result must never be attached again. Reconciliation can safely observe the same intent
+ * without creating another operation or prompting the wallet.
+ */
+export function hasDurableFundingDestinationEvidence(
+  intent: Pick<VerifiedFundingIntent, 'destinationTransactionHash' | 'recovery'>,
+): boolean {
+  if (intent.destinationTransactionHash !== undefined) return true;
+  return (
+    intent.recovery?.status === 'submitted' ||
+    intent.recovery?.status === 'onchain_verified' ||
+    intent.recovery?.status === 'gateway_finalized'
+  );
+}
+
 const TRANSACTION_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
 export function assertFundingRecoveryStorage(storage: Storage): void {
