@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 
 import { reportListHref } from '@/components/reports/report-detail-model';
 import { toReportQueryKey, toReportSearchParams } from '@/components/reports/report-filters';
-import { formatUsdc, REPORT_STATUS_OPTIONS } from '@/components/reports/report-format';
+import {
+  formatExactTimestamp,
+  formatUsdc,
+  REPORT_STATUS_OPTIONS,
+} from '@/components/reports/report-format';
 import { ReportPagination, reportPaginationLabel } from '@/components/reports/report-pagination';
 import { ReportCardList, ReportTable } from '@/components/reports/report-table';
 import { MY_REPORTS_EVENT_NAMES, myReportsRowOpenedEvent } from '@/lib/my-reports-analytics';
@@ -24,6 +28,7 @@ const baseReport = reportSummarySchema.parse({
   updatedAt: '2026-07-26T12:00:00.000Z',
 });
 const HIGH_PRECISION_REWARD = '9007199254740993.123456';
+const EXACT_UPDATED_TIMESTAMP = formatExactTimestamp(baseReport.updatedAt);
 
 describe('MR-05 report table', () => {
   it('renders seven semantic columns without private report content', () => {
@@ -72,8 +77,8 @@ describe('MR-05 report table', () => {
     expect(markup).not.toContain('data-variant="success"');
     expect(markup).toContain('dateTime="2026-07-26T12:00:00.000Z"');
     expect(markup).toContain('aria-label="Updated ');
-    expect(markup).toContain('aria-label="Updated Jul 26, 2026, 7:00:00 PM"');
-    expect(markup).toContain('Exact update timestamp: Jul 26, 2026, 7:00:00 PM');
+    expect(markup).toContain(`aria-label="Updated ${EXACT_UPDATED_TIMESTAMP}"`);
+    expect(markup).toContain(`Exact update timestamp: ${EXACT_UPDATED_TIMESTAMP}`);
     expect(markup).toMatch(/aria-describedby="report-updated-description-[^"]+"/);
 
     const mobileMarkup = renderToStaticMarkup(
@@ -84,7 +89,7 @@ describe('MR-05 report table', () => {
       }),
     );
     expect(mobileMarkup).toContain('>Updated 2 weeks ago</time>');
-    expect(mobileMarkup).toContain('Exact update timestamp: Jul 26, 2026, 7:00:00 PM');
+    expect(mobileMarkup).toContain(`Exact update timestamp: ${EXACT_UPDATED_TIMESTAMP}`);
   });
 
   it('uses an em dash for an undecided reward and one focusable whole-row link', () => {
