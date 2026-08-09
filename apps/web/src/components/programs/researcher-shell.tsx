@@ -25,6 +25,7 @@ import {
 import { LogoutMenuItem } from '@/components/account/logout-action';
 import { ROLE_BADGE_LABELS } from '@/components/onboarding/role-options';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { getSiteCopyright } from '@/lib/site-footer';
 import { useAuth } from '@/providers/auth-provider';
 
 /*
@@ -199,9 +200,7 @@ export function ResearcherShell({
           {children}
         </div>
       </main>
-      {showFooter ? (
-        <SiteFooter copyright={`© ${new Date().getFullYear()} BountyEscrow`} variant="short" />
-      ) : null}
+      {showFooter ? <SiteFooter copyright={getSiteCopyright()} variant="short" /> : null}
     </div>
   );
 }

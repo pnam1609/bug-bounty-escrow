@@ -176,7 +176,11 @@ describe('SR-12 private report detail projection', () => {
       message: 'Include the exact block number.',
       requestedAt: '2026-07-26T12:00:00.000Z',
     });
-    expect(detail?.capabilities).toEqual({ canEdit: true, canResubmit: true });
+    expect(detail?.capabilities).toEqual({
+      canEdit: true,
+      canResubmit: true,
+      canReopenDuplicate: false,
+    });
   });
 
   it('returns the same not-found boundary for another researcher before mapping private data', async () => {

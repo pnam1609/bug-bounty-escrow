@@ -16,6 +16,7 @@ import type { ReactNode } from 'react';
 
 import { ACCOUNT_SETTINGS_PATH } from '@/components/account/account-settings-model';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { getSiteCopyright } from '@/lib/site-footer';
 
 /*
  * No Figma source — chrome for the two reviewer routes.
@@ -72,7 +73,7 @@ export function ReviewShell({ activeHref = '/review', children }: ReviewShellPro
     <WorkspaceShell
       footer={
         <SiteFooter
-          copyright={`© ${new Date().getFullYear()} BountyEscrow · Arc Testnet`}
+          copyright={getSiteCopyright(' · Arc Testnet')}
           legal={
             <>
               <SiteFooterLink href="/">Privacy</SiteFooterLink>

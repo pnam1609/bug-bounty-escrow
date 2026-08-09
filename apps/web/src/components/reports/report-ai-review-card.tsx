@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
   Callout,
+  Button,
   SeverityBadge,
 } from '@bug-bounty-escrow/ui';
 import { ChevronDown } from 'lucide-react';
@@ -24,6 +25,67 @@ export interface ReportAiReviewCardProps {
   /** Current immutable report projection used to fail closed on stale AI results. */
   readonly currentContentHash?: string;
   readonly currentSubmissionRevision?: number;
+  /** Server timestamp used to ensure duplicate targets are chronologically earlier. */
+  readonly currentSubmittedAt?: string;
+  /** Opens the existing human duplicate confirmation dialog for an authorized candidate. */
+  readonly onMarkDuplicate?: (candidateReportId: string) => void;
+}
+
+export const DUPLICATE_ACTION_CONFIDENCE_THRESHOLD = 0.4;
+
+export function canMarkDuplicateCandidate(
+  review: Pick<ReportAiReview, 'status' | 'submissionSequence'>,
+  candidate: Pick<
+    NonNullable<ReportAiReview['duplicateCandidates']>[number],
+    'assessment' | 'confidence' | 'submittedAt'
+  >,
+  currentSubmittedAt?: string,
+): boolean {
+  return (
+    review.status === 'ready' &&
+    review.submissionSequence !== undefined &&
+    review.submissionSequence > 1 &&
+    candidate.assessment === 'likely' &&
+    candidate.confidence > DUPLICATE_ACTION_CONFIDENCE_THRESHOLD &&
+    candidate.submittedAt !== undefined &&
+    currentSubmittedAt !== undefined &&
+    Number.isFinite(Date.parse(candidate.submittedAt)) &&
+    Number.isFinite(Date.parse(currentSubmittedAt)) &&
+    Date.parse(candidate.submittedAt) < Date.parse(currentSubmittedAt)
+  );
+}
+
+export function sortDuplicateCandidates(
+  candidates: readonly NonNullable<ReportAiReview['duplicateCandidates']>[number][],
+): NonNullable<ReportAiReview['duplicateCandidates']> {
+  return [...candidates].sort((left, right) => {
+    const leftTimestamp =
+      left.submittedAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(left.submittedAt);
+    const rightTimestamp =
+      right.submittedAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(right.submittedAt);
+    const timestampOrder = leftTimestamp - rightTimestamp;
+    if (timestampOrder !== 0) return timestampOrder;
+    return left.candidateReportId.localeCompare(right.candidateReportId);
+  });
+}
+
+/** Builds the human-action selector from the server-authorized advisory projection. */
+export function eligibleDuplicateCandidates(
+  review:
+    | (Pick<ReportAiReview, 'status' | 'submissionSequence'> & {
+        readonly duplicateCandidates?: readonly NonNullable<
+          ReportAiReview['duplicateCandidates']
+        >[number][];
+      })
+    | undefined,
+  currentSubmittedAt: string | undefined,
+): readonly NonNullable<ReportAiReview['duplicateCandidates']>[number][] {
+  if (review === undefined || review.duplicateCandidates === undefined) return [];
+  return sortDuplicateCandidates(
+    review.duplicateCandidates.filter((candidate) =>
+      canMarkDuplicateCandidate(review, candidate, currentSubmittedAt),
+    ),
+  );
 }
 
 const STATUS_COPY: Readonly<
@@ -166,8 +228,16 @@ function SafeResearcherDuplicateCopy({ assessment }: { readonly assessment: stri
   );
 }
 
-function ReviewerCandidates({ review }: { readonly review: ReportAiReview }) {
-  const candidates = review.duplicateCandidates ?? [];
+function ReviewerCandidates({
+  currentSubmittedAt,
+  onMarkDuplicate,
+  review,
+}: {
+  readonly currentSubmittedAt?: string;
+  readonly onMarkDuplicate?: (candidateReportId: string) => void;
+  readonly review: ReportAiReview;
+}) {
+  const candidates = sortDuplicateCandidates(review.duplicateCandidates ?? []);
   if (candidates.length === 0) return null;
 
   return (
@@ -179,13 +249,34 @@ function ReviewerCandidates({ review }: { readonly review: ReportAiReview }) {
             className="flex flex-col gap-xs rounded-md border border-border bg-surface-raised p-md"
             key={candidate.candidateReportId}
           >
-            <div className="flex flex-wrap items-center justify-between gap-sm">
-              <code className="break-all text-label-sm text-text">
-                {candidate.candidateReportId}
-              </code>
-              <span className="text-label-sm text-medium">
-                {candidate.assessment} · {percentage(candidate.confidence)}
-              </span>
+            <div className="flex flex-wrap items-start justify-between gap-sm">
+              <div className="flex min-w-0 flex-col gap-xs">
+                <p className="text-body-sm text-text">{candidate.title ?? 'Untitled report'}</p>
+                <code className="break-all text-label-sm text-text">
+                  {candidate.candidateReportId}
+                </code>
+                {candidate.submittedAt === undefined ? null : (
+                  <time className="text-label-sm text-text-muted" dateTime={candidate.submittedAt}>
+                    Submitted {formatTimestamp(candidate.submittedAt)}
+                  </time>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-sm">
+                <span className="text-label-sm text-medium">
+                  {candidate.assessment} · {percentage(candidate.confidence)}
+                </span>
+                {onMarkDuplicate !== undefined &&
+                canMarkDuplicateCandidate(review, candidate, currentSubmittedAt) ? (
+                  <Button
+                    onClick={() => onMarkDuplicate(candidate.candidateReportId)}
+                    size="md"
+                    type="button"
+                    variant="secondary"
+                  >
+                    Mark duplicate
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <p className="text-body-sm text-text-muted">{candidate.reason}</p>
           </li>
@@ -196,11 +287,15 @@ function ReviewerCandidates({ review }: { readonly review: ReportAiReview }) {
 }
 
 function ReadyDetails({
+  currentSubmittedAt,
+  onMarkDuplicate,
   review,
   audience,
 }: {
+  readonly currentSubmittedAt?: string;
   readonly review: ReportAiReview;
   readonly audience: AiReviewAudience;
+  readonly onMarkDuplicate?: (candidateReportId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -267,7 +362,13 @@ function ReadyDetails({
         </div>
       )}
 
-      {audience === 'reviewer' ? <ReviewerCandidates review={review} /> : null}
+      {audience === 'reviewer' ? (
+        <ReviewerCandidates
+          {...(currentSubmittedAt === undefined ? {} : { currentSubmittedAt })}
+          {...(onMarkDuplicate === undefined ? {} : { onMarkDuplicate })}
+          review={review}
+        />
+      ) : null}
 
       <button
         className="inline-flex min-h-11 items-center gap-xs self-start rounded-sm text-label-md text-low hover:underline"
@@ -329,7 +430,9 @@ export function ReportAiReviewCard({
   review,
   audience,
   currentContentHash,
+  currentSubmittedAt,
   currentSubmissionRevision,
+  onMarkDuplicate,
 }: ReportAiReviewCardProps) {
   const status = resolveAiReviewStatus(review, currentContentHash, currentSubmissionRevision);
   const safeReview = isKnownReview(review) ? review : undefined;
@@ -356,7 +459,12 @@ export function ReportAiReviewCard({
 
       {effectiveReview.status === 'ready' ? (
         <CardContent>
-          <ReadyDetails audience={audience} review={effectiveReview} />
+          <ReadyDetails
+            audience={audience}
+            {...(currentSubmittedAt === undefined ? {} : { currentSubmittedAt })}
+            {...(onMarkDuplicate === undefined ? {} : { onMarkDuplicate })}
+            review={effectiveReview}
+          />
         </CardContent>
       ) : null}
 

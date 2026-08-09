@@ -9,15 +9,12 @@
  * Researcher screens carry no workspace sidebar, so `WorkspaceShell` is used without one.
  */
 
-import {
-  Stepper,
-  SiteFooter,
-  WorkspaceShell,
-} from '@bug-bounty-escrow/ui';
+import { Stepper, SiteFooter, WorkspaceShell } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 
 import { ResearcherHeader } from '@/components/programs/researcher-shell';
+import { getSiteCopyright } from '@/lib/site-footer';
 
 import { STEP_COUNT, SUBMIT_BUG_STEPS, type StepIndex } from './submit-bug-model';
 
@@ -25,7 +22,7 @@ function ShortFooter() {
   return (
     <SiteFooter
       variant="short"
-      copyright="© 2026 BountyEscrow · Arc Testnet"
+      copyright={getSiteCopyright(' · Arc Testnet')}
       legal={
         <Fragment>
           <Link href="/" className="text-label-sm text-text-muted hover:text-text">

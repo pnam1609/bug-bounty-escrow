@@ -10,6 +10,7 @@ import type {
   MarkDuplicateRequest,
   PublicDisclosure,
   RejectReportRequest,
+  ReopenDuplicateRequest,
   ReportDetail,
   ReportPaidSettlementProof,
   ReportImpact,
@@ -48,7 +49,15 @@ interface ReportRow {
   readonly paid_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
-  readonly programs: { name: string; slug: string; status: string } | null;
+  readonly programs: {
+    name: string;
+    slug: string;
+    status: string;
+    owner_id?: string;
+    total_pool?: string | number;
+    reserved_pool?: string | number;
+    paid_pool?: string | number;
+  } | null;
   readonly affected_scope: {
     id: string;
     asset_type: ReportImpact['assetType'];
@@ -113,6 +122,7 @@ interface ReportRow {
       updated_at: string;
     }>;
   }>;
+  readonly report_disclosures?: Array<{ id: string }>;
 }
 
 interface ReportProgramFilterOptionRow {
@@ -151,7 +161,7 @@ const REPORT_SUMMARY_PROJECTION = [
   'created_at',
   'updated_at',
   // Joined so "My reports" and the review inbox can render a program name without an N+1.
-  'programs(name,slug,status)',
+  'programs(name,slug,status,owner_id,total_pool,reserved_pool,paid_pool)',
 ].join(',');
 
 const REPORT_DETAIL_PROJECTION = [
@@ -165,6 +175,7 @@ const REPORT_DETAIL_PROJECTION = [
   // successful report submission look like a 500 when ReportService hydrated the new detail.
   'escrow_transactions!escrow_transactions_report_program_fkey(transaction_hash,chain_id,token_address,amount,block_number,block_hash,confirmations,log_index,status,transaction_type,confirmed_at)',
   'reward_settlement_intents(status,amount,recipient_address,escrow_contracts(chain_id,token_address),reward_settlement_operations(operation_type,status,transaction_hash,event_log_index,transfer_log_index,block_number,block_hash,updated_at))',
+  'report_disclosures!report_disclosures_report_fkey(id)',
 ].join(',');
 
 function money(value: string | number): string {
@@ -173,6 +184,12 @@ function money(value: string | number): string {
 
 function maskAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function isZeroPool(value: string | number | undefined): boolean {
+  if (value === undefined) return false;
+  const amount = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(amount) && amount === 0;
 }
 
 function mapReviewActorRole(review: ReportReviewRow): ReportReviewActorRole {
@@ -240,6 +257,17 @@ function mapDetail(
     row.programs?.status === 'active' &&
     (row.status === 'draft' || row.status === 'needs_information');
   const isProgramSide = principal.role === 'owner' || principal.role === 'reviewer';
+  const canReopenDuplicate =
+    principal.role === 'owner' &&
+    row.status === 'duplicate' &&
+    row.programs?.owner_id === principal.userId &&
+    row.programs.status === 'active' &&
+    isZeroPool(row.programs.total_pool) &&
+    isZeroPool(row.programs.reserved_pool) &&
+    isZeroPool(row.programs.paid_pool) &&
+    (row.escrow_transactions ?? []).length === 0 &&
+    (row.reward_settlement_intents ?? []).length === 0 &&
+    (row.report_disclosures ?? []).length === 0;
   const reviewEvents = isProgramSide
     ? (row.report_reviews ?? [])
         .filter(
@@ -363,6 +391,7 @@ function mapDetail(
     capabilities: {
       canEdit,
       canResubmit: canEdit && row.status === 'needs_information',
+      canReopenDuplicate,
     },
     ...(latestInformationRequest === undefined
       ? {}
@@ -591,6 +620,18 @@ export class ReportRepository {
       actor_id: principal.userId,
       target_report_id: reportId,
       original_report_id: input.originalReportId,
+      transition_reason: input.reason ?? '',
+    });
+  }
+
+  public reopenDuplicate(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: ReopenDuplicateRequest,
+  ): Promise<void> {
+    return this.transition('reopen_duplicate_report_atomic', {
+      actor_id: principal.userId,
+      target_report_id: reportId,
       transition_reason: input.reason ?? '',
     });
   }

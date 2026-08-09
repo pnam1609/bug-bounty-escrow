@@ -12,6 +12,7 @@ import {
 } from '@bug-bounty-escrow/ui';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useState } from 'react';
 
 import { CommentThread } from './comment-thread';
 import { ReportIdCopy } from './copy-value';
@@ -54,6 +55,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
   const viewer = useCurrentUser();
   const token = session?.access_token;
   const principalId = session?.user.id ?? 'no-session';
+  const [duplicateCandidateId, setDuplicateCandidateId] = useState<string>();
 
   const query = useQuery({
     queryKey: queryKeys.report(principalId, id),
@@ -177,6 +179,10 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
           <ReportAiReviewCard
             audience="reviewer"
             currentContentHash={report.contentHash}
+            currentSubmittedAt={report.submittedAt ?? report.createdAt}
+            {...(viewer.data?.role === 'owner' || viewer.data?.role === 'reviewer'
+              ? { onMarkDuplicate: (candidateId: string) => setDuplicateCandidateId(candidateId) }
+              : {})}
             review={report.aiReview}
             {...(report.submissionRevision === undefined
               ? {}
@@ -193,6 +199,10 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
 
         <div className="flex flex-col gap-xl lg:sticky lg:top-xl">
           <ReviewActions
+            {...(duplicateCandidateId === undefined
+              ? {}
+              : { initialDuplicateCandidateId: duplicateCandidateId })}
+            onDuplicateCandidateConsumed={() => setDuplicateCandidateId(undefined)}
             principalId={principalId}
             report={report}
             token={token}

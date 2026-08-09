@@ -69,6 +69,7 @@ const expectedMigrations = [
   '20260801001000_cp13_deployment_idempotency_recovery.sql',
   '20260809000100_cp13_publish_canonical_escrow.sql',
   '20260809000200_cp01_short_summary_1000.sql',
+  '20260809000300_rr_flow_reopen_duplicate.sql',
 ];
 
 const tableMigrations = new Map([
@@ -204,22 +205,52 @@ for (const tableName of [
   }
 }
 
-const deploymentFeeGate = migrationContents.get('20260801000600_cp11_server_deployment_fee_gate.sql');
-if (!/create table(?: if not exists)? public\.escrow_deployment_fee_quotes/i.test(deploymentFeeGate)) {
+const deploymentFeeGate = migrationContents.get(
+  '20260801000600_cp11_server_deployment_fee_gate.sql',
+);
+if (
+  !/create table(?: if not exists)? public\.escrow_deployment_fee_quotes/i.test(deploymentFeeGate)
+) {
   fail('CP-11 deployment fee migration does not create escrow_deployment_fee_quotes');
 }
-const programOwnerAuthority = migrationContents.get('20260801000700_program_owner_withdraw_authority.sql');
-if (!/create or replace function public\.create_escrow_deployment_server_atomic/i.test(programOwnerAuthority) ||
-    !/target_program_owner_wallet/i.test(programOwnerAuthority)) {
+const programOwnerAuthority = migrationContents.get(
+  '20260801000700_program_owner_withdraw_authority.sql',
+);
+if (
+  !/create or replace function public\.create_escrow_deployment_server_atomic/i.test(
+    programOwnerAuthority,
+  ) ||
+  !/target_program_owner_wallet/i.test(programOwnerAuthority)
+) {
   fail('Program-owner authority migration does not bind target_program_owner_wallet');
 }
-if (!/alter table public\.escrow_deployment_fee_quotes enable row level security/i.test(deploymentFeeGate)) {
+if (
+  !/alter table public\.escrow_deployment_fee_quotes enable row level security/i.test(
+    deploymentFeeGate,
+  )
+) {
   fail('CP-11 deployment fee migration does not enable RLS on escrow_deployment_fee_quotes');
 }
 const shortSummaryLimit = migrationContents.get('20260809000200_cp01_short_summary_1000.sql');
-if (!/drop constraint if exists programs_short_summary_length_check/i.test(shortSummaryLimit) ||
-    !/check \(length\(btrim\(short_summary\)\) between 1 and 1000\)/i.test(shortSummaryLimit)) {
+if (
+  !/drop constraint if exists programs_short_summary_length_check/i.test(shortSummaryLimit) ||
+  !/check \(length\(btrim\(short_summary\)\) between 1 and 1000\)/i.test(shortSummaryLimit)
+) {
   fail('CP-01 short-summary migration does not widen the trimmed summary constraint to 1000');
+}
+const reopenDuplicate = migrationContents.get('20260809000300_rr_flow_reopen_duplicate.sql');
+for (const requiredFragment of [
+  'create or replace function public.reopen_duplicate_report_atomic',
+  "'reopen_duplicate', 'duplicate', 'submitted'",
+  "'report_reopened'",
+  'duplicate_reopen_program_not_active',
+  'duplicate_reopen_funded',
+  'duplicate_reopen_settlement_started',
+  'duplicate_target_invalid',
+]) {
+  if (!reopenDuplicate.includes(requiredFragment)) {
+    fail(`RR-FLOW-008 reopen migration is missing ${requiredFragment}`);
+  }
 }
 for (const functionName of [
   'list_active_unified_balance_gateway_intent_ids',

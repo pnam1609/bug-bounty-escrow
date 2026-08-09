@@ -5,11 +5,15 @@ import {
 } from '@bug-bounty-escrow/shared';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import TestRenderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NeedsInformationAlert } from '@/components/reports/needs-information-alert';
 import { ReportContent } from '@/components/reports/report-content';
 import {
+  canMarkDuplicateCandidate,
+  eligibleDuplicateCandidates,
+  sortDuplicateCandidates,
   ReportAiReviewCard,
   ReportAiReviewStatusBadge,
 } from '@/components/reports/report-ai-review-card';
@@ -79,7 +83,7 @@ const report: ReportDetail = reportDetailSchema.parse({
       createdAt: '2026-07-26T10:01:00.000Z',
     },
   ],
-  capabilities: { canEdit: true, canResubmit: true },
+  capabilities: { canEdit: true, canResubmit: true, canReopenDuplicate: false },
   latestInformationRequest: {
     message: 'Include the exact block number and failing transaction.',
     requestedAt: '2026-07-26T12:00:00.000Z',
@@ -239,6 +243,181 @@ describe('SR-12 report detail', () => {
     expect(reviewerMarkup).toContain('Authorized duplicate candidates');
   });
 
+  it('gates Mark duplicate above 40 percent and never offers it for the first sequence', () => {
+    const candidate = {
+      candidateReportId: '10000000-0000-4000-8000-000000000099',
+      assessment: 'likely' as const,
+      reason: 'The affected function and outcome match.',
+      confidence: 0.41,
+      submittedAt: '2026-07-26T09:00:00.000Z',
+    };
+    const renderCandidate = (confidence: number, submissionSequence: number) =>
+      renderToStaticMarkup(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: () => undefined,
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [{ ...candidate, confidence }],
+          },
+        }),
+      );
+
+    expect(renderCandidate(0.41, 2)).toContain('Mark duplicate');
+    expect(renderCandidate(0.4, 2)).not.toContain('Mark duplicate');
+    expect(renderCandidate(0.39, 2)).not.toContain('Mark duplicate');
+    expect(renderCandidate(0.99, 1)).not.toContain('Mark duplicate');
+    expect(
+      renderToStaticMarkup(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: () => undefined,
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence: 2,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [{ ...candidate, assessment: 'possible', confidence: 0.99 }],
+          },
+        }),
+      ),
+    ).not.toContain('Mark duplicate');
+    expect(
+      canMarkDuplicateCandidate(
+        { status: 'ready', submissionSequence: 2 },
+        candidate,
+        '2026-07-27T09:00:00.000Z',
+      ),
+    ).toBe(true);
+    expect(
+      canMarkDuplicateCandidate(
+        { status: 'ready', submissionSequence: 1 },
+        candidate,
+        '2026-07-27T09:00:00.000Z',
+      ),
+    ).toBe(false);
+  });
+
+  it('orders candidate evidence by original submission timestamp before UUID', () => {
+    const candidates = [
+      {
+        candidateReportId: '10000000-0000-4000-8000-000000000099',
+        assessment: 'likely' as const,
+        reason: 'later',
+        confidence: 0.9,
+        submittedAt: '2026-07-27T00:00:00.000Z',
+      },
+      {
+        candidateReportId: '10000000-0000-4000-8000-000000000098',
+        assessment: 'possible' as const,
+        reason: 'earlier',
+        confidence: 0.5,
+        submittedAt: '2026-07-26T00:00:00.000Z',
+      },
+    ];
+    expect(
+      sortDuplicateCandidates(candidates).map((candidate) => candidate.candidateReportId),
+    ).toEqual(['10000000-0000-4000-8000-000000000098', '10000000-0000-4000-8000-000000000099']);
+  });
+
+  it('builds the duplicate selector from eligible earlier candidates only', () => {
+    const options = eligibleDuplicateCandidates(
+      {
+        status: 'ready',
+        submissionSequence: 2,
+        duplicateCandidates: [
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000099',
+            title: 'Earlier finding',
+            assessment: 'likely',
+            reason: 'same impact',
+            confidence: 0.41,
+            submittedAt: '2026-07-26T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000098',
+            title: 'Later finding',
+            assessment: 'likely',
+            reason: 'same impact',
+            confidence: 0.99,
+            submittedAt: '2026-07-28T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000097',
+            title: 'Possible finding',
+            assessment: 'possible',
+            reason: 'weak signal',
+            confidence: 0.99,
+            submittedAt: '2026-07-25T09:00:00.000Z',
+          },
+        ],
+      },
+      '2026-07-27T09:00:00.000Z',
+    );
+    expect(options.map((candidate) => candidate.title)).toEqual(['Earlier finding']);
+  });
+
+  it('routes the candidate shortcut to the human duplicate action', async () => {
+    const candidateId = '10000000-0000-4000-8000-000000000099';
+    let selectedCandidate: string | undefined;
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: (id) => {
+            selectedCandidate = id;
+          },
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence: 2,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [
+              {
+                candidateReportId: candidateId,
+                assessment: 'likely',
+                reason: 'same impact',
+                confidence: 0.41,
+                submittedAt: '2026-07-26T09:00:00.000Z',
+              },
+            ],
+          },
+        }),
+      );
+    });
+    // The renderer is assigned inside act so React 19 does not treat the tree as unmounted.
+    const mountedRenderer = renderer!;
+    const hasText = (value: unknown, expected: string): boolean => {
+      if (typeof value === 'string') return value.includes(expected);
+      if (Array.isArray(value)) return value.some((item) => hasText(item, expected));
+      if (typeof value !== 'object' || value === null || !('props' in value)) return false;
+      return hasText((value as { props?: { children?: unknown } }).props?.children, expected);
+    };
+    const button = mountedRenderer.root
+      .findAllByType('button')
+      .find((element) => hasText(element.props['children'], 'Mark duplicate'));
+    expect(button).toBeDefined();
+    await act(async () => {
+      button?.props['onClick']();
+    });
+    expect(selectedCandidate).toBe(candidateId);
+    mountedRenderer.unmount();
+  });
+
   it('renders safe Processing and Unavailable states when the API has no AI projection', () => {
     const processing = renderToStaticMarkup(
       createElement(ReportAiReviewCard, {
@@ -374,7 +553,10 @@ describe('SR-12 report detail', () => {
     const disabled = renderToStaticMarkup(
       createElement(InformationRequestCallout, {
         action,
-        report: { ...report, capabilities: { canEdit: false, canResubmit: false } },
+        report: {
+          ...report,
+          capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: false },
+        },
       }),
     );
 

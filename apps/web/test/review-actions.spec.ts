@@ -4,7 +4,21 @@ import { createElement } from 'react';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
-import { duplicateTargetIsSafe, ReviewActions } from '@/components/reports/review-actions';
+const openConnectModal = vi.hoisted(() => vi.fn());
+
+vi.mock('@rainbow-me/rainbowkit', () => ({
+  useConnectModal: () => ({ openConnectModal }),
+}));
+
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ address: undefined, connector: undefined, isConnected: false }),
+}));
+
+import {
+  connectRewardWalletViaRainbowKit,
+  duplicateTargetIsSafe,
+  ReviewActions,
+} from '@/components/reports/review-actions';
 
 const REPORT_ID = '10000000-0000-4000-8000-000000000010';
 const PROGRAM_ID = '10000000-0000-4000-8000-000000000020';
@@ -36,7 +50,7 @@ const report = reportDetailSchema.parse({
   severityMismatchAcknowledged: false,
   impacts: [],
   attachments: [],
-  capabilities: { canEdit: false, canResubmit: false },
+  capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: false },
   contentHash: `0x${'a'.repeat(64)}`,
 });
 
@@ -130,6 +144,21 @@ async function renderActions(
 }
 
 describe('ReviewActions reward ownership boundary', () => {
+  it('opens the RainbowKit modal instead of requesting an arbitrary injected provider', async () => {
+    openConnectModal.mockClear();
+
+    await expect(
+      connectRewardWalletViaRainbowKit({
+        address: undefined,
+        connector: undefined,
+        isConnected: false,
+        openConnectModal,
+      }),
+    ).rejects.toThrow('reward_wallet_connection_required');
+
+    expect(openConnectModal).toHaveBeenCalledOnce();
+  });
+
   it('requires a readable same-program target before duplicate confirmation', () => {
     expect(duplicateTargetIsSafe(REPORT_ID, PROGRAM_ID, undefined)).toBe(false);
     expect(
@@ -181,5 +210,19 @@ describe('ReviewActions reward ownership boundary', () => {
 
     expect(markup).toContain('Settlement state could not be verified');
     expect(markup).not.toContain('Approve reward');
+  });
+
+  it('shows reopen only to the owner when the server grants the capability', async () => {
+    const duplicateReport = reportDetailSchema.parse({
+      ...report,
+      status: 'duplicate',
+      capabilities: { canEdit: false, canResubmit: false, canReopenDuplicate: true },
+    });
+    const ownerMarkup = text(await renderActions('owner', 'absent', duplicateReport));
+    const reviewerMarkup = text(await renderActions('reviewer', 'absent', duplicateReport));
+
+    expect(ownerMarkup).toContain('Reopen duplicate');
+    expect(reviewerMarkup).not.toContain('Reopen duplicate');
+    expect(reviewerMarkup).toContain('owner may reopen');
   });
 });

@@ -7,7 +7,7 @@ import { reportListHref } from '@/components/reports/report-detail-model';
 import { toReportQueryKey, toReportSearchParams } from '@/components/reports/report-filters';
 import { formatUsdc, REPORT_STATUS_OPTIONS } from '@/components/reports/report-format';
 import { ReportPagination, reportPaginationLabel } from '@/components/reports/report-pagination';
-import { ReportTable } from '@/components/reports/report-table';
+import { ReportCardList, ReportTable } from '@/components/reports/report-table';
 import { MY_REPORTS_EVENT_NAMES, myReportsRowOpenedEvent } from '@/lib/my-reports-analytics';
 
 const baseReport = reportSummarySchema.parse({
@@ -47,7 +47,7 @@ describe('MR-05 report table', () => {
     expect(markup).toContain('>Action</th>');
     expect(markup).toContain('line-clamp-2');
     expect(markup).toContain('Aegis Protocol');
-    expect(markup).not.toContain('description');
+    expect(markup).not.toContain('Private report body');
   });
 
   it('keeps severity provenance, pending tone, exact time and monetary precision accessible', () => {
@@ -72,6 +72,19 @@ describe('MR-05 report table', () => {
     expect(markup).not.toContain('data-variant="success"');
     expect(markup).toContain('dateTime="2026-07-26T12:00:00.000Z"');
     expect(markup).toContain('aria-label="Updated ');
+    expect(markup).toContain('aria-label="Updated Jul 26, 2026, 7:00:00 PM"');
+    expect(markup).toContain('Exact update timestamp: Jul 26, 2026, 7:00:00 PM');
+    expect(markup).toMatch(/aria-describedby="report-updated-description-[^"]+"/);
+
+    const mobileMarkup = renderToStaticMarkup(
+      createElement(ReportCardList, {
+        actionLabel: 'Open',
+        hrefFor: (report) => `/reports/${report.id}`,
+        reports: [finalReport],
+      }),
+    );
+    expect(mobileMarkup).toContain('>Updated 2 weeks ago</time>');
+    expect(mobileMarkup).toContain('Exact update timestamp: Jul 26, 2026, 7:00:00 PM');
   });
 
   it('uses an em dash for an undecided reward and one focusable whole-row link', () => {

@@ -14,6 +14,7 @@ import type {
   MarkDuplicateRequest,
   PublicDisclosureListResponse,
   RejectReportRequest,
+  ReopenDuplicateRequest,
   ReportDetail,
   ReportListQuery,
   ReportListResponse,
@@ -189,6 +190,20 @@ export class ReportService {
         throw new GoneException('reward_settlement_flow_required');
     }
 
+    return this.get(principal, reportId);
+  }
+
+  /** Reopens a duplicate only through the owner-only, server-guarded transition. */
+  public async reopenDuplicate(
+    principal: RequestPrincipal,
+    reportId: string,
+    input: ReopenDuplicateRequest,
+  ): Promise<ReportDetail> {
+    if (principal.role !== 'owner') {
+      throw new ForbiddenException();
+    }
+
+    await this.repository.reopenDuplicate(principal, reportId, input);
     return this.get(principal, reportId);
   }
 

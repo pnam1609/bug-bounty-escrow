@@ -206,6 +206,8 @@ type TriageResult = {
   fingerprint: ReportFingerprint;
   // Chỉ owner/reviewer đã re-authorize được nhận candidate IDs.
   duplicateCandidateReportIds: string[];
+  // Owner/reviewer read models may additionally expose same-program candidates with their
+  // advisory assessment/confidence and server-enriched original submittedAt timestamp.
 };
 ```
 
@@ -235,6 +237,20 @@ AI result được validate rồi persist trước khi UI đọc và không tự
 AI pass 1 tạo `ReportFingerprint`; BE dùng fingerprint + deterministic signals để shortlist các prior
 sequence trong cùng program; AI pass 2 mới so sánh chi tiết với top candidates. Scope/impact researcher
 chọn không được dùng làm hard filter.
+
+Owner/reviewer duplicate candidates remain advisory and are re-authorized at read time. The server
+projection enriches retained same-program candidates with the original report `submittedAt` (falling
+back to `createdAt` only for legacy rows), drops rows without a valid timestamp and sorts them
+chronologically ascending with a UUID tie-break. The inline human `Mark duplicate` shortcut is shown
+only when a candidate is assessed `likely`, its confidence is strictly greater than 40%, and the
+current canonical `submissionSequence` is greater than 1. It is hidden for `possible`, exactly 40%
+or lower, the first sequence, or missing/invalid sequence. Clicking it only opens the existing human
+confirmation dialog; owner/reviewer role, status, same-program, self-reference and cycle checks stay
+server-authoritative, and AI cannot mutate lifecycle or payout.
+The dialog's normal path is a server-authorized select, never arbitrary UUID entry: options require a
+`likely` assessment, confidence strictly above 40%, a valid candidate title/timestamp, and a timestamp
+strictly earlier than the current report. Each option shows title, shortened UUID and exact/relative
+submitted time; an inline candidate action preselects it, while no eligible option keeps confirm disabled.
 
 Gemini provider pin exact stable model `gemini-3.5-flash`, không dùng `latest` alias. Free tier chỉ
 được dùng cho synthetic/demo/non-confidential data: Gemini unpaid-service terms không phù hợp để gửi
@@ -719,6 +735,10 @@ then rewritten to `SUPABASE_PUBLIC_URL` before reaching the browser. The interna
 `supabase-kong:8000` origin must never be returned to an HTTPS page because browsers block it as
 Mixed Content.
 
+Review inbox and report-list `Updated` values remain compact relative times while hover/focus
+exposes the exact local timestamp through the design-system tooltip and an accessible description,
+including seconds. The row must not expose report body, PoC, comments or private attachment data.
+
 `draft` chỉ tồn tại trong `localStorage` của browser; server tạo thẳng `submitted`.
 
 ### Program metrics
@@ -1182,6 +1202,7 @@ POST   /api/reports/:id/request-information
 POST   /api/reports/:id/validate
 POST   /api/reports/:id/reject
 POST   /api/reports/:id/mark-duplicate
+POST   /api/reports/:id/reopen-duplicate
 POST   /api/reports/:id/approve-reward
 POST   /api/reports/:id/pay
 POST   /api/reports/:id/confirm-payment
@@ -1194,6 +1215,14 @@ thuộc program được phép review.
 
 `approve-reward` reserve số tiền vào `programs.reserved_pool`; `pay` ghi nhận transaction và
 chuyển sang `payment_pending`; `confirm-payment` chuyển reserved → paid và đóng report.
+
+`POST /api/reports/:id/reopen-duplicate` là recovery action chỉ program owner được phép dùng cho
+report đang `duplicate`. Database/RPC là authority: chỉ chuyển `duplicate → submitted` khi program
+đang `active`, chưa có funding/settlement/payment/disclosure evidence và cả `total_pool`,
+`reserved_pool`, `paid_pool` đều bằng 0; `paused`, `expired`, `closed`, `deactivated`, reviewer và
+researcher đều bị chặn. Action ghi audit `reopen_duplicate` và notification, giữ nguyên lịch sử
+duplicate; không tự chạy AI, validate, reward hoặc payout. Comments vẫn là private collaboration
+được researcher/owner/reviewer dùng theo quyền hiện hành, không phải cơ chế reopen.
 
 Body của `approve-reward` phụ thuộc calculation type của tier:
 

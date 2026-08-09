@@ -60,6 +60,9 @@ export const API_ERROR_CODES = Object.freeze([
   'impact_selection_required',
   'reproduction_steps_required',
   'duplicate_target_invalid',
+  'duplicate_reopen_program_not_active',
+  'duplicate_reopen_funded',
+  'duplicate_reopen_settlement_started',
 
   // Settlement
   'reward_out_of_bounds',

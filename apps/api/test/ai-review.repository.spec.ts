@@ -337,4 +337,165 @@ describe('SupabaseAiReviewQueueRepository report projection', () => {
       repository.getReview('10000000-0000-0000-0000-000000000020', owner),
     ).resolves.toMatchObject({ status: 'ready', duplicateCandidates: [] });
   });
+
+  it('enriches authorized candidates with submitted timestamps and orders them chronologically', async () => {
+    const earliest = '10000000-0000-4000-8000-000000000012';
+    const latest = '10000000-0000-4000-8000-000000000011';
+    const candidateResult = {
+      ...result,
+      result: {
+        ...(result.result as Record<string, unknown>),
+        duplicateAssessment: {
+          assessment: 'likely',
+          confidence: 0.8,
+          candidates: [
+            {
+              candidateRef: latest,
+              assessment: 'likely',
+              reasons: ['same function'],
+              confidence: 0.8,
+            },
+            {
+              candidateRef: earliest,
+              assessment: 'possible',
+              reasons: ['same impact'],
+              confidence: 0.6,
+            },
+          ],
+        },
+      },
+    };
+    const repository = new SupabaseAiReviewQueueRepository(
+      clientFor(
+        run.source_content_hash,
+        { ...run, program_submission_sequence: 2 },
+        candidateResult,
+        run['submission_revision'],
+        { submitted_at: '2026-08-02T00:00:00.000Z' },
+        null,
+        owner.userId,
+        [
+          {
+            id: latest,
+            program_id: '10000000-0000-0000-0000-000000000099',
+            title: 'Latest candidate',
+            submitted_at: '2026-08-01T00:00:00.000Z',
+            created_at: '2026-07-31T00:00:00.000Z',
+          },
+          {
+            id: earliest,
+            program_id: '10000000-0000-0000-0000-000000000099',
+            title: 'Earliest candidate',
+            submitted_at: '2026-07-30T00:00:00.000Z',
+            created_at: '2026-07-29T00:00:00.000Z',
+          },
+        ],
+      ) as never,
+    );
+
+    await expect(
+      repository.getReview('10000000-0000-0000-0000-000000000020', owner),
+    ).resolves.toMatchObject({
+      status: 'ready',
+      duplicateCandidates: [
+        {
+          candidateReportId: earliest,
+          title: 'Earliest candidate',
+          submittedAt: '2026-07-30T00:00:00.000Z',
+        },
+        {
+          candidateReportId: latest,
+          title: 'Latest candidate',
+          submittedAt: '2026-08-01T00:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  it('uses created_at for legacy rows, drops malformed timestamps and tie-breaks by UUID', async () => {
+    const legacy = '10000000-0000-4000-8000-000000000012';
+    const tiedLaterId = '10000000-0000-4000-8000-000000000014';
+    const tiedEarlierId = '10000000-0000-4000-8000-000000000013';
+    const malformed = '10000000-0000-4000-8000-000000000015';
+    const candidateResult = {
+      ...result,
+      result: {
+        ...(result.result as Record<string, unknown>),
+        duplicateAssessment: {
+          assessment: 'likely',
+          confidence: 0.8,
+          candidates: [
+            { candidateRef: malformed, assessment: 'possible', reasons: ['bad'], confidence: 0.4 },
+            {
+              candidateRef: tiedLaterId,
+              assessment: 'possible',
+              reasons: ['tie'],
+              confidence: 0.5,
+            },
+            {
+              candidateRef: legacy,
+              assessment: 'likely',
+              reasons: ['legacy'],
+              confidence: 0.7,
+            },
+            {
+              candidateRef: tiedEarlierId,
+              assessment: 'possible',
+              reasons: ['tie'],
+              confidence: 0.5,
+            },
+          ],
+        },
+      },
+    };
+    const sameProgram = '10000000-0000-0000-0000-000000000099';
+    const repository = new SupabaseAiReviewQueueRepository(
+      clientFor(
+        run.source_content_hash,
+        run,
+        candidateResult,
+        run['submission_revision'],
+        {},
+        null,
+        owner.userId,
+        [
+          {
+            id: legacy,
+            program_id: sameProgram,
+            submitted_at: null,
+            created_at: '2026-08-01T00:00:00+02:00',
+          },
+          {
+            id: tiedLaterId,
+            program_id: sameProgram,
+            submitted_at: '2026-07-31T22:30:00.000Z',
+            created_at: '2026-07-31T22:00:00.000Z',
+          },
+          {
+            id: tiedEarlierId,
+            program_id: sameProgram,
+            submitted_at: '2026-07-31T22:30:00.000Z',
+            created_at: '2026-07-31T22:00:00.000Z',
+          },
+          {
+            id: malformed,
+            program_id: sameProgram,
+            submitted_at: null,
+            created_at: 'not-a-timestamp',
+          },
+        ],
+      ) as never,
+    );
+
+    await expect(
+      repository.getReview('10000000-0000-0000-0000-000000000020', owner),
+    ).resolves.toMatchObject({
+      status: 'ready',
+      duplicateCandidates: [
+        { candidateReportId: legacy, submittedAt: '2026-08-01T00:00:00+02:00' },
+        { candidateReportId: tiedEarlierId, submittedAt: '2026-07-31T22:30:00.000Z' },
+        { candidateReportId: tiedLaterId, submittedAt: '2026-07-31T22:30:00.000Z' },
+      ],
+    });
+  });
 });

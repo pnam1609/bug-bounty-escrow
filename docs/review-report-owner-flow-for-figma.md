@@ -53,12 +53,12 @@ ký approval và khởi động reward settlement.
 
 ### 3.1 Product và task source
 
-| Nguồn                                             | Vai trò                                                                        |
-| ------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `PROJECT_CONTEXT.md`                              | Role, lifecycle, privacy, human/AI boundary và Arc settlement                  |
-| Shared Zod contracts + `apps/api/openapi.json`    | Contract implementation hiện hành; flow doc thắng khi có target contract mới   |
-| Notion project `06a0ee55892f4852bffd3b871ef4df8d` | Status, dependency và acceptance criteria live của ticket                      |
-| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-08                          |
+| Nguồn                                             | Vai trò                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `PROJECT_CONTEXT.md`                              | Role, lifecycle, privacy, human/AI boundary và Arc settlement                |
+| Shared Zod contracts + `apps/api/openapi.json`    | Contract implementation hiện hành; flow doc thắng khi có target contract mới |
+| Notion project `06a0ee55892f4852bffd3b871ef4df8d` | Status, dependency và acceptance criteria live của ticket                    |
+| Tài liệu này                                      | Target UX/interaction requirement cho RR-01 đến RR-08                        |
 
 Notion là nguồn sự thật cho **trạng thái công việc**, không tự thay thế acceptance criteria trong
 tài liệu này. Trước khi bắt đầu implementation, agent phải map RR screens vào ticket FE-REV tương
@@ -205,8 +205,12 @@ validated
 reward_approved
   └─ payout submitted and verified → payment_pending → paid
 
-rejected | duplicate | paid
+rejected | paid
   └─ terminal for this review flow
+
+duplicate
+  ├─ program owner reopen (only while program is active and unfunded) → submitted
+  └─ researcher comments/appeals; reviewer cannot reopen
 ```
 
 Mỗi successful submit và resubmit đồng thời ghi nhận submission revision/content hash hiện hành và
@@ -226,14 +230,15 @@ prompt hoặc provider progress.
 
 ### 6.2 Action availability
 
-| Status                               | Owner                                                 | Assigned reviewer                     |
-| ------------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| `submitted`, `triaged`               | Validate, Request information, Reject, Mark duplicate | Cùng bốn review actions               |
-| `needs_information`                  | Comment/view; chờ researcher resubmit                 | Comment/view; chờ researcher resubmit |
-| `validated`                          | Approve reward / continue or resume settlement        | Chỉ xem, chờ owner                    |
-| `reward_approved`, `payment_pending` | Resume/reconcile settlement khi cần                   | Chỉ xem progress                      |
-| `rejected`, `duplicate`, `paid`      | Read-only terminal                                    | Read-only terminal                    |
-| `draft`                              | Không xuất hiện trong review inbox                    | Không xuất hiện trong review inbox    |
+| Status                               | Owner                                                                       | Assigned reviewer                     |
+| ------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------- |
+| `submitted`, `triaged`               | Validate, Request information, Reject, Mark duplicate                       | Cùng bốn review actions               |
+| `needs_information`                  | Comment/view; chờ researcher resubmit                                       | Comment/view; chờ researcher resubmit |
+| `validated`                          | Approve reward / continue or resume settlement                              | Chỉ xem, chờ owner                    |
+| `reward_approved`, `payment_pending` | Resume/reconcile settlement khi cần                                         | Chỉ xem progress                      |
+| `rejected`, `paid`                   | Read-only terminal                                                          | Read-only terminal                    |
+| `duplicate`                          | Reopen duplicate only when server capability allows it; otherwise read-only | Read-only terminal                    |
+| `draft`                              | Không xuất hiện trong review inbox                                          | Không xuất hiện trong review inbox    |
 
 Mọi mutation phải chặn double-submit, giữ dialog mở khi error, refresh đúng report/inbox query sau
 success và xử lý conflict do status đổi ở tab khác bằng server response thay vì overwrite.
@@ -274,6 +279,10 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Program options phải đến từ authorized result scope, không từ public programs list.
 - Không thêm search nếu API chưa có search contract.
 - `Needs action` phải dễ nhận biết bằng text + tone, không chỉ màu.
+- `Updated` keeps a compact relative value (for example, `2 hours ago`). Hovering or focusing the
+  value opens a design-system tooltip with the exact local timestamp including seconds. The time
+  remains keyboard-focusable and keeps `title` plus an `aria-describedby` description; no report
+  body or private evidence is added to the row.
 
 ### Desktop table
 
@@ -330,6 +339,12 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
   không mở AI result trong panel/dialog riêng.
 - AI output không prefill final severity, duplicate target, decision form hoặc reward field. Human
   reviewer phải tự chọn và confirm mọi quyết định.
+- Với owner/reviewer, mỗi candidate đã được server re-authorize hiển thị timestamp `submittedAt`
+  của report gốc và được sort chronological ascending (earliest first; UUID tie-break). Chỉ candidate
+  có assessment `likely`, confidence **strictly greater than 40%** và current
+  `submissionSequence > 1` mới có nút `Mark duplicate`; `possible`, confidence bằng/nhỏ hơn 40%,
+  first sequence hoặc sequence thiếu/không hợp lệ chỉ là advisory evidence. Nút mở dialog duplicate
+  human hiện hành với UUID được prefill, không tự submit.
 - Nếu result chưa current/valid/available, dùng safe state của RR-08 và vẫn để human decision
   controls khả dụng theo report status.
 
@@ -404,12 +419,37 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
 ### Mark duplicate
 
 - Chỉ từ `submitted | triaged`.
-- Original report full UUID bắt buộc; optional reason tối đa 2,000 ký tự.
+- Selector bắt buộc chọn một original report từ danh sách server-authorized; optional reason tối đa
+  2,000 ký tự. Không dùng nhập UUID tự do làm happy path.
 - Target phải tồn tại, cùng program, reviewer có quyền đọc, không self-reference và không tạo cycle.
-- UI target cuối cùng nên search/select authorized report theo FE-REV-007; input UUID hiện tại chỉ là
-  implementation baseline, không phải trải nghiệm cuối cùng.
+- Select options chỉ gồm candidates cùng program, `assessment = likely`, confidence `> 0.40`,
+  timestamp hợp lệ và `submittedAt` sớm hơn report hiện tại. Mỗi option hiển thị title, short UUID
+  và exact/relative submitted timestamp; không có option thì confirm disabled.
+- Inline AI candidates chỉ là shortcut để mở dialog human: candidate phải là `likely` với confidence
+  `> 0.40`, current submission sequence phải lớn hơn 1, và report gốc phải có timestamp do server
+  trả. Candidate list sort theo `submittedAt` tăng dần (UUID tăng dần khi cùng timestamp). Report đầu
+  tiên trong program và result thiếu/không hợp lệ sequence tuyệt đối không có nút này.
+- Click shortcut preselect candidate đó trong selector; mở Mark duplicate trực tiếp bắt đầu không có
+  selection. Server vẫn re-authorize target, client không thể submit arbitrary UUID để bypass selector.
 - Trước confirm hiển thị target title + short ID để owner đối chiếu; không lộ candidate ngoài quyền.
 - Success → `duplicate`, hiển thị linked original; duplicate không nhận reward.
+
+### Reopen duplicate
+
+- Chỉ program owner của report được phép reopen; assigned reviewer và researcher luôn read-only.
+- Action chỉ xuất hiện khi server trả capability `canReopenDuplicate = true` cho report đang ở
+  `duplicate`; UI không tự suy luận từ program status hoặc pool balance.
+- Confirmation phải nói rõ đây là false-positive recovery: report trở lại `submitted` để review lại,
+  không tự validate, tạo reward, payout hoặc chạy lại AI. Researcher vẫn có thể comment/appeal nhưng
+  không có nút reopen.
+- Server/RPC kiểm tra atomic: report đang `duplicate`, original report tồn tại/cùng program/được
+  owner đọc, program đang `active`, `total_pool = reserved_pool = paid_pool = 0`, escrow chưa có
+  funding/settlement/payment/disclosure evidence, và không có transition/reopen race đang chạy.
+  `paused`, `expired`, `closed` và `deactivated` đều bị chặn.
+- Success ghi audit action `reopen_duplicate` với lý do tùy chọn (server dùng reason mặc định nếu bỏ
+  trống), giữ nguyên duplicate audit/linked
+  original history, chuyển status `submitted`, tạo notification cho researcher và refetch inbox/detail.
+- Reopen lần hai hoặc trạng thái đã đổi trả stable conflict; không optimistic đổi terminal state.
 
 ### Error/race behavior
 
@@ -429,6 +469,12 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 - Available pool, reserved pool, amount/basis và recipient wallet được server derive/verify.
 - Connected wallet phải đúng locked owner/admin wallet; account/network mismatch fail closed.
 - Reviewer không phải owner chỉ thấy waiting state, không thấy connect/sign controls.
+- Owner approval phải dùng RainbowKit Connect/account modal và Wagmi connector đã chọn. Nếu chưa
+  connect, action mở RainbowKit modal rồi dừng an toàn; không tự dò injected provider, không gọi
+  `eth_requestAccounts` và không tự chọn OKX/Rainbow khác với account đang hiển thị.
+- Sau khi account được chọn, provider EIP-1193 của connector đó mới được bridge vào Circle App Kit.
+  Trước mỗi preflight/signature phải đọc lại account và chain; mismatch fail closed. Circle App Kit
+  chỉ thực thi transaction, không thay thế wallet chooser.
 
 ### Range hoặc flat tier
 
@@ -457,6 +503,8 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 ### 13.1 Nguyên tắc
 
 - Browser owner chỉ ký **một** `approveReward` cho immutable report key/content hash/recipient/amount.
+- `Approve reward` và `Continue approval` đều dùng đúng RainbowKit/Wagmi account/provider bridge;
+  chúng không mở wallet provider legacy hoặc tự động chọn wallet cài trong browser.
 - Sau approval confirmed, Circle developer-controlled wallet gọi permissionless `payReward`.
 - Circle API key, Entity Secret và Deployment Wallet ID chỉ ở backend; không xuống browser/Figma
   sample/log.
@@ -578,6 +626,10 @@ Duplicate pipeline là hai AI pass xen giữa một BE retrieval pass:
   missing information, confidence và authorized duplicate candidates nếu feature này được bật.
 - Mỗi run/result ghi `reportId`, source submission revision, source content hash, `generatedAt` và
   `persistedAt`. UI chỉ coi result là current khi cả revision và hash khớp report đang đọc.
+- Owner/reviewer read projection re-authorize candidate UUIDs cùng program, enriches each retained
+  candidate with the original report `submittedAt` (legacy `createdAt` fallback), drops candidates
+  without a valid timestamp, and returns chronological ascending order with deterministic UUID
+  tie-break. This metadata is never included in the researcher projection.
 - Prior result được giữ cho audit nhưng mang `superseded`; không dùng làm current summary hoặc
   fallback khi revision mới chưa completed.
 - Persist thêm `programId`, `programSubmissionSequence`, `provider`, exact `model`, `schemaVersion`,
@@ -620,7 +672,12 @@ AI worker tách request thành **internal job envelope** và **provider-safe rep
   },
   "duplicateContext": {
     "priorSameProgramCandidates": [
-      { "candidateRef": "opaque-ref", "sequence": 17, "fingerprint": "...", "boundedReasons": ["..."] }
+      {
+        "candidateRef": "opaque-ref",
+        "sequence": 17,
+        "fingerprint": "...",
+        "boundedReasons": ["..."]
+      }
     ]
   }
 }
@@ -674,7 +731,12 @@ tương đương) trước khi persist. Response hợp lệ là advisory, không
     "confidence": 0.71,
     "matchingReasons": ["..."],
     "candidates": [
-      { "candidateRef": "opaque-ref", "assessment": "possible", "confidence": 0.71, "reasons": ["..."] }
+      {
+        "candidateRef": "opaque-ref",
+        "assessment": "possible",
+        "confidence": 0.71,
+        "reasons": ["..."]
+      }
     ]
   }
 }
@@ -889,6 +951,11 @@ AI run mới.
 - [ ] AC-18 — Gemini provider pin exact stable `gemini-3.5-flash`, structured output được Zod validate,
       quota/timeout/invalid output retry bounded và không chặn human review. Free tier chỉ chạy với
       synthetic/demo/non-confidential data; private production content fail closed.
+- [ ] AC-19 — Authorized duplicate candidates show server `submittedAt` in chronological order. The
+      inline human `Mark duplicate` shortcut appears only for `likely` candidates with confidence
+      `> 0.40` and current sequence `> 1`; exactly 40%, `possible`, first/missing sequence hide it.
+      Clicking only opens the existing human confirmation dialog; server role/status/program/cycle
+      authorization remains authoritative and AI cannot mutate lifecycle or payout.
 
 ## 20. Test matrix
 

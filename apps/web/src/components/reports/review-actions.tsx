@@ -4,12 +4,14 @@ import {
   approveRewardRequestSchema,
   createRewardSettlementIntentRequestSchema,
   markDuplicateRequestSchema,
+  reopenDuplicateRequestSchema,
   rejectReportRequestSchema,
   reportResponseSchema,
   rewardSettlementIntentResponseSchema,
   requestInformationRequestSchema,
   validateReportRequestSchema,
   type ApproveRewardRequest,
+  type AiDuplicateCandidate,
   type ReportDetail,
   type RewardSettlementIntent,
   type Severity,
@@ -42,12 +44,16 @@ import {
   SelectValue,
   Textarea,
 } from '@bug-bounty-escrow/ui';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useAccount } from 'wagmi';
+import type { EIP1193Provider } from 'viem';
 
 import {
   describeReportError,
+  formatTimestamp,
   SEVERITY_LABELS,
   SEVERITY_OPTIONS,
   shortReportId,
@@ -55,7 +61,15 @@ import {
 } from './report-format';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
-import { connectCircleWallet } from '@/components/owner/circle-funding-executor';
+import {
+  connectCircleWalletFromProvider,
+  type CircleWalletSession,
+} from '@/components/owner/circle-funding-executor';
+import { eligibleDuplicateCandidates } from './report-ai-review-card';
+
+function formatDuplicateCandidateTime(value: string | undefined): string {
+  return value === undefined ? 'timestamp unavailable' : formatTimestamp(value);
+}
 
 import {
   executeReservedRewardApproval,
@@ -73,6 +87,37 @@ import {
 
 export { ACTIONS_BY_STATUS, ACTION_RESULT_STATUS };
 export type { ActionId };
+
+type RainbowRewardConnector = {
+  readonly id: string;
+  readonly name: string;
+  readonly getProvider: () => Promise<unknown>;
+};
+
+/**
+ * Resolve the owner approval wallet through RainbowKit's Wagmi connector. The legacy funding
+ * helper discovers injected providers and calls `eth_requestAccounts`, which could silently pick
+ * an installed OKX provider when the owner expected RainbowKit's selected account. Reward approval
+ * must use the same account/provider RainbowKit displays; Circle App Kit only receives the bridged
+ * EIP-1193 provider after that selection has already happened.
+ */
+export async function connectRewardWalletViaRainbowKit(input: {
+  readonly address: string | undefined;
+  readonly connector: RainbowRewardConnector | undefined;
+  readonly isConnected: boolean;
+  readonly openConnectModal: (() => void) | undefined;
+}): Promise<CircleWalletSession> {
+  if (!input.isConnected || input.address === undefined || input.connector === undefined) {
+    input.openConnectModal?.();
+    throw new Error('reward_wallet_connection_required');
+  }
+
+  const provider = await input.connector.getProvider();
+  return connectCircleWalletFromProvider(provider as EIP1193Provider, input.address, {
+    id: input.connector.id,
+    name: input.connector.name,
+  });
+}
 
 /*
  * No Figma source — the reviewer's decision panel.
@@ -94,7 +139,8 @@ const WAITING_COPY: Readonly<Partial<Record<ReportStatus, string>>> = Object.fre
   needs_information:
     'Waiting on the researcher. They must answer and resend the report before it can be decided.',
   rejected: 'This report is closed. Rejection is final.',
-  duplicate: 'This report is closed as a duplicate. That decision is final.',
+  duplicate:
+    'This report is closed as a duplicate. The program owner may reopen it only while the program remains unfunded.',
   paid: 'Settled. The escrow released the reward and there is nothing left to decide.',
   draft: 'This report has not been submitted yet.',
 });
@@ -384,6 +430,11 @@ function RejectAction({ busy, submit }: ActionProps) {
 interface MarkDuplicateActionProps extends ActionProps {
   readonly currentProgramId: string;
   readonly currentReportId: string;
+  readonly currentSubmittedAt: string | undefined;
+  readonly currentSubmissionSequence: number | undefined;
+  readonly duplicateCandidates: readonly AiDuplicateCandidate[];
+  readonly initialOriginalReportId?: string;
+  readonly onInitialOriginalReportIdConsumed?: () => void;
   readonly token: string | undefined;
 }
 
@@ -402,6 +453,11 @@ function MarkDuplicateAction({
   busy,
   currentProgramId,
   currentReportId,
+  currentSubmittedAt,
+  currentSubmissionSequence,
+  duplicateCandidates,
+  initialOriginalReportId,
+  onInitialOriginalReportIdConsumed,
   submit,
   token,
 }: MarkDuplicateActionProps) {
@@ -413,6 +469,28 @@ function MarkDuplicateAction({
     setReason('');
     setFieldError(null);
   });
+  const eligibleCandidates = eligibleDuplicateCandidates(
+    {
+      status: 'ready',
+      submissionSequence: currentSubmissionSequence,
+      duplicateCandidates,
+    },
+    currentSubmittedAt,
+  );
+  useEffect(() => {
+    if (initialOriginalReportId === undefined) return;
+    const isEligible = eligibleCandidates.some(
+      (candidate) => candidate.candidateReportId === initialOriginalReportId,
+    );
+    setOriginalId(isEligible ? initialOriginalReportId : '');
+    setReason('');
+    setFieldError(null);
+    if (isEligible) form.change(true);
+    onInitialOriginalReportIdConsumed?.();
+    // `form.change` is intentionally used only for this one-shot candidate prefill. The parent
+    // clears the consumed id immediately, so including the per-render form object would reopen
+    // the dialog on every render.
+  }, [initialOriginalReportId, onInitialOriginalReportIdConsumed]);
   const candidateId = originalId.trim();
   const candidateShapeValid = markDuplicateRequestSchema.safeParse({
     originalReportId: candidateId,
@@ -441,7 +519,7 @@ function MarkDuplicateAction({
     });
 
     if (!parsed.success) {
-      setFieldError('Enter the id of the earlier report this one duplicates.');
+      setFieldError('Select an earlier authorized report this one duplicates.');
       return;
     }
 
@@ -476,17 +554,38 @@ function MarkDuplicateAction({
     >
       <Field
         error={fieldError ?? undefined}
-        helperText="The full id of the original report, copied from its detail screen."
-        label="Original report id"
+        helperText="Only earlier, server-authorized AI candidates above the action threshold are available."
+        label="Original report"
         required
       >
-        <Input
-          autoComplete="off"
-          onChange={(event) => setOriginalId(event.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
-          size="lg"
+        <Select
+          onValueChange={(value) => {
+            setOriginalId(value);
+            setFieldError(null);
+          }}
           value={originalId}
-        />
+        >
+          <SelectTrigger
+            aria-invalid={fieldError !== null || undefined}
+            id="duplicate-target"
+            size="lg"
+          >
+            <SelectValue
+              placeholder={
+                eligibleCandidates.length === 0
+                  ? 'No eligible earlier report'
+                  : 'Select an earlier report'
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {eligibleCandidates.map((candidate) => (
+              <SelectItem key={candidate.candidateReportId} value={candidate.candidateReportId}>
+                {`${candidate.title ?? 'Untitled report'} · ${shortReportId(candidate.candidateReportId)} · ${formatDuplicateCandidateTime(candidate.submittedAt)}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
       {candidateId === '' || !candidateShapeValid ? null : targetQuery.isPending ? (
         <p aria-live="polite" className="text-body-sm text-text-muted">
@@ -513,6 +612,50 @@ function MarkDuplicateAction({
           maxLength={2000}
           onChange={(event) => setReason(event.target.value)}
           placeholder="Anything that helps the researcher see the overlap."
+          rows={3}
+          value={reason}
+        />
+      </Field>
+    </ActionDialog>
+  );
+}
+
+function ReopenDuplicateAction({ busy, submit }: ActionProps) {
+  const [reason, setReason] = useState('');
+  const form = useActionForm(() => setReason(''));
+
+  async function confirm() {
+    const parsed = reopenDuplicateRequestSchema.safeParse(
+      reason.trim() === '' ? {} : { reason: reason.trim() },
+    );
+    if (!parsed.success) {
+      form.setError('Use a shorter explanation, or leave the reason empty.');
+      return;
+    }
+
+    const result = await submit('reopen-duplicate', parsed.data);
+    if (result.ok) form.close();
+    else form.setError(result.message);
+  }
+
+  return (
+    <ActionDialog
+      busy={busy}
+      confirmLabel="Reopen report"
+      description="Returns this duplicate report to submitted so the program owner can review it again."
+      error={form.error}
+      onConfirm={() => void confirm()}
+      onOpenChange={form.change}
+      open={form.open}
+      title="Reopen duplicate report"
+      trigger={<Button variant="secondary">Reopen duplicate</Button>}
+      warning="This is available only to the program owner while the program is active, unfunded, and has no settlement or disclosure activity."
+    >
+      <Field counter={`${String(reason.length)} / 2,000`} label="Reason (optional)">
+        <Textarea
+          maxLength={2000}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Explain why this duplicate decision should be reviewed again."
           rows={3}
           value={reason}
         />
@@ -813,10 +956,21 @@ export interface ReviewActionsProps {
   readonly report: ReportDetail;
   readonly token: string | undefined;
   readonly viewerRole?: 'owner' | 'researcher' | 'reviewer';
+  readonly initialDuplicateCandidateId?: string;
+  readonly onDuplicateCandidateConsumed?: () => void;
 }
 
-export function ReviewActions({ principalId, report, token, viewerRole }: ReviewActionsProps) {
+export function ReviewActions({
+  initialDuplicateCandidateId,
+  onDuplicateCandidateConsumed,
+  principalId,
+  report,
+  token,
+  viewerRole,
+}: ReviewActionsProps) {
   const client = useQueryClient();
+  const { address: rainbowAddress, connector: rainbowConnector, isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const rewardIntentQueryKey = ['reward-settlement', principalId, report.id] as const;
   const settlement = useQuery({
     queryKey: rewardIntentQueryKey,
@@ -835,6 +989,15 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
   const [volatileRecovery, setVolatileRecovery] = useState<
     { intentId: string; transactionHash: string } | undefined
   >();
+
+  async function connectRewardWallet(): Promise<CircleWalletSession> {
+    return connectRewardWalletViaRainbowKit({
+      address: rainbowAddress,
+      connector: rainbowConnector,
+      isConnected,
+      openConnectModal,
+    });
+  }
 
   useEffect(() => {
     const intentId = settlement.data?.data.id;
@@ -868,7 +1031,7 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
   function rewardDependencies(): RewardApprovalOrchestratorDependencies {
     return {
       recoveryStore: window.localStorage,
-      connect: connectCircleWallet,
+      connect: connectRewardWallet,
       current: async () =>
         (
           await apiRequest(
@@ -909,7 +1072,7 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
       command:
         { kind: 'create'; input: ApproveRewardRequest } | { kind: 'continue'; intentId: string },
     ) => {
-      const session = await connectCircleWallet();
+      const session = await connectRewardWallet();
       let intentId: string;
       if (command.kind === 'create') {
         const request = createRewardSettlementIntentRequestSchema.parse({
@@ -1040,6 +1203,10 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
   }
 
   const available = ACTIONS_BY_STATUS[report.status];
+  const canRenderReopen = viewerRole === 'owner' && report.capabilities.canReopenDuplicate;
+  const hasVisibleAction = available.some(
+    (action) => action !== 'reopen-duplicate' || canRenderReopen,
+  );
   const settlementAbsent =
     settlement.error instanceof ApiClientError &&
     settlement.error.status === 404 &&
@@ -1084,7 +1251,7 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
         <p className="text-body-sm text-text-muted" role="status">
           Waiting for the program owner to approve the reward.
         </p>
-      ) : available.length === 0 ? (
+      ) : !hasVisibleAction ? (
         <p className="text-body-sm text-text-muted">
           {WAITING_COPY[report.status] ?? 'There is nothing to decide at this stage.'}
         </p>
@@ -1140,8 +1307,20 @@ export function ReviewActions({ principalId, report, token, viewerRole }: Review
               {...props}
               currentProgramId={report.programId}
               currentReportId={report.id}
+              currentSubmittedAt={report.submittedAt ?? report.createdAt}
+              currentSubmissionSequence={report.aiReview?.submissionSequence}
+              duplicateCandidates={report.aiReview?.duplicateCandidates ?? []}
+              {...(initialDuplicateCandidateId === undefined
+                ? {}
+                : { initialOriginalReportId: initialDuplicateCandidateId })}
+              {...(onDuplicateCandidateConsumed === undefined
+                ? {}
+                : { onInitialOriginalReportIdConsumed: onDuplicateCandidateConsumed })}
               token={token}
             />
+          ) : null}
+          {available.includes('reopen-duplicate') && canRenderReopen ? (
+            <ReopenDuplicateAction {...props} />
           ) : null}
         </div>
       )}

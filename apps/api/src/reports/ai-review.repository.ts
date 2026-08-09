@@ -13,6 +13,7 @@ import {
   type TriageCandidateInput,
 } from '@bug-bounty-escrow/ai';
 import {
+  isoDateTimeSchema,
   reportAiReviewSchema,
   type ReportAiReview,
   type RequestPrincipal,
@@ -71,6 +72,19 @@ interface ScopeRow {
 }
 
 interface CandidateRow {
+  readonly id: string;
+  readonly program_id: string;
+  readonly title: string | null;
+  readonly submitted_at: string | null;
+  readonly created_at: string | null;
+}
+
+interface AuthorizedCandidateTime {
+  readonly submittedAt: string;
+  readonly title?: string;
+}
+
+interface CandidateFingerprintRow {
   readonly report_id: string;
   readonly program_submission_sequence: number;
   readonly snapshot: Record<string, unknown>;
@@ -113,7 +127,7 @@ export class SupabaseAiReviewQueueRepository
     // before reading revisions/results whenever the principal cannot access this report.
     const { data: accessData, error: accessError } = await this.client
       .from('reports')
-      .select('content_hash,researcher_id,program_id')
+      .select('content_hash,researcher_id,program_id,submitted_at,created_at')
       .eq('id', reportId)
       .maybeSingle();
     if (accessError !== null) throw normalizeDatabaseError(accessError);
@@ -121,6 +135,8 @@ export class SupabaseAiReviewQueueRepository
       content_hash?: unknown;
       researcher_id?: unknown;
       program_id?: unknown;
+      submitted_at?: unknown;
+      created_at?: unknown;
     } | null;
     if (
       access === null ||
@@ -348,18 +364,56 @@ export class SupabaseAiReviewQueueRepository
       } else {
         const { data: candidateRows, error: candidateError } = await this.client
           .from('reports')
-          .select('id,program_id')
+          .select('id,program_id,title,submitted_at,created_at')
           .in('id', candidateIds)
           .eq('program_id', access.program_id);
         if (candidateError !== null) throw normalizeDatabaseError(candidateError);
-        const visibleIds = new Set(
-          ((candidateRows ?? []) as Array<{ id?: unknown; program_id?: unknown }>).flatMap((row) =>
-            row.id === undefined || row.program_id !== access.program_id ? [] : [row.id],
-          ),
-        );
-        visibleDuplicateCandidates = duplicateCandidates.filter(
-          (candidate) => candidate !== undefined && visibleIds.has(candidate.candidateReportId),
-        );
+        const authorizedTimes = new Map<string, AuthorizedCandidateTime>();
+        for (const row of (candidateRows ?? []) as unknown as Array<Partial<CandidateRow>>) {
+          if (row.id === undefined || row.program_id !== access.program_id) continue;
+          const submittedAt = isoDateTimeSchema.safeParse(row.submitted_at).success
+            ? (row.submitted_at as string)
+            : isoDateTimeSchema.safeParse(row.created_at).success
+              ? (row.created_at as string)
+              : undefined;
+          if (submittedAt !== undefined) {
+            authorizedTimes.set(row.id, {
+              submittedAt,
+              ...(typeof row.title === 'string' ? { title: row.title } : {}),
+            });
+          }
+        }
+        const currentSubmittedAt = isoDateTimeSchema.safeParse(access.submitted_at).success
+          ? (access.submitted_at as string)
+          : isoDateTimeSchema.safeParse(access.created_at).success
+            ? (access.created_at as string)
+            : undefined;
+        visibleDuplicateCandidates = duplicateCandidates
+          .flatMap((candidate) => {
+            if (candidate === undefined) return [];
+            const authorized = authorizedTimes.get(candidate.candidateReportId);
+            if (authorized === undefined) return [];
+            const timestamp = authorized.submittedAt;
+            return timestamp === undefined
+              ? []
+              : [
+                  {
+                    ...candidate,
+                    submittedAt: timestamp,
+                    ...(authorized.title === undefined ? {} : { title: authorized.title }),
+                  },
+                ];
+          })
+          .filter((candidate) =>
+            currentSubmittedAt === undefined
+              ? true
+              : Date.parse(candidate.submittedAt) < Date.parse(currentSubmittedAt),
+          )
+          .sort((left, right) => {
+            const timestampOrder = Date.parse(left.submittedAt) - Date.parse(right.submittedAt);
+            if (timestampOrder !== 0) return timestampOrder;
+            return left.candidateReportId.localeCompare(right.candidateReportId);
+          });
       }
     }
     const review = {
@@ -439,7 +493,7 @@ export class SupabaseAiReviewQueueRepository
     });
     if (error !== null) throw normalizeDatabaseError(error);
 
-    const rows = (data ?? []) as unknown as CandidateRow[];
+    const rows = (data ?? []) as unknown as CandidateFingerprintRow[];
     const result: TriageCandidateInput[] = [];
     for (const row of rows) {
       const scope = await this.readScope(row.snapshot);

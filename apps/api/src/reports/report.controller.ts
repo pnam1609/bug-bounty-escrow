@@ -16,6 +16,7 @@ import {
   markDuplicateRequestSchema,
   programIdParamsSchema,
   rejectReportRequestSchema,
+  reopenDuplicateRequestSchema,
   reportIdParamsSchema,
   reportListQuerySchema,
   reportProgramFilterOptionsResponseSchema,
@@ -31,6 +32,7 @@ import {
   type ProgramIdParams,
   type PublicDisclosureListResponse,
   type RejectReportRequest,
+  type ReopenDuplicateRequest,
   type ReportListQuery,
   type ReportListResponse,
   type ReportProgramFilterOptionsResponse,
@@ -155,6 +157,21 @@ export class ReportController {
     @CurrentPrincipal() principal?: RequestPrincipal,
   ): Promise<ReportResponse> {
     return this.review('duplicate', principal, params.id, input);
+  }
+
+  @Roles('owner')
+  @Post(':id/reopen-duplicate')
+  @RateLimit({ limit: 20, windowMs: 60_000 })
+  public async reopenDuplicate(
+    @ZodParam(reportIdParamsSchema) params: ProgramIdParams,
+    @ZodBody(reopenDuplicateRequestSchema)
+    input: ReopenDuplicateRequest,
+    @CurrentPrincipal() principal?: RequestPrincipal,
+  ): Promise<ReportResponse> {
+    return {
+      success: true,
+      data: await this.service.reopenDuplicate(requirePrincipal(principal), params.id, input),
+    };
   }
 
   @Roles('owner', 'reviewer')

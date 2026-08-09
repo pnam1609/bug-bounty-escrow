@@ -21,7 +21,9 @@ export const REPORT_STATUS_TRANSITIONS: Readonly<Record<ReportStatus, readonly R
     triaged: reportTransitions('needs_information', 'rejected', 'duplicate', 'validated'),
     needs_information: reportTransitions('submitted'),
     rejected: reportTransitions(),
-    duplicate: reportTransitions(),
+    // Owner-only reopen is guarded by the database RPC; this entry documents the audited
+    // duplicate -> submitted edge without granting reviewers or clients authority.
+    duplicate: reportTransitions('submitted'),
     validated: reportTransitions('reward_approved'),
     reward_approved: reportTransitions('payment_pending'),
     payment_pending: reportTransitions('paid'),

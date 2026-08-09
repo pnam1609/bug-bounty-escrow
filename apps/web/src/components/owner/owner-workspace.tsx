@@ -24,6 +24,7 @@ import { ChevronDown } from 'lucide-react';
 import { ACCOUNT_SETTINGS_PATH } from '@/components/account/account-settings-model';
 import { LogoutMenuItem } from '@/components/account/logout-action';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { getSiteCopyright } from '@/lib/site-footer';
 
 /*
  * Owner workspace chrome — Figma `Owner · Create program flow` (95:318). Every frame in the
@@ -180,7 +181,7 @@ export function OwnerWorkspace({
       }
       footer={
         <SiteFooter
-          copyright="© 2026 BountyEscrow · Arc Testnet"
+          copyright={getSiteCopyright(' · Arc Testnet')}
           legal={
             <>
               <SiteFooterLink

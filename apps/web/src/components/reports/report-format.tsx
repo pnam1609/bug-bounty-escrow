@@ -27,6 +27,15 @@ const ABSOLUTE_TIMESTAMP = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+const EXACT_TIMESTAMP = new Intl.DateTimeFormat('en-US', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
 const RELATIVE = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' });
 
 export function formatUsdc(value: string): string {
@@ -41,6 +50,12 @@ export function formatTimestamp(iso: string): string {
   const date = new Date(iso);
 
   return Number.isNaN(date.getTime()) ? 'Unknown date' : ABSOLUTE_TIMESTAMP.format(date);
+}
+
+export function formatExactTimestamp(iso: string): string {
+  const date = new Date(iso);
+
+  return Number.isNaN(date.getTime()) ? 'Unknown date' : EXACT_TIMESTAMP.format(date);
 }
 
 const RELATIVE_DIVISIONS: readonly {
@@ -74,7 +89,7 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   return ABSOLUTE_TIMESTAMP.format(date);
 }
 
-/** Relative for the eye, absolute for the tooltip and the accessible name. */
+/** Relative for the eye, exact-to-the-second for the tooltip and accessible description. */
 export interface TimeDisplay {
   readonly text: string;
   readonly absolute: string;
@@ -83,7 +98,7 @@ export interface TimeDisplay {
 export function describeTime(iso: string | undefined, now?: number): TimeDisplay | undefined {
   if (iso === undefined) return undefined;
 
-  return { text: formatRelativeTime(iso, now), absolute: formatTimestamp(iso) };
+  return { text: formatRelativeTime(iso, now), absolute: formatExactTimestamp(iso) };
 }
 
 /**
@@ -226,6 +241,10 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 export function describeReportError(error: unknown, fallback: string): string {
   if (error instanceof TypeError) {
     return 'We could not reach the server. Check your connection and try again.';
+  }
+
+  if (error instanceof Error && error.message === 'reward_wallet_connection_required') {
+    return 'Connect the owner wallet with RainbowKit before approving the reward.';
   }
 
   if (error instanceof ApiClientError) {

@@ -128,6 +128,9 @@ export const rejectReportRequestSchema = z
 export const markDuplicateRequestSchema = z
   .object({ originalReportId: uuidSchema, reason: z.string().trim().max(2_000).optional() })
   .strict();
+export const reopenDuplicateRequestSchema = z
+  .object({ reason: nonEmptyTrimmedTextSchema.max(2_000).optional() })
+  .strict();
 /**
  * Range and flat tiers take the concrete USDC `amount` the reviewer decided on.
  *
@@ -333,6 +336,8 @@ export const reportCapabilitiesSchema = z
   .object({
     canEdit: z.boolean(),
     canResubmit: z.boolean(),
+    // Older cached/read-model payloads do not carry the capability yet; fail closed for them.
+    canReopenDuplicate: z.boolean().default(false),
   })
   .strict();
 
@@ -412,9 +417,13 @@ export const aiReportFingerprintSchema = z
 export const aiDuplicateCandidateSchema = z
   .object({
     candidateReportId: uuidSchema,
+    /** Server-enriched title of the authorized original report. */
+    title: z.string().optional(),
     assessment: z.enum(['possible', 'likely']),
     reason: z.string(),
     confidence: z.number().min(0).max(1),
+    /** Server-enriched timestamp of the authorized original report. */
+    submittedAt: isoDateTimeSchema.optional(),
   })
   .strict();
 
@@ -543,6 +552,7 @@ export type RequestInformationRequest = z.output<typeof requestInformationReques
 export type ValidateReportRequest = z.output<typeof validateReportRequestSchema>;
 export type RejectReportRequest = z.output<typeof rejectReportRequestSchema>;
 export type MarkDuplicateRequest = z.output<typeof markDuplicateRequestSchema>;
+export type ReopenDuplicateRequest = z.output<typeof reopenDuplicateRequestSchema>;
 export type ApproveRewardRequest = z.output<typeof approveRewardRequestSchema>;
 export type StartPaymentRequest = z.output<typeof startPaymentRequestSchema>;
 export type ConfirmPaymentRequest = z.output<typeof confirmPaymentRequestSchema>;

@@ -16,6 +16,7 @@ import type { ReactNode } from 'react';
 import { ROLE_LANDING_PATHS } from '@/components/onboarding/role-options';
 import { HeaderAccountMenu } from '@/components/programs/researcher-shell';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { getSiteCopyright } from '@/lib/site-footer';
 import { useAuth } from '@/providers/auth-provider';
 
 /*
@@ -165,7 +166,7 @@ export function LandingFooter(): ReactNode {
           ))}
         </SiteFooterColumn>
       ))}
-      copyright="© 2026 BountyEscrow. Demo product on Arc Testnet."
+      copyright={getSiteCopyright('. Demo product on Arc Testnet.')}
       status={
         <p className="inline-flex items-center gap-sm text-label-sm uppercase text-escrow">
           <span aria-hidden="true" className="size-sm shrink-0 rounded-full bg-escrow" />

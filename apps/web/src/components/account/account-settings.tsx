@@ -46,6 +46,7 @@ import { ResearcherHeader } from '@/components/programs/researcher-shell';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { apiRequest, safeReturnPath } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import { getSiteCopyright } from '@/lib/site-footer';
 import { useAuth } from '@/providers/auth-provider';
 
 /*
@@ -119,7 +120,7 @@ function AccountShell({
           {children}
         </div>
       </main>
-      <SiteFooter copyright="© 2026 BountyEscrow" variant="short" />
+      <SiteFooter copyright={getSiteCopyright()} variant="short" />
     </div>
   );
 }
