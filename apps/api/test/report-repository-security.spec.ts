@@ -49,6 +49,33 @@ describe('report repository storage boundary', () => {
     expect(result).not.toHaveProperty('storagePath');
   });
 
+  it('rewrites the private Supabase gateway origin before returning a browser upload URL', async () => {
+    const createSignedUploadUrl = vi.fn().mockResolvedValue({
+      data: {
+        signedUrl:
+          'http://supabase-kong:8000/storage/v1/upload/sign/reports/report.txt?token=private',
+      },
+      error: null,
+    });
+    const client = {
+      rpc: vi.fn().mockResolvedValue({ data: 'reports/report.txt', error: null }),
+      storage: { from: vi.fn().mockReturnValue({ createSignedUploadUrl }) },
+    };
+    const repository = new ReportRepository(client as never, {
+      SUPABASE_PUBLIC_URL: 'https://supabase.bountyescrow.xyz',
+    });
+
+    const result = await repository.createUploadUrl(
+      principal,
+      '10000000-0000-4000-8000-000000000100',
+      { filename: 'report.txt', mimeType: 'text/plain', sizeBytes: 10 },
+    );
+
+    expect(result.uploadUrl).toBe(
+      'https://supabase.bountyescrow.xyz/storage/v1/upload/sign/reports/report.txt?token=private',
+    );
+  });
+
   it('does not touch Storage for a cross-report or inaccessible download', async () => {
     const storageFrom = vi.fn();
     const repository = new ReportRepository({

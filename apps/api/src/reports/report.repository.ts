@@ -1,7 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   ApproveRewardRequest,
+  ApiEnvironment,
   AttachmentUploadRequest,
   ConfirmPaymentRequest,
   CreateReportRequest,
@@ -23,7 +24,9 @@ import type {
 } from '@bug-bounty-escrow/shared';
 import { randomUUID } from 'node:crypto';
 
+import { API_CONFIG } from '../config/api-config.module.js';
 import { normalizeDatabaseError } from '../database/database-error.js';
+import { publicStorageUrl } from '../database/storage-url.js';
 import { SUPABASE_CLIENT } from '../database/supabase.provider.js';
 
 interface ReportRow {
@@ -382,7 +385,12 @@ function mapDetail(
 
 @Injectable()
 export class ReportRepository {
-  public constructor(@Inject(SUPABASE_CLIENT) private readonly client: SupabaseClient) {}
+  public constructor(
+    @Inject(SUPABASE_CLIENT) private readonly client: SupabaseClient,
+    @Optional()
+    @Inject(API_CONFIG)
+    private readonly config?: Pick<ApiEnvironment, 'SUPABASE_PUBLIC_URL'>,
+  ) {}
 
   public async list(
     principal: RequestPrincipal,
@@ -775,7 +783,10 @@ export class ReportRepository {
       throw normalizeDatabaseError(error);
     }
 
-    return { attachmentId, uploadUrl: data.signedUrl };
+    return {
+      attachmentId,
+      uploadUrl: publicStorageUrl(data.signedUrl, this.config?.SUPABASE_PUBLIC_URL),
+    };
   }
 
   public async completeUpload(
@@ -826,7 +837,7 @@ export class ReportRepository {
       throw normalizeDatabaseError(error);
     }
 
-    return data.signedUrl;
+    return publicStorageUrl(data.signedUrl, this.config?.SUPABASE_PUBLIC_URL);
   }
 
   private async findReviewableProgramIds(principal: RequestPrincipal): Promise<string[]> {

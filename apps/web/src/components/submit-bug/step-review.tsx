@@ -87,6 +87,21 @@ function SummaryRow({ label, children }: { readonly label: string; readonly chil
   );
 }
 
+function StackedSummaryRow({
+  children,
+  label,
+}: {
+  readonly children: ReactNode;
+  readonly label: string;
+}) {
+  return (
+    <div className="flex flex-col gap-sm">
+      <dt className="text-label-sm text-text-muted uppercase">{label}</dt>
+      <dd className="min-w-0 text-body-sm text-text">{children}</dd>
+    </div>
+  );
+}
+
 export interface StepReviewProps {
   readonly confirmed: boolean;
   readonly confirmError: string | undefined;
@@ -209,29 +224,29 @@ export function StepReview({
 
       <SummarySection editLabel="Edit" onEdit={() => onEditStep(2)} title="Vulnerability report">
         <dl className="flex flex-col gap-md">
-          <SummaryRow label="Title">{draft.title.trim()}</SummaryRow>
-          <SummaryRow label="Description">
+          <StackedSummaryRow label="Title">{draft.title.trim()}</StackedSummaryRow>
+          <StackedSummaryRow label="Description">
             <MarkdownPreview value={draft.description.trim()} />
-          </SummaryRow>
-          <SummaryRow label="PoC / reproduction">
+          </StackedSummaryRow>
+          <StackedSummaryRow label="PoC / reproduction">
             {draft.reproductionSteps.trim() === '' ? (
               <span className="text-text-muted">Not provided</span>
             ) : (
               <MarkdownPreview value={draft.reproductionSteps.trim()} />
             )}
-          </SummaryRow>
+          </StackedSummaryRow>
           {draft.secretGistUrl.trim() === '' ? null : (
-            <SummaryRow label="Secret Gist">
+            <StackedSummaryRow label="Secret Gist">
               <span className="break-all">{draft.secretGistUrl.trim()}</span>
-            </SummaryRow>
+            </StackedSummaryRow>
           )}
-          <SummaryRow label="Attachment">
+          <StackedSummaryRow label="Attachment">
             {file === null ? (
               <span className="text-text-muted">No attachment</span>
             ) : (
               `${file.name} · ${formatBytes(file.size)} · uploads after the report is created`
             )}
-          </SummaryRow>
+          </StackedSummaryRow>
         </dl>
       </SummarySection>
 

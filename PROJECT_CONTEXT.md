@@ -710,6 +710,14 @@ type VulnerabilityReport = {
 the researcher composer. Both use the shared GitHub-style `Edit` / `Preview` editor (minimum 20
 visible rows, active panel only); the API receives the untouched Markdown source. Review renders
 both fields with the same safe preview policy (raw HTML disabled and unsafe URL schemes rejected).
+The final `Vulnerability report` review summary uses a stacked label/content layout so title,
+description, PoC/reproduction, optional Secret Gist and attachment details use the full available
+width instead of a two-column definition-table layout.
+
+Private report attachment signed URLs are generated through the server's internal Supabase client,
+then rewritten to `SUPABASE_PUBLIC_URL` before reaching the browser. The internal
+`supabase-kong:8000` origin must never be returned to an HTTPS page because browsers block it as
+Mixed Content.
 
 `draft` chỉ tồn tại trong `localStorage` của browser; server tạo thẳng `submitted`.
 

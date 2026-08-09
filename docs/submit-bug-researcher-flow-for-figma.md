@@ -14,6 +14,8 @@ Phạm vi gồm:
 - Đính kèm một PoC file riêng tư trong MVP.
 - Review disclosure trước khi gửi.
 - Submit report, upload attachment bằng signed URL và xác nhận thành công.
+- Signed upload/download URLs trả về cho browser phải dùng public HTTPS Supabase origin; không được
+  lộ hostname nội bộ như `supabase-kong:8000`.
 - Tự động bắt đầu AI review sau mỗi successful submit/resubmit, persist structured result và kiểm tra
   duplicate theo thứ tự submit trong cùng program.
 - Các nhánh validation, network/API error, attachment error, session/role error và program ngừng nhận report.
@@ -674,9 +676,9 @@ Summary sections:
    - Hiển thị mismatch acknowledgment nếu có.
    - Edit impacts → Step 1; edit severity → Step 2.
 3. `Vulnerability report`
-   - Title, description preview và PoC/reproduction preview.
-   - Secret Gist URL nếu có.
-   - Attachment filename/size hoặc `No attachment`.
+   - Dùng bố cục dọc, mỗi label nằm trên content tương ứng; không dùng bảng hai cột cho phần này.
+   - Title, description preview và PoC/reproduction preview dùng toàn bộ chiều rộng content khả dụng.
+   - Secret Gist URL nếu có và attachment filename/size hoặc `No attachment` cũng dùng cùng bố cục dọc.
    - Edit → Step 3.
 4. `What happens next`
    - Report enters review as `Submitted`.

@@ -135,6 +135,13 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          # Supabase REST/storage calls stay on the Docker network, but signed URLs are consumed
+          # by the browser. Keep the public origin synchronized with the browser build config.
+          if grep -q '^SUPABASE_PUBLIC_URL=' "${PRODUCTION_ENV_FILE}"; then
+            sed -i "s#^SUPABASE_PUBLIC_URL=.*#SUPABASE_PUBLIC_URL=${NEXT_PUBLIC_SUPABASE_URL}#" "${PRODUCTION_ENV_FILE}"
+          else
+            printf '\nSUPABASE_PUBLIC_URL=%s\n' "${NEXT_PUBLIC_SUPABASE_URL}" >>"${PRODUCTION_ENV_FILE}"
+          fi
           python3 -m unittest deploy/test_upsert_circle_phase2_env.py
           python3 deploy/upsert_circle_phase2_env.py \
             --path "${PRODUCTION_ENV_FILE}"

@@ -76,6 +76,7 @@ export const apiEnvironmentSchema = z
     PORT: portSchema.default(3001),
     WEB_APP_ORIGIN: webOriginSchema,
     SUPABASE_URL: httpUrlSchema,
+    SUPABASE_PUBLIC_URL: httpUrlSchema.optional(),
     SUPABASE_ANON_KEY: secretValueSchema,
     SUPABASE_SERVICE_ROLE_KEY: secretValueSchema,
     // Temporary, server-only hackathon waiver. A missing or blank value is

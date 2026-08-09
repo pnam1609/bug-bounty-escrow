@@ -9,10 +9,7 @@ import {
   StepReview,
   type StepReviewProps,
 } from '@/components/submit-bug/step-review';
-import type {
-  ProgramScope,
-  ReportDraft,
-} from '@/components/submit-bug/submit-bug-model';
+import type { ProgramScope, ReportDraft } from '@/components/submit-bug/submit-bug-model';
 
 const scope: ProgramScope = {
   id: 'scope-vault',
@@ -86,9 +83,7 @@ describe('SR-09 review summary', () => {
 
     expect(markup).toContain('Cross-chain retry locks reward accounting');
     expect(markup).toContain('Researcher proposed');
-    expect(markup).toContain(
-      'Acknowledged — you chose to continue with your own proposal.',
-    );
+    expect(markup).toContain('Acknowledged — you chose to continue with your own proposal.');
     expect(markup).toMatch(/data-severity="critical"/);
     expect(markup).toMatch(/data-severity="high"/);
   });
@@ -100,6 +95,16 @@ describe('SR-09 review summary', () => {
     expect(markup).toContain('aria-label="Edit impacts: Impacts and severity"');
     expect(markup).toContain('aria-label="Edit severity: Impacts and severity"');
     expect(markup).toContain('aria-label="Edit: Vulnerability report"');
+  });
+
+  it('renders the vulnerability report fields as full-width stacked content', () => {
+    const markup = renderReview();
+    const vulnerabilitySection = markup.slice(markup.indexOf('Vulnerability report'));
+
+    expect(vulnerabilitySection).toContain('>Description</dt>');
+    expect(vulnerabilitySection).toContain('>PoC / reproduction</dt>');
+    expect(vulnerabilitySection).not.toContain('sm:flex-row');
+    expect(vulnerabilitySection).not.toContain('sm:basis-1/3');
   });
 
   it('states every real next step without promising validation or payout', () => {
