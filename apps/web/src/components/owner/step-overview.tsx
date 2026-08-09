@@ -34,6 +34,7 @@ import {
   StepLayout,
   ValidationSummary,
 } from './wizard-parts';
+import { MarkdownEditor } from './markdown-editor';
 
 const LOGO_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -304,7 +305,7 @@ export function StepOverview({ draft, errors, onCancel, onContinue, update }: St
           label="Program overview"
           required
         >
-          <Textarea
+          <MarkdownEditor
             id={fieldId('description')}
             maxLength={20_000}
             onChange={(event) => update({ description: event.target.value })}

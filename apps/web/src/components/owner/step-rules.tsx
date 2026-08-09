@@ -27,6 +27,7 @@ import {
   StepLayout,
   ValidationSummary,
 } from './wizard-parts';
+import { MarkdownEditor } from './markdown-editor';
 
 /*
  * CP-03R — Rules. Sections are exactly the five the flow document lists: Proof of Concept, reward
@@ -126,7 +127,7 @@ export function StepRules({ draft, errors, onBack, onContinue, update }: StepRul
           label="Reward and eligibility policy"
           required
         >
-          <Textarea
+          <MarkdownEditor
             id={fieldId('rules.rewardPolicy')}
             maxLength={20_000}
             onChange={(event) => patchRules({ rewardPolicy: event.target.value })}
@@ -224,8 +225,9 @@ export function StepRules({ draft, errors, onBack, onContinue, update }: StepRul
           htmlFor={fieldId('rules.testingRestrictions')}
           label="Testing restrictions"
         >
-          <Textarea
+          <MarkdownEditor
             id={fieldId('rules.testingRestrictions')}
+            maxLength={10_000}
             onChange={(event) => patchRules({ testingRestrictions: event.target.value })}
             placeholder="Rate limits, test accounts, environments researchers must use."
             rows={3}

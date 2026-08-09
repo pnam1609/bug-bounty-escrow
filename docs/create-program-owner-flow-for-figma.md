@@ -298,16 +298,16 @@ manual original-message recovery, tuyệt đối không chạy lại full bridge
 
 ### Program overview
 
-| Field            | Bắt buộc      | Validation                                                      |
-| ---------------- | ------------- | --------------------------------------------------------------- |
-| Name             | Có            | Trimmed, 1–200 ký tự                                            |
-| Slug             | Có khi create | 1–120 ký tự, lowercase kebab-case: `^[a-z0-9]+(?:-[a-z0-9]+)*$` |
+| Field            | Bắt buộc      | Validation                                                                  |
+| ---------------- | ------------- | --------------------------------------------------------------------------- |
+| Name             | Có            | Trimmed, 1–200 ký tự                                                        |
+| Slug             | Có khi create | 1–120 ký tự, lowercase kebab-case: `^[a-z0-9]+(?:-[a-z0-9]+)*$`             |
 | Short summary    | Có            | Trimmed, 1–1,000 ký tự; textarea nhiều dòng, dùng trong program card/header |
-| Description      | Có            | Trimmed, 1–20,000 ký tự; rich long-form overview                |
-| Official website | Có            | HTTPS URL hợp lệ                                                |
-| Logo asset       | Không         | Private draft upload; PNG/JPEG/WebP/SVG, tối đa 2 MB            |
-| Tags             | Có            | 1–10 giá trị normalized, mỗi tag tối đa 40 ký tự                |
-| Deadline         | Không         | ISO date-time khi có giá trị                                    |
+| Description      | Có            | Markdown, trimmed, 1–20,000 ký tự; rich long-form overview                  |
+| Official website | Có            | HTTPS URL hợp lệ                                                            |
+| Logo asset       | Không         | Private draft upload; PNG/JPEG/WebP/SVG, tối đa 2 MB                        |
+| Tags             | Có            | 1–10 giá trị normalized, mỗi tag tối đa 40 ký tự                            |
+| Deadline         | Không         | ISO date-time khi có giá trị                                                |
 
 Slug có thể được gợi ý từ Name nhưng phải cho phép owner chỉnh sửa trước khi lưu.
 Slug là canonical public URL key: PostgreSQL enforce unique toàn hệ thống và không cho đổi sau khi
@@ -1420,7 +1420,11 @@ Fields:
    - Combobox/chips; 1–10 tags.
    - Example: `DeFi`, `Solidity`, `DEX`, `Arbitrum`.
 7. `Program overview`
-   - Textarea.
+   - Markdown editor kiểu GitHub với hai tab `Edit` và `Preview`.
+   - Tab `Edit` là textarea; tab `Preview` render bản nháp Markdown an toàn và không thay đổi raw value gửi lên API.
+   - Textarea hiển thị tối thiểu 20 dòng; khi chuyển sang `Preview`, textarea được unmount để chỉ còn nội dung preview đang active.
+   - Icon và label của mỗi tab nằm trên cùng một hàng.
+   - Preview không render raw HTML hoặc URL scheme không an toàn; nội dung rỗng hiển thị empty state rõ ràng.
    - Placeholder: `Describe the product, security goals and what researchers should know.`
    - Character counter: `0 / 20,000`.
 8. `Submission deadline` — optional.
@@ -1655,12 +1659,14 @@ Sections:
    - Radio: `Required` hoặc `Optional`; default `Required`.
    - Optional policy note.
 2. `Reward and eligibility policy`
-   - Markdown-friendly textarea.
+   - GitHub-style Markdown editor with `Edit` and `Preview` tabs.
+   - The editor shows at least 20 rows in `Edit`; inactive tab content is not mounted, and each tab icon/label stays on one horizontal row.
+   - Preview renders the draft safely, does not render raw HTML or unsafe URL schemes, and never changes the raw Markdown value sent to the API.
    - Nêu calculation, exclusions và primacy rules nếu cần.
 3. `Prohibited activities`
    - Platform default rules hiển thị checked + locked.
    - Owner có thể thêm, edit và delete custom rules.
-4. `Testing restrictions` — optional markdown textarea.
+4. `Testing restrictions` — optional GitHub-style Markdown editor with `Edit` and `Preview` tabs, at least 20 rows in `Edit`, horizontal icon/label tabs, and active-only panel rendering.
 5. `Custom acknowledgment` — optional concise checkbox copy cho Submit Bug.
 
 Disclosure callout:

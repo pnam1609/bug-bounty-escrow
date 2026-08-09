@@ -528,7 +528,7 @@ type BountyProgram = {
   name: string;
   slug: string;
   shortSummary: string; // trimmed, 1–1,000 chars; shown on program cards and headers
-  description: string; // trimmed long-form overview, 1–20,000 chars
+  description: string; // raw Markdown, trimmed long-form overview, 1–20,000 chars
   websiteUrl?: string;
   logoUrl?: string;
   tags: string[];
@@ -565,6 +565,15 @@ type BountyProgram = {
   publishedAt?: string;
 };
 ```
+
+`description` and the owner-authored `rules.rewardPolicy` / `rules.testingRestrictions` fields are
+Markdown source strings. The owner editor provides GitHub-style `Edit` and `Preview` tabs; Edit
+renders at least 20 visible rows and remains vertically resizable, while each tab's icon and label
+stay on one horizontal row. Only the active panel is mounted, so switching to Preview unmounts the
+textarea and switching back restores the same raw draft. Preview is read-only, does not alter the
+raw value submitted to the API, skips raw HTML and rejects unsafe URL schemes. Plain-text fields
+such as `shortSummary`, scope/impact descriptions and reward `calculationNote` do not use the
+Markdown editor.
 
 ### Scope
 
