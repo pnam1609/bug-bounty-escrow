@@ -62,6 +62,40 @@ function fundingRow(): FundingIntentRow {
 }
 
 describe('funding sync terminal recovery', () => {
+  it('returns a stable in-progress code when another reconciliation lease is active', async () => {
+    const repository = {
+      isProgramOwner: vi.fn().mockResolvedValue(true),
+      findFundingIntentRow: vi.fn().mockResolvedValue(fundingRow()),
+      claimFundingReconciliation: vi.fn().mockResolvedValue(false),
+      toFundingIntent: vi.fn(),
+    };
+    const service = new EscrowService(
+      repository as never,
+      {} as never,
+      {} as never,
+      { CIRCLE_POLL_TIMEOUT_MS: 1_000, CIRCLE_REQUEST_TIMEOUT_MS: 1_000 } as never,
+      {} as never,
+    );
+    const principal = {
+      userId: '31000000-0000-0000-0000-000000000099',
+      email: 'owner@example.test',
+      role: 'owner' as const,
+    };
+
+    const error = await service
+      .reconcileFunding(principal, PROGRAM_ID, INTENT_ID)
+      .catch((candidate: unknown) => candidate);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      success: false,
+      error: {
+        code: 'funding_reconciliation_in_progress',
+      },
+    });
+    expect(repository.claimFundingReconciliation).toHaveBeenCalledOnce();
+  });
+
   it('links fresh sync attempts after Circle failure and proven Arc revert, then credits once', async () => {
     let row = fundingRow();
     const submittedIds = [

@@ -658,6 +658,7 @@ export function ProgramLifecycle({
   const [fundingPhase, setFundingPhase] = useState<FundingOperationPhase>('ready_to_sign');
   const [fundingWorking, setFundingWorking] = useState(false);
   const [fundingError, setFundingError] = useState<string>();
+  const [fundingNotice, setFundingNotice] = useState<string>();
   const [fundingResult, setFundingResult] = useState<FundingDestinationResult>();
   const [fundingRecoveryHash, setFundingRecoveryHash] = useState('');
   const [fundingReadiness, setFundingReadiness] = useState<FundingReadinessSnapshot>();
@@ -2132,16 +2133,73 @@ export function ProgramLifecycle({
 
   async function reconcileFundingIntent(intent: VerifiedFundingIntent) {
     setFundingPhase('verifying_destination');
-    const reconciled = await apiRequest(
-      `/api/programs/${program.id}/funding-intents/${intent.id}/reconcile`,
-      fundingIntentResponseSchema,
-      { method: 'POST', token: session?.access_token },
-    );
-    const verified = verifiedIntentFromApi(reconciled.data);
-    setFundingPhase(fundingPhaseFromApi(reconciled.data.status));
-    if (reconciled.data.status === 'complete') {
-      if (reconciled.data.confirmationArtifact !== undefined) {
-        setFundingConfirmation(reconciled.data.confirmationArtifact);
+    setFundingNotice(undefined);
+    let reconciledData: ApiFundingIntent | undefined;
+    try {
+      reconciledData = (
+        await apiRequest(
+          `/api/programs/${program.id}/funding-intents/${intent.id}/reconcile`,
+          fundingIntentResponseSchema,
+          { method: 'POST', token: session?.access_token },
+        )
+      ).data;
+    } catch (error) {
+      if (
+        !(error instanceof ApiClientError) ||
+        error.code !== 'funding_reconciliation_in_progress'
+      ) {
+        throw error;
+      }
+
+      // A second tab/request must never replay the wallet transaction. The first request owns
+      // the durable reconciliation lease; hydrate that same intent until it reaches a terminal
+      // state and keep the owner informed instead of reporting wallet-submission uncertainty.
+      setFundingError(undefined);
+      setFundingNotice(
+        'Funding verification is already in progress. Waiting for the server; no wallet transaction is required.',
+      );
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1_000));
+        try {
+          const current = await apiRequest(
+            `/api/programs/${program.id}/funding-intents/${intent.id}`,
+            fundingIntentResponseSchema,
+            { token: session?.access_token },
+          );
+          reconciledData = current.data;
+          if (
+            current.data.status === 'complete' ||
+            current.data.status === 'failed' ||
+            current.data.status === 'cancelled'
+          ) {
+            break;
+          }
+        } catch (pollError) {
+          // Keep the durable destination evidence visible if a transient read fails. A reload
+          // can resume the same intent, and no replacement wallet transaction is requested.
+          if (pollError instanceof ApiClientError && pollError.status === 404) throw pollError;
+        }
+      }
+
+      if (reconciledData === undefined) {
+        setFundingPhase(
+          intent.fundingPhase === 'ready_for_destination'
+            ? 'destination_submitted'
+            : 'ready_to_sign',
+        );
+        setFundingNotice(
+          'Funding verification is still in progress. Keep this page open or reload to resume; no wallet transaction is required.',
+        );
+        return;
+      }
+    }
+
+    const verified = verifiedIntentFromApi(reconciledData);
+    setFundingNotice(undefined);
+    setFundingPhase(fundingPhaseFromApi(reconciledData.status));
+    if (reconciledData.status === 'complete') {
+      if (reconciledData.confirmationArtifact !== undefined) {
+        setFundingConfirmation(reconciledData.confirmationArtifact);
       }
       setVerifiedFundingIntent(undefined);
       fundingIdempotencyKey.current = undefined;
@@ -2270,6 +2328,10 @@ export function ProgramLifecycle({
       const safeAmbiguousArmRetry =
         continuation === 'recovery_required' && heldDestinationClaimToken !== undefined;
       if (continuation !== 'execute' && !safeAmbiguousArmRetry) {
+        if (continuation === 'reconcile') {
+          await reconcileFundingIntent(activeIntent);
+          return;
+        }
         if (continuation === 'observe_destination' && pendingDestinationResult !== undefined) {
           setFundingResult(pendingDestinationResult);
           const operationRecordId =
@@ -2931,6 +2993,7 @@ export function ProgramLifecycle({
           <FundingPending
             error={fundingError}
             estimatedFeeReserve={activeFundingIntent?.estimatedFeeReserve ?? '0'}
+            {...(fundingNotice === undefined ? {} : { notice: fundingNotice })}
             onBack={() => void leaveFundingConfirmation()}
             onConnectWallet={() => void chooseFundingWallet()}
             onDisconnectWallet={disconnectFundingWallet}

@@ -170,11 +170,11 @@ export function FundingAllocations({
             const status = depositStatuses[source.rowId] ?? 'not_started';
             const amountBaseUnits = parseUsdcBaseUnits(source.amount);
             const hasValidAmount = amountBaseUnits !== undefined && amountBaseUnits > 0n;
+            // A submitted deposit already has a durable server boundary. Keep Check deposit
+            // actionable so the owner can reconcile the same hash while Gateway finalization is
+            // pending; only signing/replacement and recovery states remain blocked here.
             const depositBlocked =
-              status === 'submitting' ||
-              status === 'pending' ||
-              status === 'confirmed' ||
-              status === 'recovery_required';
+              status === 'submitting' || status === 'confirmed' || status === 'recovery_required';
             return (
               <section
                 aria-labelledby={`${fieldId(`fund.source.${source.rowId}`)}-heading`}
@@ -459,6 +459,7 @@ export interface FundingPendingProps {
   readonly phase: FundingOperationPhase;
   readonly working: boolean;
   readonly error: string | undefined;
+  readonly notice?: string;
   readonly result: FundingDestinationResult | undefined;
   readonly executionAvailable: boolean;
   readonly verifiedRecipient: string | undefined;
@@ -481,6 +482,7 @@ export function FundingPending({
   onDisconnectWallet,
   onContinue,
   onRecoveryHashChange,
+  notice,
   phase,
   result,
   recoveryHash,
@@ -504,6 +506,11 @@ export function FundingPending({
       {error === undefined ? null : (
         <Callout title="Funding operation needs attention" variant="danger">
           {error}
+        </Callout>
+      )}
+      {notice === undefined ? null : (
+        <Callout title="Funding verification in progress" variant="warning">
+          {notice}
         </Callout>
       )}
       {result === undefined ? null : (

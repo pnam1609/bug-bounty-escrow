@@ -423,7 +423,7 @@ describe('CP-11 and CP-12 funding views', () => {
     expect(html).toContain('Existing confirmed Unified Balance can satisfy selected allocations');
   });
 
-  it.each(['pending', 'confirmed', 'recovery_required', 'submitting'] as const)(
+  it.each(['confirmed', 'recovery_required', 'submitting'] as const)(
     'keeps deposits fail-closed for %s state',
     (status) => {
       const html = renderToStaticMarkup(
@@ -470,4 +470,45 @@ describe('CP-11 and CP-12 funding views', () => {
       expect(actionButtons.every((button) => button.includes('disabled=""'))).toBe(true);
     },
   );
+
+  it('keeps a submitted deposit check actionable while the submit plan stays fail-closed', () => {
+    const html = renderToStaticMarkup(
+      createElement(FundingAllocations, {
+        program: program(),
+        grossAmount: '10',
+        sources,
+        errors: {},
+        walletAddress: WALLET,
+        walletName: 'Test wallet',
+        walletPending: false,
+        walletError: undefined,
+        depositStatuses: { arc: 'pending', base: 'pending' },
+        depositRequiredAmounts: {},
+        depositRecoveryHashes: {},
+        confirmedUnifiedBalance: '0',
+        pendingUnifiedBalance: '10',
+        estimatedFeeReserve: '0.25',
+        transactionsEnabled: true,
+        canSubmit: false,
+        readinessChecked: false,
+        working: false,
+        onConnectWallet: vi.fn(),
+        onGrossAmountChange: vi.fn(),
+        onSourceChange: vi.fn(),
+        onAddSource: vi.fn(),
+        onRemoveSource: vi.fn(),
+        onDepositSource: vi.fn(),
+        onDepositRecoveryHashChange: vi.fn(),
+        onRefreshUnifiedBalance: vi.fn(),
+        onSubmit: vi.fn(),
+        onCheckReadiness: vi.fn(),
+        onLater: vi.fn(),
+      }),
+    );
+
+    const checkButtons = html.match(/<button[^>]*>Check deposit<\/button>/g) ?? [];
+    expect(checkButtons).toHaveLength(2);
+    expect(checkButtons.every((button) => !button.includes('disabled=""'))).toBe(true);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Submit funding plan<\/button>/);
+  });
 });

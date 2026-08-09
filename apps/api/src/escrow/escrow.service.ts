@@ -1146,7 +1146,16 @@ export class EscrowService {
       new Date(Date.now() + leaseDuration).toISOString(),
     );
     if (!claimed) {
-      throw new ConflictException('funding_reconciliation_already_claimed');
+      // The durable lease protects the destination verification and Circle sync from
+      // concurrent execution. Surface a stable, actionable response so the owner can
+      // hydrate/poll this same intent instead of treating the conflict as a wallet
+      // submission failure or attempting another transaction.
+      throw new ConflictException(
+        createApiErrorResponse(
+          'funding_reconciliation_in_progress',
+          'Funding verification is already in progress. No new wallet transaction is required; continue polling this funding intent.',
+        ),
+      );
     }
     const escrow = await this.repository.findConfirmedEscrow(programId);
     if (escrow === null || escrow.id !== row.escrow_contract_id) {

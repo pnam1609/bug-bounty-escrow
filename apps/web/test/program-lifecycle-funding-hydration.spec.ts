@@ -1102,6 +1102,112 @@ describe('ProgramLifecycle durable CP-12 hydration', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('polls an active reconciliation lease without reporting wallet submission uncertainty', async () => {
+    const activeIntent = intent('unified_balance', 'delivery_pending', 'ready_for_destination');
+    const completeIntent: FundingIntent = {
+      ...activeIntent,
+      status: 'complete',
+      destinationTransactionHash: TRANSACTION_HASH,
+    };
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+    mocks.connectCircleWallet.mockResolvedValue({
+      address: WALLET,
+      wallet: { id: 'test-wallet', name: 'Test wallet', provider: {} },
+      executor: { execute: vi.fn() },
+    });
+    const endpointCalls: Array<{ path: string; method: string }> = [];
+    const renderer = await renderLifecycle(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        endpointCalls.push({ path, method: init?.method ?? 'GET' });
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/funding-intents/active`)) {
+          return new Response(JSON.stringify({ success: true, data: activeIntent }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}/gateway-readiness`)) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              data: {
+                intentId: INTENT_ID,
+                ready: true,
+                requiredConfirmedTotal: '10',
+                confirmedSelectedTotal: '10',
+                sources: activeIntent.sources.map((source) => ({
+                  network: source.network,
+                  hasFeeHeadroom: false,
+                  allocation: source.amount,
+                  feeReserve: '0',
+                  requiredConfirmed: source.amount,
+                  confirmed: source.amount,
+                  deficit: '0',
+                })),
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}/reconcile`)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: {
+                code: 'funding_reconciliation_in_progress',
+                message: 'Funding verification is already in progress.',
+              },
+            }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (path.endsWith(`/funding-intents/${INTENT_ID}`)) {
+          return new Response(JSON.stringify({ success: true, data: completeIntent }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (path.endsWith(`/api/programs/${PROGRAM_ID}/withdrawal-intents/active`)) {
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: { code: 'not_found', message: 'No active withdrawal.' },
+            }),
+            { status: 404, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        throw new Error(`Unexpected lifecycle request: ${path}`);
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await connectPendingWallet();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => latestFundingPendingProps().onContinue());
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    expect(
+      endpointCalls.some(({ path, method }) => path.endsWith('/reconcile') && method === 'POST'),
+    ).toBe(true);
+    expect(
+      endpointCalls.some(
+        ({ path, method }) => path.endsWith(`/funding-intents/${INTENT_ID}`) && method === 'GET',
+      ),
+    ).toBe(true);
+    expect(mocks.connectCircleWallet).toHaveBeenCalledOnce();
+    expect(latestFundingPendingProps().error ?? '').not.toContain(
+      'wallet submission result is uncertain',
+    );
+
+    await act(async () => renderer.unmount());
+  });
+
   it('locks the first sufficient-balance Unified Balance submit in CP-11 and prepares CP-12 only on the second submit', async () => {
     const quote = {
       estimatedFeeReserve: '0',
