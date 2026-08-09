@@ -229,6 +229,7 @@ describe('CP-11 and CP-12 funding views', () => {
     expect(html).toContain('Destination transaction');
     expect(html).toContain('Circle transfer');
     expect(html).toContain('Source transaction 1');
+    expect(html).not.toContain('Check deposit');
   });
 
   it('renders granular Unified Balance progress from bounded server recovery steps', () => {
