@@ -522,6 +522,10 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
   address, connected owner address or mutable researcher default may override it.
 - Preflight shows masked/checksummed researcher address, `Verified`, `EVM · Arc Testnet`, snapshot
   timestamp/version and `Locked for this reward` once intent creation succeeds.
+- The reward settlement preflight keeps `Researcher wallet` and `Escrow` in one two-column row at
+  every supported viewport. Each masked address is itself a 44px copy action for the exact full
+  address, announces copy success/failure accessibly and constrains/truncates its visual value so
+  the row never creates horizontal overflow.
 - A legacy/malformed report without a valid snapshot blocks intent creation with
   `researcher_payout_wallet_required`. UI says `The researcher must add a verified payout wallet to
   this report before a reward can be approved`, keeps the report `validated`, offers no arbitrary
@@ -928,6 +932,9 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
   complete saved-wallet list or verification signature/challenge.
 - Snapshot is masked by default; copy reveals the exact address intentionally and has an accessible
   full-address label. Do not add it to inbox rows, comments, notifications or AI context.
+- In settlement preflight, the masked researcher and escrow addresses are the clickable copy actions
+  and remain paired in one responsive row; both columns use constrained content so long addresses
+  cannot overflow the card or page.
 - Owner/reviewer controls are read-only. Any request containing a client researcher address is
   ignored/rejected fail-closed; server settlement policy resolves the locked report snapshot.
 - Missing/invalid/changed/locked recipient errors are stable and safe. UI refetches report + current
@@ -1062,6 +1069,9 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
       `researcher_payout_wallet_required` with researcher-directed recovery. Intent creation and
       researcher wallet edit share an atomic race policy; exactly one locked snapshot wins and every
       post-intent edit is rejected without partial reservation/signature/payout.
+- [ ] AC-22 / FE-REV-008/009 — Reward settlement preflight renders Researcher wallet and Escrow in
+      one responsive two-column row. Each masked address is the 44px copy action for its exact full
+      address, gives accessible success/failure feedback and never causes horizontal overflow.
 
 ## 20. Test matrix
 

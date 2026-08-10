@@ -2,7 +2,7 @@ import { reportDetailSchema, type ReportDetail } from '@bug-bounty-escrow/shared
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const openConnectModal = vi.hoisted(() => vi.fn());
 
@@ -22,6 +22,7 @@ import {
   duplicateTargetIsSafe,
   matchingRewardTiers,
   ReviewActions,
+  SettlementPreflight,
   tierDetails,
 } from '@/components/reports/review-actions';
 
@@ -84,6 +85,11 @@ const intent = {
 function text(renderer: ReactTestRenderer): string {
   return JSON.stringify(renderer.toJSON());
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 async function renderActions(
   viewerRole: 'owner' | 'reviewer',
@@ -154,6 +160,59 @@ async function renderActions(
 }
 
 describe('ReviewActions reward ownership boundary', () => {
+  it('keeps both settlement address actions in one constrained row at every viewport', () => {
+    let renderer!: ReactTestRenderer;
+
+    act(() => {
+      renderer = TestRenderer.create(createElement(SettlementPreflight, { intent }));
+    });
+
+    const addressRow = renderer.root.findByProps({
+      'data-settlement-address-row': '',
+    });
+    const copyActions = renderer.root.findAllByType('button');
+
+    expect(addressRow.props['aria-label']).toBe('Settlement addresses');
+    expect(addressRow.props['role']).toBe('group');
+    expect(addressRow.props['className']).toContain('grid-cols-2');
+    expect(addressRow.props['className']).toContain('min-w-0');
+    expect(copyActions).toHaveLength(2);
+    expect(copyActions.every((action) => action.props['className'].includes('max-w-full'))).toBe(
+      true,
+    );
+    expect(text(renderer)).toContain('0x4444…4444');
+    expect(text(renderer)).toContain('0x2222…2222');
+  });
+
+  it('copies each full settlement address and announces accessible feedback', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(SettlementPreflight, { intent }));
+    });
+
+    const copyActions = renderer.root.findAllByType('button');
+    expect(copyActions[0]?.props['aria-label']).toContain(intent.recipientAddress);
+    expect(copyActions[1]?.props['aria-label']).toContain(intent.escrowAddress);
+
+    await act(async () => {
+      copyActions[0]?.props['onClick']();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenLastCalledWith(intent.recipientAddress);
+    expect(text(renderer)).toContain('Copied');
+
+    await act(async () => {
+      copyActions[1]?.props['onClick']();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenLastCalledWith(intent.escrowAddress);
+    expect(renderer.root.findAllByProps({ 'aria-live': 'polite' })).toHaveLength(2);
+  });
+
   it('uses final severity and affected asset to select reward tiers with decimal-safe bounds', () => {
     const rangeTier = {
       assetType: 'smart_contract' as const,

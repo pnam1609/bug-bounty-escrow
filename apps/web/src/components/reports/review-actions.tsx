@@ -62,6 +62,7 @@ import {
   shortReportId,
   type ReportStatus,
 } from './report-format';
+import { CopyValueAction } from './copy-value';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import {
@@ -1107,8 +1108,11 @@ function ContinueRewardApprovalAction({
   );
 }
 
-function SettlementPreflight({ intent }: { readonly intent: RewardSettlementIntent }) {
-  const maskedRecipient = `${intent.recipientAddress.slice(0, 6)}…${intent.recipientAddress.slice(-4)}`;
+function maskAddress(address: string): string {
+  return address.length <= 12 ? address : `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+export function SettlementPreflight({ intent }: { readonly intent: RewardSettlementIntent }) {
   const calculation =
     intent.calculationType === 'percentage'
       ? `Percentage · ${intent.percentageBps === undefined ? 'server-derived' : `${intent.percentageBps} bps`}`
@@ -1142,15 +1146,30 @@ function SettlementPreflight({ intent }: { readonly intent: RewardSettlementInte
               <dd className="text-text">{intent.maxRewardCap} USDC</dd>
             </div>
           )}
-          <div>
-            <dt className="text-label-sm text-text-muted">Researcher wallet</dt>
-            <dd className="font-mono text-text">{maskedRecipient}</dd>
-          </div>
-          <div>
-            <dt className="text-label-sm text-text-muted">Escrow</dt>
-            <dd className="font-mono text-text">{intent.escrowAddress}</dd>
-          </div>
         </dl>
+        <div
+          aria-label="Settlement addresses"
+          className="grid min-w-0 grid-cols-2 gap-sm"
+          data-settlement-address-row=""
+          role="group"
+        >
+          <div className="min-w-0">
+            <p className="text-label-sm text-text-muted">Researcher wallet</p>
+            <CopyValueAction
+              displayValue={maskAddress(intent.recipientAddress)}
+              value={intent.recipientAddress}
+              what="researcher wallet address"
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="text-label-sm text-text-muted">Escrow</p>
+            <CopyValueAction
+              displayValue={maskAddress(intent.escrowAddress)}
+              value={intent.escrowAddress}
+              what="escrow address"
+            />
+          </div>
+        </div>
       </div>
     </Callout>
   );

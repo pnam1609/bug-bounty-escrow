@@ -17,15 +17,10 @@ import { reportReferenceAriaLabel, shortReportId } from './report-format';
 
 const RESET_AFTER_MS = 2000;
 
-export interface CopyButtonProps {
-  /** What lands on the clipboard. */
-  readonly value: string;
-  /** Completes the accessible name, e.g. "report id". */
-  readonly what: string;
-}
+type CopyState = 'idle' | 'copied' | 'failed';
 
-export function CopyButton({ value, what }: CopyButtonProps) {
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+function useClipboardCopy(value: string) {
+  const [state, setState] = useState<CopyState>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -50,6 +45,19 @@ export function CopyButton({ value, what }: CopyButtonProps) {
     timer.current = setTimeout(() => setState('idle'), RESET_AFTER_MS);
   }
 
+  return { copy, state } as const;
+}
+
+export interface CopyButtonProps {
+  /** What lands on the clipboard. */
+  readonly value: string;
+  /** Completes the accessible name, e.g. "report id". */
+  readonly what: string;
+}
+
+export function CopyButton({ value, what }: CopyButtonProps) {
+  const { copy, state } = useClipboardCopy(value);
+
   return (
     <>
       <button
@@ -69,6 +77,44 @@ export function CopyButton({ value, what }: CopyButtonProps) {
         {state === 'copied' ? 'Copied' : state === 'failed' ? 'Press Ctrl+C to copy' : ''}
       </span>
     </>
+  );
+}
+
+export interface CopyValueActionProps {
+  /** Short value shown in the constrained UI, such as a masked wallet address. */
+  readonly displayValue: string;
+  /** Exact value copied and exposed in the accessible action name. */
+  readonly value: string;
+  /** Completes the accessible name, e.g. "researcher wallet address". */
+  readonly what: string;
+}
+
+/** A constrained value that is itself the copy action, with screen-reader feedback. */
+export function CopyValueAction({ displayValue, value, what }: CopyValueActionProps) {
+  const { copy, state } = useClipboardCopy(value);
+
+  return (
+    <span className="flex min-w-0 max-w-full flex-col items-start">
+      <button
+        aria-label={`Copy the full ${what}: ${value}`}
+        className="inline-flex min-h-11 min-w-0 max-w-full items-center gap-xs rounded-sm text-left text-low hover:underline"
+        onClick={() => void copy()}
+        title={value}
+        type="button"
+      >
+        <span aria-hidden="true" className="min-w-0 truncate font-mono text-body-sm">
+          {displayValue}
+        </span>
+        {state === 'copied' ? (
+          <Check aria-hidden="true" className="size-4 shrink-0" />
+        ) : (
+          <Copy aria-hidden="true" className="size-4 shrink-0" />
+        )}
+      </button>
+      <span aria-live="polite" className="text-label-sm text-text-muted">
+        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Press Ctrl+C to copy' : ''}
+      </span>
+    </span>
   );
 }
 
