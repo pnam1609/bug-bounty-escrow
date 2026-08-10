@@ -462,11 +462,13 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
   `payment_pending` and `paid` must never show that inline button. API remains the authority and
   returns a conflict if a stale client calls an invalid mutation.
 - `Original report` là một server-authorized search combobox/input, không chỉ là danh sách AI suggest.
-  Owner có thể search theo report title hoặc full report ID; kết quả chỉ gồm report cùng
-  program, có quyền đọc, sớm hơn report hiện tại và thỏa status/cycle rules. Search phải debounce,
-  bounded và giữ menu trong đúng chiều rộng input; label dài phải ellipsis nhưng vẫn có accessible
-  full value. AI candidates được dùng làm initial suggestions và shortcut preselection, không giới
-  hạn tập kết quả tìm kiếm.
+  Khi input rỗng, menu hiển thị trước các AI duplicate suggestions có assessment `likely` và confidence
+  **strictly greater than 40%**; suggestion vẫn có thể là original lịch sử ở trạng thái `validated`,
+  `paid` hoặc `rejected` (không cho target report đã `duplicate`). Sau đó owner có thể search theo report title hoặc full report ID; kết quả
+  chỉ gồm report cùng program, có quyền đọc, sớm hơn report hiện tại và thỏa status/cycle rules. Search
+  phải debounce, bounded và giữ menu trong đúng chiều rộng input; chỉ title dài được ellipsis/truncate,
+  còn short ID và submitted time phải luôn nhìn thấy. AI candidates được dùng làm initial suggestions và
+  shortcut preselection, không giới hạn tập kết quả tìm kiếm.
 - Typed text hoặc UUID không được submit trực tiếp: owner phải chọn một option do server trả về;
   optional reason tối đa 2,000 ký tự. Khi không có option hợp lệ, confirm disabled.
 - Target phải tồn tại, cùng program, reviewer có quyền đọc, không self-reference và không tạo cycle.
@@ -1050,10 +1052,11 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - [ ] AC-05 — Needs-information giữ report private, lưu reason/audit, chờ researcher resubmit và sau
       resubmit quay đúng action set mà không reset initial submitted timestamp.
 - [ ] AC-06 — Duplicate target cùng program, readable, không self/cycle; UI review target trước
-      confirm và không lộ candidate ngoài quyền. `Original report` là server-authorized combobox
-      search theo title hoặc full report ID, không bị giới hạn bởi AI candidates, và không
-      nhận typed UUID trực tiếp. Menu giữ đúng chiều rộng input, ellipsis label dài, chọn option mới
-      enable confirm; owner/reviewer candidate links dùng `/review/:id`.
+      confirm và không lộ candidate ngoài quyền. `Original report` là server-authorized combobox;
+      input rỗng hiển thị AI candidates có `likely` và confidence `> 0.40`, còn text nhập vào search
+      theo title hoặc full report ID và không bị giới hạn bởi AI candidates. Typed UUID không được nhận
+      trực tiếp. Menu giữ đúng chiều rộng input, chỉ ellipsis title dài để short ID và submitted time vẫn
+      hiển thị; chọn option mới enable confirm; owner/reviewer candidate links dùng `/review/:id`.
 - [ ] AC-07 — Validate chỉ ghi final severity; không reserve/payout. Assigned reviewer dừng ở waiting
       state, chỉ owner thấy reward settlement controls.
 - [ ] AC-08 — The owner reward dialog uses the server final severity and exact affected asset,
@@ -1124,7 +1127,7 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 | Review      | Reject thiếu reason hoặc double click           | Client/server chặn; không duplicate review record                                                                       |
 | Duplicate   | Self/cross-program/cycle/unauthorized target    | Stable validation/forbidden; current report không đổi                                                                   |
 | Duplicate   | AI shortcut on `submitted` vs terminal status   | `likely` >40% eligible earlier candidate shows inline button only on `submitted`; `triaged`, `validated`, `duplicate`, `paid`, settlement and ineligible target statuses show badges/no shortcut |
-| Duplicate   | Search original by title/full ID                | Debounced same-program server search returns selectable options beyond AI suggestions; typed UUID is never submitted directly |
+| Duplicate   | Empty/input search and option metadata           | Empty input shows eligible AI `likely` >40% suggestions; debounced title/full-ID search returns selectable options beyond AI suggestions; only title ellipsizes while short ID/time remain visible; typed UUID is never submitted directly |
 | Duplicate   | Owner opens authorized candidate link           | Candidate title/ID navigates to `/review/:id`; `/reports/:id` is reserved for researcher-owned detail |
 | Race        | Hai reviewer quyết định cùng lúc                | Chỉ transition hợp lệ thắng; client thua refetch state                                                                  |
 | Reward      | Final severity mismatches proposed severity     | All active tiers for the asset render; other severities are context-only and only the final-severity tier is selectable |

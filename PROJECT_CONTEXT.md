@@ -268,11 +268,14 @@ it only opens the existing human confirmation dialog; owner/reviewer role, statu
 self-reference and cycle checks stay server-authoritative, and AI cannot mutate lifecycle or payout.
 The dialog uses a server-authorized same-program search combobox: the input searches by report title or
 full report ID and may show AI-authorized candidates as initial suggestions, but selecting an
-original report is never limited to AI suggestions. Typed text/UUID is not submitted directly; the
-owner must select a server-returned option that is earlier than the current report and passes the same
-authorization/status/cycle rules. Each option shows title, shortened UUID and exact/relative submitted
-time; the menu is constrained to the input width with ellipsis for long labels, and no eligible option
-keeps confirm disabled.
+original report is never limited to AI suggestions. When the input is empty, the menu starts with the
+server-authorized AI duplicate suggestions whose assessment is `likely` and confidence is strictly greater
+than 40%; these suggestions may point to a historical `validated`, `paid` or `rejected` original (but not
+an already-`duplicate` report). Entering text switches to the debounced title/full-ID search. Typed text/UUID is not submitted
+directly; the owner must select a server-returned option that is earlier than the current report and passes
+the same authorization/status/cycle rules. Each option shows a title, shortened UUID and exact/relative
+submitted time; only the title may ellipsis/truncate, so the shortened UUID and time remain visible. The menu
+is constrained to the input width, and no eligible option keeps confirm disabled.
 
 Gemini provider pin exact stable model `gemini-3.5-flash`, không dùng `latest` alias. Free tier chỉ
 được dùng cho synthetic/demo/non-confidential data: Gemini unpaid-service terms không phù hợp để gửi

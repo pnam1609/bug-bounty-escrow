@@ -71,7 +71,7 @@ import {
   connectCircleWalletFromProvider,
   type CircleWalletSession,
 } from '@/components/owner/circle-funding-executor';
-import { eligibleDuplicateCandidates } from './report-ai-review-card';
+import { aiDuplicateSuggestions, eligibleDuplicateCandidates } from './report-ai-review-card';
 
 function formatDuplicateCandidateTime(value: string | undefined): string {
   return value === undefined ? 'timestamp unavailable' : formatTimestamp(value);
@@ -81,6 +81,26 @@ type DuplicateTargetOption = Pick<ReportSummary, 'id' | 'title' | 'status' | 'su
 
 function duplicateTargetOptionLabel(option: DuplicateTargetOption): string {
   return `${option.title || 'Untitled report'} · ${shortReportId(option.id)} · ${formatDuplicateCandidateTime(option.submittedAt)}`;
+}
+
+export function DuplicateTargetOptionRow({
+  option,
+}: {
+  readonly option: DuplicateTargetOption;
+}) {
+  const title = option.title || 'Untitled report';
+
+  return (
+    <span className="flex min-w-0 items-center gap-xs whitespace-nowrap">
+      <span className="min-w-0 flex-1 truncate" title={title}>
+        {title}
+      </span>
+      <span className="shrink-0 text-text-muted">· {shortReportId(option.id)}</span>
+      <span className="shrink-0 text-text-muted">
+        · {formatDuplicateCandidateTime(option.submittedAt)}
+      </span>
+    </span>
+  );
 }
 
 import {
@@ -597,7 +617,14 @@ function MarkDuplicateAction({
     (report) =>
       duplicateTargetIsSafe(currentReportId, currentProgramId, report, currentSubmittedAt),
   );
-  const aiOptions: DuplicateTargetOption[] = eligibleCandidates.map((candidate) => ({
+  const aiOptions: DuplicateTargetOption[] = aiDuplicateSuggestions(
+    {
+      status: 'ready',
+      submissionSequence: currentSubmissionSequence,
+      duplicateCandidates,
+    },
+    currentSubmittedAt,
+  ).map((candidate) => ({
     id: candidate.candidateReportId,
     title: candidate.title ?? 'Untitled report',
     status: candidate.status ?? 'submitted',
@@ -735,7 +762,7 @@ function MarkDuplicateAction({
               id="duplicate-target-options"
               role="listbox"
             >
-              {reportSearchQuery.isPending ? (
+              {normalizedSearch.length > 0 && reportSearchQuery.isPending ? (
                 <p className="px-sm py-xs text-body-sm text-text-muted">Searching reports…</p>
               ) : targetOptions.length === 0 ? (
                 <p className="px-sm py-xs text-body-sm text-text-muted">
@@ -744,19 +771,26 @@ function MarkDuplicateAction({
                     : 'No reports found in this program.'}
                 </p>
               ) : (
-                targetOptions.map((option, index) => (
-                  <button
-                    aria-selected={index === activeSearchIndex}
-                    className="block w-full truncate rounded-sm px-sm py-xs text-left text-body-sm text-text hover:bg-ambient focus-visible:bg-ambient"
-                    id={`duplicate-target-option-${option.id}`}
-                    key={option.id}
-                    onClick={() => selectTarget(option)}
-                    role="option"
-                    type="button"
-                  >
-                    {duplicateTargetOptionLabel(option)}
-                  </button>
-                ))
+                <>
+                  {normalizedSearch.length === 0 ? (
+                    <p className="px-sm py-xs text-label-sm text-text-muted">
+                      AI duplicate suggestions
+                    </p>
+                  ) : null}
+                  {targetOptions.map((option, index) => (
+                    <button
+                      aria-selected={index === activeSearchIndex}
+                      className="block w-full rounded-sm px-sm py-xs text-left text-body-sm text-text hover:bg-ambient focus-visible:bg-ambient"
+                      id={`duplicate-target-option-${option.id}`}
+                      key={option.id}
+                      onClick={() => selectTarget(option)}
+                      role="option"
+                      type="button"
+                    >
+                      <DuplicateTargetOptionRow option={option} />
+                    </button>
+                  ))}
+                </>
               )}
             </div>
           ) : null}

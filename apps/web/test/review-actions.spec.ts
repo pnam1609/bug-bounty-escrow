@@ -1,6 +1,7 @@
 import { reportDetailSchema, type ReportDetail } from '@bug-bounty-escrow/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +20,7 @@ import {
   configuredRewardTiers,
   connectRewardWalletViaRainbowKit,
   defaultRewardAmount,
+  DuplicateTargetOptionRow,
   duplicateTargetIsSafe,
   matchingRewardTiers,
   ReviewActions,
@@ -160,6 +162,24 @@ async function renderActions(
 }
 
 describe('ReviewActions reward ownership boundary', () => {
+  it('truncates only the duplicate title while keeping the id and submitted time visible', () => {
+    const markup = renderToStaticMarkup(
+      createElement(DuplicateTargetOptionRow, {
+        option: {
+          id: '10000000-0000-4000-8000-000000000099',
+          title: 'A very long report title that should be truncated in the option row',
+          status: 'submitted',
+          submittedAt: '2026-08-10T10:30:00.000Z',
+        },
+      }),
+    );
+
+    expect(markup).toContain('truncate');
+    expect(markup).toContain('A very long report title that should be truncated in the option row');
+    expect(markup).toContain('10000000');
+    expect(markup).toContain('Aug 10, 2026');
+  });
+
   it('keeps both settlement address actions in one constrained row at every viewport', () => {
     let renderer!: ReactTestRenderer;
 

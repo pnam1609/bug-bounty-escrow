@@ -102,6 +102,44 @@ export function eligibleDuplicateCandidates(
   );
 }
 
+/**
+ * Returns AI-likely earlier reports for the duplicate dialog's empty-input suggestions.
+ *
+ * Unlike the inline shortcut, an original report may already be validated, paid, or rejected;
+ * those lifecycle states are still valid historical originals. Duplicate targets are the only
+ * status excluded here because the transition cannot target an already-duplicate report.
+ */
+export function aiDuplicateSuggestions(
+  review:
+    | (Pick<ReportAiReview, 'status' | 'submissionSequence'> & {
+        readonly duplicateCandidates?: readonly NonNullable<
+          ReportAiReview['duplicateCandidates']
+        >[number][];
+      })
+    | undefined,
+  currentSubmittedAt: string | undefined,
+): readonly NonNullable<ReportAiReview['duplicateCandidates']>[number][] {
+  if (review === undefined || review.duplicateCandidates === undefined) return [];
+  if (review.status !== 'ready' || review.submissionSequence === undefined) return [];
+  if (review.submissionSequence <= 1 || currentSubmittedAt === undefined) return [];
+  const currentTimestamp = Date.parse(currentSubmittedAt);
+  if (!Number.isFinite(currentTimestamp)) return [];
+
+  return sortDuplicateCandidates(
+    review.duplicateCandidates.filter((candidate) => {
+      const candidateTimestamp =
+        candidate.submittedAt === undefined ? Number.NaN : Date.parse(candidate.submittedAt);
+      return (
+        candidate.status !== 'duplicate' &&
+        candidate.assessment === 'likely' &&
+        candidate.confidence > DUPLICATE_ACTION_CONFIDENCE_THRESHOLD &&
+        Number.isFinite(candidateTimestamp) &&
+        candidateTimestamp < currentTimestamp
+      );
+    }),
+  );
+}
+
 const STATUS_COPY: Readonly<
   Record<ReportAiReview['status'], { label: string; description: string }>
 > = Object.freeze({

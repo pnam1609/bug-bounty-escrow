@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NeedsInformationAlert } from '@/components/reports/needs-information-alert';
 import { ReportContent } from '@/components/reports/report-content';
 import {
+  aiDuplicateSuggestions,
   canMarkDuplicateCandidate,
   eligibleDuplicateCandidates,
   sortDuplicateCandidates,
@@ -502,6 +503,65 @@ describe('SR-12 report detail', () => {
       '2026-07-27T09:00:00.000Z',
     );
     expect(options.map((candidate) => candidate.title)).toEqual(['Earlier finding']);
+  });
+
+  it('keeps AI-likely historical originals in empty-input suggestions', () => {
+    const options = aiDuplicateSuggestions(
+      {
+        status: 'ready',
+        submissionSequence: 3,
+        duplicateCandidates: [
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000099',
+            title: 'Validated original',
+            status: 'validated',
+            assessment: 'likely',
+            reason: 'same issue',
+            confidence: 0.8,
+            submittedAt: '2026-07-26T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000098',
+            title: 'Duplicate original',
+            status: 'duplicate',
+            assessment: 'likely',
+            reason: 'same issue',
+            confidence: 0.9,
+            submittedAt: '2026-07-25T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000097',
+            title: 'Low confidence',
+            status: 'submitted',
+            assessment: 'likely',
+            reason: 'weak signal',
+            confidence: 0.4,
+            submittedAt: '2026-07-24T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000095',
+            title: 'Possible assessment',
+            status: 'submitted',
+            assessment: 'possible',
+            reason: 'weak signal',
+            confidence: 0.9,
+            submittedAt: '2026-07-23T09:00:00.000Z',
+          },
+          {
+            candidateReportId: '10000000-0000-4000-8000-000000000096',
+            title: 'Future report',
+            status: 'submitted',
+            assessment: 'likely',
+            reason: 'same issue',
+            confidence: 0.9,
+            submittedAt: '2026-07-28T09:00:00.000Z',
+          },
+        ],
+      },
+      '2026-07-27T09:00:00.000Z',
+    );
+
+    expect(options.map((candidate) => candidate.title)).toEqual(['Validated original']);
   });
 
   it('routes the candidate shortcut to the human duplicate action', async () => {
