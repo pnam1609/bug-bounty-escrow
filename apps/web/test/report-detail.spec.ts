@@ -128,15 +128,14 @@ describe('SR-12 report detail', () => {
     expect(markup).toContain('250 USDC');
     expect(markup).toContain('Transaction hash');
     expect(markup).toContain(`href="https://testnet.arcscan.app/tx/0x${'a'.repeat(64)}"`);
-    expect(markup).toContain(
-      `href="https://testnet.arcscan.app/address/0x3600000000000000000000000000000000000000"`,
-    );
-    expect(markup).toContain(`title="0x${'b'.repeat(64)}"`);
-    expect(markup).toContain('the full block hash');
-    expect(markup).toContain('the full RewardPaid log index');
-    expect(markup).toContain('the full USDC Transfer log index');
-    expect(markup).toContain('Paid Jul 26, 2026');
-    expect(markup).toContain('Verified Jul 26, 2026');
+    expect(markup).not.toContain('Chain / token');
+    expect(markup).not.toContain('Block');
+    expect(markup).not.toContain('RewardPaid log');
+    expect(markup).not.toContain('USDC Transfer log');
+    expect(markup).not.toContain('Paid Jul 26, 2026');
+    expect(markup).not.toContain('Verified Jul 26, 2026');
+    expect(markup).not.toContain('0x3600000000000000000000000000000000000000');
+    expect(markup).not.toContain(`0x${'b'.repeat(64)}`);
     expect(markup).toContain('0xaaaa…aaaa');
   });
 

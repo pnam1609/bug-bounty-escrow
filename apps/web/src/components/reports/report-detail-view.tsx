@@ -23,7 +23,7 @@ import { useEffect, type ReactNode } from 'react';
 
 import { CommentThread } from './comment-thread';
 import { arcExplorerHref, CryptoValueAction } from './crypto-value';
-import { CopyButton, ReportIdCopy } from './copy-value';
+import { ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
 import { ReportAiReviewCard } from './report-ai-review-card';
 import { getReportAccessFailure, REPORTS_LOGIN_HREF } from './report-access';
@@ -106,13 +106,7 @@ function shortCryptoValue(value: string): string {
   return value.length <= 18 ? value : `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
 
-function PaidSettlementSummary({
-  paidAt,
-  proof,
-}: {
-  readonly paidAt: string | undefined;
-  readonly proof: ReportPaidSettlementProof;
-}) {
+function PaidSettlementSummary({ proof }: { readonly proof: ReportPaidSettlementProof }) {
   return (
     <div
       aria-label="Verified reward payment"
@@ -148,47 +142,7 @@ function PaidSettlementSummary({
             />
           </dd>
         </div>
-        <div>
-          <dt className="text-label-sm text-text-muted">Chain / token</dt>
-          <dd className="flex flex-col items-start gap-xs text-text">
-            <span>Arc Testnet · Chain {proof.chainId} · USDC</span>
-            <CryptoValueAction
-              displayValue={shortCryptoValue(proof.tokenAddress)}
-              href={arcExplorerHref(proof.tokenAddress, 'address')}
-              hrefLabel="Open USDC token address"
-              value={proof.tokenAddress}
-              what="USDC token address"
-            />
-          </dd>
-        </div>
-        <div>
-          <dt className="text-label-sm text-text-muted">Block</dt>
-          <dd className="flex flex-col items-start gap-xs font-mono text-text">
-            <span className="flex flex-wrap items-center gap-xs">
-              <span>{proof.blockNumber}</span>
-              <CopyButton value={proof.blockNumber} what="block number" />
-            </span>
-            <span className="flex max-w-full flex-wrap items-center gap-xs">
-              <span className="truncate" title={proof.blockHash}>
-                {shortCryptoValue(proof.blockHash)}
-              </span>
-              <CopyButton value={proof.blockHash} what="block hash" />
-            </span>
-          </dd>
-        </div>
       </dl>
-      <p className="flex flex-wrap items-center gap-xs text-label-sm text-text-muted">
-        <span>
-          Paid {formatTimestamp(paidAt ?? proof.verifiedAt)} · Verified{' '}
-          {formatTimestamp(proof.verifiedAt)} · RewardPaid log
-        </span>
-        <span>{proof.rewardEventLogIndex}</span>
-        <CopyButton value={String(proof.rewardEventLogIndex)} what="RewardPaid log index" />
-        <span aria-hidden="true">·</span>
-        <span>USDC Transfer log</span>
-        <span>{proof.transferLogIndex}</span>
-        <CopyButton value={String(proof.transferLogIndex)} what="USDC Transfer log index" />
-      </p>
     </div>
   );
 }
@@ -242,7 +196,7 @@ export function DisclosureSummary({ report }: { readonly report: ReportDetail })
           <div className="sm:col-span-2">
             <dt className="sr-only">Reward payment</dt>
             <dd>
-              <PaidSettlementSummary paidAt={report.paidAt} proof={report.paidSettlementProof} />
+              <PaidSettlementSummary proof={report.paidSettlementProof} />
             </dd>
           </div>
         )}
