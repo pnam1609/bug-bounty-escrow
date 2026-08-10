@@ -513,6 +513,9 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
   flat, percentage rate and cap details. Tiers whose severity differs from `finalSeverity` are
   context-only and visibly marked not applicable; only the exact final-severity tier can be chosen.
   If no exact tier is returned, the owner cannot submit an approval.
+- Each tier is rendered as a readable card with approximately 30–50% more vertical space than the
+  compact variant; long calculation notes wrap at 1440/768/390px without horizontal overflow.
+  Severity is rendered with the shared severity badge component/tokens and its canonical color.
 - Escrow/chain `Arc Testnet`, token `USDC`.
 - Available pool, reserved pool, amount/basis và recipient wallet được server derive/verify. Recipient
   comes only from the current immutable report payout-wallet snapshot; no owner field, request body
@@ -535,7 +538,7 @@ Validation chỉ ghi quyết định human + final severity. Reward là bước 
 ### Range hoặc flat tier
 
 - A flat tier pre-fills its exact configured `flatAmount` and the amount control is read-only.
-- A range tier accepts an inclusive decimal amount between the configured `minReward` and
+- A range tier defaults to its configured `minReward` and accepts an inclusive decimal amount between the configured `minReward` and
   `maxReward`; the dialog shows `Reward amount is outside the configured range` and disables
   confirmation while the value is outside the range.
 - Server kiểm tra tier bounds, remaining pool, canonical USDC decimals và current report status.
@@ -1014,8 +1017,10 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - [ ] AC-08 — The owner reward dialog uses the server final severity and exact affected asset,
       lists all active tiers for that program/asset with complete calculation details, marks
       other-severity tiers as context-only, and allows selection only of the exact final-severity
-      tier. It pre-fills/locks flat amounts, bounds-checks range amounts with `Reward amount is
-      outside the configured range`, and shows percentage rate/cap. Range/flat amount and percentage basis use
+      tier. Tier cards are 30–50% taller than the compact variant, use shared severity badges/colors,
+      and wrap safely at supported breakpoints. Range defaults to `minReward`; flat pre-fills/locks
+      `flatAmount`; range bounds show `Reward amount is outside the configured range`, and percentage
+      shows rate/cap with basis-only input. Range/flat amount and percentage basis use
       decimal-safe/server-derived rules; reserve pool atomic/idempotent and no legacy
       approve/pay/confirm endpoints are called.
 - [ ] AC-09 — Owner chỉ ký một approval; uncertain/submitted/confirmed evidence luôn dẫn tới

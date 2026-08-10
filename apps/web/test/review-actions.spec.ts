@@ -18,6 +18,7 @@ import {
   amountWithinTier,
   configuredRewardTiers,
   connectRewardWalletViaRainbowKit,
+  defaultRewardAmount,
   duplicateTargetIsSafe,
   matchingRewardTiers,
   ReviewActions,
@@ -180,15 +181,28 @@ describe('ReviewActions reward ownership boundary', () => {
     });
 
     expect(selected).toEqual([rangeTier, flatTier]);
-    expect(configuredRewardTiers({ ...report, finalSeverity: 'high', rewardTiers: [
-      rangeTier,
-      flatTier,
-      { ...rangeTier, severity: 'low' as const },
-    ] } as ReportDetail)).toHaveLength(3);
+    expect(
+      configuredRewardTiers({
+        ...report,
+        finalSeverity: 'high',
+        rewardTiers: [rangeTier, flatTier, { ...rangeTier, severity: 'low' as const }],
+      } as ReportDetail),
+    ).toHaveLength(3);
     expect(amountWithinTier('1.250000', rangeTier)).toBe(true);
     expect(amountWithinTier('2.500001', rangeTier)).toBe(false);
     expect(amountWithinTier('5.000001', flatTier)).toBe(true);
     expect(amountWithinTier('5', flatTier)).toBe(false);
+    expect(defaultRewardAmount(rangeTier)).toBe('1.25');
+    expect(defaultRewardAmount(flatTier)).toBe('5.000001');
+    expect(
+      defaultRewardAmount({
+        assetType: 'smart_contract',
+        severity: 'high',
+        calculationType: 'percentage',
+        percentageBps: 1250,
+        maxRewardCap: '1000',
+      }),
+    ).toBe('');
   });
 
   it('describes matching range, flat, and percentage tiers without floating-point bounds', () => {

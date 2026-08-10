@@ -44,6 +44,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SeverityBadge,
   Textarea,
 } from '@bug-bounty-escrow/ui';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
@@ -742,6 +743,13 @@ export function tierDetails(tier: ReviewRewardTier): string {
   return `Percentage · ${tier.percentageBps === undefined ? '—' : `${tier.percentageBps / 100}%`} · cap ${tier.maxRewardCap ?? '—'} USDC`;
 }
 
+/** The first value shown in the owner form is always a configured value, never a guessed amount. */
+export function defaultRewardAmount(tier: ReviewRewardTier): string {
+  if (tier.calculationType === 'flat') return tier.flatAmount ?? '';
+  if (tier.calculationType === 'range') return tier.minReward ?? '';
+  return '';
+}
+
 export function amountWithinTier(amount: string, tier: ReviewRewardTier): boolean {
   const value = parseUsdcBaseUnits(amount);
   if (value === undefined) return false;
@@ -782,15 +790,11 @@ function ApproveRewardAction({
   });
 
   useEffect(() => {
-    if (
-      !form.open ||
-      selectedTier?.calculationType !== 'flat' ||
-      selectedTier.flatAmount === undefined
-    ) {
+    if (!form.open || selectedTier === undefined) {
       return;
     }
-    setAmount(selectedTier.flatAmount);
-  }, [form.open, selectedTier?.calculationType, selectedTier?.flatAmount]);
+    setAmount(defaultRewardAmount(selectedTier));
+  }, [form.open, selectedTier]);
 
   const rangeOutOfBounds =
     selectedTier?.calculationType === 'range' && amount.trim() !== ''
@@ -882,11 +886,22 @@ function ApproveRewardAction({
             const applicable = tiers.includes(tier);
             return (
               <div
-                className={`flex items-center justify-between gap-md rounded-md border p-sm ${applicable ? 'border-primary bg-surface-raised' : 'border-border bg-surface'}`}
+                className={`flex min-h-12 flex-wrap items-center justify-between gap-md rounded-md border p-md ${applicable ? 'border-primary bg-surface-raised' : 'border-border bg-surface'}`}
+                data-testid="reward-tier-card"
                 key={`${tier.assetType}-${tier.severity}-${tier.calculationType}-${index}`}
               >
-                <span className="text-body-sm text-text">{`${tier.severity} · ${tierDetails(tier)}`}</span>
-                <span className="text-label-sm text-text-muted">
+                <div className="flex min-w-0 flex-1 flex-col gap-xs">
+                  <div className="flex min-w-0 flex-wrap items-center gap-md">
+                    <SeverityBadge severity={tier.severity} />
+                    <span className="text-body-sm text-text">{tierDetails(tier)}</span>
+                  </div>
+                  {tier.calculationNote === undefined ? null : (
+                    <p className="break-words text-label-sm text-text-muted">
+                      {tier.calculationNote}
+                    </p>
+                  )}
+                </div>
+                <span className="shrink-0 text-label-sm text-text-muted">
                   {applicable ? 'Available for final severity' : 'Not applicable'}
                 </span>
               </div>
@@ -900,8 +915,9 @@ function ApproveRewardAction({
           <legend className="mb-sm text-label-md text-text">Choose a configured reward tier</legend>
           <RadioGroup
             onValueChange={(value) => {
+              const nextTier = tiers[Number(value)];
               setSelectedTierIndex(Number(value));
-              setAmount('');
+              setAmount(nextTier === undefined ? '' : defaultRewardAmount(nextTier));
               setBasis('');
               setFieldError(null);
             }}

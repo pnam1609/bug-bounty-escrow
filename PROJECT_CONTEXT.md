@@ -718,8 +718,10 @@ Trong dialog owner approve reward, server `finalSeverity` và affected asset c�
 nguồn sự thật; không dùng `proposedSeverity` để chọn tier. API trả mọi active tier của đúng
 program/asset (bao gồm các severity khác để owner có đủ context), đánh dấu tier trùng
 `finalSeverity` là tier có thể chọn; chỉ tier trùng final severity mới được dùng để tính reward.
-Owner xem calculation type và chi tiết. Flat tier phải
-prefill và khóa đúng `flatAmount`; range tier chỉ cho amount trong inclusive `[minReward,
+Owner xem calculation type và chi tiết trong card cao hơn khoảng 30–50% so với compact variant;
+severity dùng shared badge component/tokens và màu canonical, long note phải wrap an toàn ở
+1440/768/390px. Flat tier phải prefill và khóa đúng `flatAmount`; range tier mặc định là
+`minReward` và chỉ cho amount trong inclusive `[minReward,
 maxReward]`, hiện lỗi `Reward amount is outside the configured range` và disable submit khi ngoài
 range. Percentage tier hiển rate/cap và chỉ nhận verified basis; database/RPC luôn validate
 authoritative, không tin client.
