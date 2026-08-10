@@ -173,7 +173,18 @@ export class RewardSettlementService {
           transactionHash: operation.transaction_hash,
         });
       } catch (error) {
+        if (error instanceof EscrowProviderError && error.retryable) {
+          return this.repository.toRewardSettlementIntent(row);
+        }
         await this.failDeterministic(row.id, 'approval', error);
+        if (error instanceof EscrowProviderError) {
+          throw new ConflictException(
+            createApiErrorResponse(
+              error.code,
+              'The approval transaction does not match the settlement intent.',
+            ),
+          );
+        }
         throw error;
       }
       await this.repository.confirmRewardApproval({

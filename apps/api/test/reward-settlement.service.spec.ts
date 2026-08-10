@@ -90,6 +90,84 @@ function ownerAccess() {
 }
 
 describe('reward settlement orchestration', () => {
+  it('persists a submitted approval and returns pending state while Arc indexes its receipt', async () => {
+    const awaiting = row({
+      status: 'awaiting_approval',
+      reward_settlement_operations: [],
+    });
+    const approvalSubmitted = row();
+    const repository = {
+      ...ownerAccess(),
+      findRewardSettlementIntentById: vi
+        .fn()
+        .mockResolvedValueOnce(awaiting)
+        .mockResolvedValueOnce(approvalSubmitted),
+      observeRewardApproval: vi.fn(),
+      failRewardSettlementOperation: vi.fn(),
+      toRewardSettlementIntent: vi.fn().mockImplementation((value) => value),
+    };
+    const arc = {
+      verifyRewardApproval: vi
+        .fn()
+        .mockRejectedValue(new EscrowProviderError('reward_approval_receipt_pending', true)),
+    };
+    const service = new RewardSettlementService(repository as never, {} as never, arc as never);
+
+    await expect(
+      service.observeApproval(principal, REPORT_ID, INTENT_ID, {
+        outcome: 'submitted',
+        transactionHash: APPROVAL_HASH,
+      }),
+    ).resolves.toBe(approvalSubmitted);
+    expect(repository.observeRewardApproval).toHaveBeenCalledWith({
+      actorId: OWNER_ID,
+      intentId: INTENT_ID,
+      outcome: 'submitted',
+      transactionHash: APPROVAL_HASH,
+    });
+    expect(repository.failRewardSettlementOperation).not.toHaveBeenCalled();
+  });
+
+  it('persists a stable failure code when submitted approval evidence is deterministically invalid', async () => {
+    const awaiting = row({
+      status: 'awaiting_approval',
+      reward_settlement_operations: [],
+    });
+    const approvalSubmitted = row();
+    const repository = {
+      ...ownerAccess(),
+      findRewardSettlementIntentById: vi
+        .fn()
+        .mockResolvedValueOnce(awaiting)
+        .mockResolvedValueOnce(approvalSubmitted),
+      observeRewardApproval: vi.fn(),
+      failRewardSettlementOperation: vi.fn(),
+    };
+    const arc = {
+      verifyRewardApproval: vi
+        .fn()
+        .mockRejectedValue(new EscrowProviderError('reward_approval_event_mismatch', false)),
+    };
+    const service = new RewardSettlementService(repository as never, {} as never, arc as never);
+
+    await expect(
+      service.observeApproval(principal, REPORT_ID, INTENT_ID, {
+        outcome: 'submitted',
+        transactionHash: APPROVAL_HASH,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: {
+        error: { code: 'reward_approval_event_mismatch' },
+      },
+    });
+    expect(repository.failRewardSettlementOperation).toHaveBeenCalledWith(
+      INTENT_ID,
+      'approval',
+      'reward_approval_event_mismatch',
+    );
+  });
+
   it('uses one owner approval then durably relays permissionless payout through Circle', async () => {
     const approvalConfirmed = operation({
       status: 'confirmed',

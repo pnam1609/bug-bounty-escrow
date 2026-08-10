@@ -632,7 +632,15 @@ export class ArcRpcAdapter implements ArcEscrowGateway {
     transactionHash: `0x${string}`;
   }): Promise<VerifiedRewardApproval> {
     await this.assertArcChain();
-    const receipt = await this.client.getTransactionReceipt({ hash: input.transactionHash });
+    let receipt: RpcReceipt;
+    try {
+      receipt = await this.client.getTransactionReceipt({ hash: input.transactionHash });
+    } catch (error) {
+      if (isTransactionReceiptMissing(error)) {
+        throw new EscrowProviderError('reward_approval_receipt_pending', true);
+      }
+      throw new EscrowProviderError('reward_approval_rpc_unavailable', true);
+    }
     await this.assertCommittedReceipt(receipt);
     if (receipt.status !== 'success') {
       throw new EscrowProviderError('reward_approval_reverted', false);

@@ -207,6 +207,28 @@ describe('Arc RPC escrow verifier', () => {
     ).resolves.toMatchObject({ eventLogIndex: 2, blockNumber: 42n });
   });
 
+  it('classifies a just-submitted approval receipt as retryable instead of leaking a viem error', async () => {
+    const client = rpc();
+    const receiptMissing = new Error('Transaction receipt could not be found');
+    receiptMissing.name = 'TransactionReceiptNotFoundError';
+    client.getTransactionReceipt = vi.fn().mockRejectedValue(receiptMissing);
+    const adapter = new ArcRpcAdapter(config(), client);
+
+    await expect(
+      adapter.verifyRewardApproval({
+        escrowAddress: ESCROW,
+        reportKey: `0x${'6'.repeat(64)}`,
+        approvedContentHash: `0x${'7'.repeat(64)}`,
+        recipientAddress: RECIPIENT,
+        amountBaseUnits: 10_000_000n,
+        transactionHash: TRANSACTION_HASH,
+      }),
+    ).rejects.toMatchObject({
+      code: 'reward_approval_receipt_pending',
+      retryable: true,
+    });
+  });
+
   it('requires one exact RewardPaid event and canonical USDC transfer', async () => {
     const reportKey = `0x${'6'.repeat(64)}` as const;
     const contentHash = `0x${'7'.repeat(64)}` as const;
