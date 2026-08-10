@@ -32,10 +32,8 @@ import {
   ASSET_TYPE_LABELS,
   ASSET_TYPE_TAB_LABELS,
   AUTHORABLE_ASSET_TYPES,
-  contractExplorerHref,
   fieldId,
   nextRowId,
-  shortenAddress,
   validateScopeRow,
   type FieldErrors,
   type ProgramDraft,
@@ -50,6 +48,7 @@ import {
   StepLayout,
   ValidationSummary,
 } from './wizard-parts';
+import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 
 const MAX_SCOPES = 50;
 function ScopeStatusBadge({ inScope }: { readonly inScope: boolean }) {
@@ -162,28 +161,27 @@ export function StepScope({ draft, errors, onBack, onContinue, update }: StepSco
             >
               <ScopeStatusBadge inScope={scope.isInScope} />
               <p className="text-h3 text-text">{scope.assetName}</p>
-              {scope.assetUrl === '' && scope.contractAddress === '' ? null :
-                scope.contractAddress === '' ? (
-                  <a
-                    className="truncate text-body-sm text-primary hover:underline"
-                    href={scope.assetUrl}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {scope.assetUrl}
-                  </a>
-                ) : (
-                  <a
-                    aria-label={`Open ${scope.assetName} contract in the Arc explorer`}
-                    className="truncate text-body-sm text-primary hover:underline"
-                    href={contractExplorerHref(scope.contractAddress)}
-                    rel="noreferrer"
-                    target="_blank"
-                    title={scope.contractAddress}
-                  >
-                    {shortenAddress(scope.contractAddress)}
-                  </a>
-                )}
+              {scope.assetUrl === '' &&
+              scope.contractAddress === '' ? null : scope.contractAddress === '' ? (
+                <a
+                  className="truncate text-body-sm text-primary hover:underline"
+                  href={scope.assetUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {scope.assetUrl}
+                </a>
+              ) : (
+                <CryptoValueAction
+                  displayValue={
+                    scope.contractAddress.slice(0, 6) + '…' + scope.contractAddress.slice(-4)
+                  }
+                  href={arcExplorerHref(scope.contractAddress, 'address')}
+                  hrefLabel={`Open ${scope.assetName} contract in the Arc explorer`}
+                  value={scope.contractAddress}
+                  what={`${scope.assetName} contract address`}
+                />
+              )}
               {scope.description === '' ? null : (
                 <p className="line-clamp-2 text-body-sm text-text-muted">{scope.description}</p>
               )}

@@ -35,7 +35,7 @@ import {
   type StepIndex,
 } from './submit-bug-model';
 import { MarkdownPreview } from '@/components/owner/markdown-editor';
-import { CopyButton } from '@/components/reports/copy-value';
+import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 
 export const REVIEW_PRIVACY_NOTICE =
   "Submitting shares this report with the program's authorized owner and reviewers. It will not be public by default.";
@@ -154,6 +154,17 @@ export function StepReview({
           <SummaryRow label="Asset type">
             {scope === undefined ? '—' : ASSET_TYPE_LABELS[scope.assetType]}
           </SummaryRow>
+          {scope?.contractAddress === undefined ? null : (
+            <SummaryRow label="Contract address">
+              <CryptoValueAction
+                displayValue={`${scope.contractAddress.slice(0, 6)}…${scope.contractAddress.slice(-4)}`}
+                href={arcExplorerHref(scope.contractAddress, 'address')}
+                hrefLabel="Open affected contract in the Arc explorer"
+                value={scope.contractAddress}
+                what="affected contract address"
+              />
+            </SummaryRow>
+          )}
         </dl>
       </SummarySection>
 
@@ -261,10 +272,13 @@ export function StepReview({
             {selectedWallet === undefined ? (
               <span className="text-text-muted">Not selected</span>
             ) : (
-              <span className="flex flex-wrap items-center gap-sm">
-                <code className="font-mono">{selectedWallet.maskedAddress}</code>
-                <CopyButton value={selectedWallet.address} what="reward wallet address" />
-              </span>
+              <CryptoValueAction
+                displayValue={selectedWallet.maskedAddress}
+                href={arcExplorerHref(selectedWallet.address, 'address')}
+                hrefLabel="Open reward wallet address in the Arc explorer"
+                value={selectedWallet.address}
+                what="reward wallet address"
+              />
             )}
           </SummaryRow>
           <SummaryRow label="Verification">

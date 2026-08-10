@@ -15,6 +15,8 @@ import {
 } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
 
+import { arcExplorerHref, CryptoValueAction } from './crypto-value';
+import { CopyButton } from './copy-value';
 import { formatTimestamp, formatUsdc, shortReportId } from './report-format';
 
 type EvidenceReport = Pick<
@@ -34,6 +36,10 @@ function actorLabel(role: ReportReviewEvent['actorRole']): string {
   if (role === 'reviewer') return 'Assigned reviewer';
   if (role === 'researcher') return 'Researcher';
   return 'System';
+}
+
+function shortHash(value: string): string {
+  return value.length <= 18 ? value : `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
 
 function ReviewEvent({ event }: { readonly event: ReportReviewEvent }) {
@@ -153,17 +159,35 @@ function PaidSettlementProof({ proof }: { readonly proof: ReportPaidSettlementPr
           </div>
           <div className="sm:col-span-2">
             <dt className="text-label-sm text-text-muted">Arc transaction</dt>
-            <dd className="break-all font-mono text-text">{proof.transactionHash}</dd>
+            <dd>
+              <CryptoValueAction
+                displayValue={shortHash(proof.transactionHash)}
+                href={arcExplorerHref(proof.transactionHash, 'tx')}
+                hrefLabel="Open Arc transaction"
+                value={proof.transactionHash}
+                what="transaction hash"
+              />
+            </dd>
           </div>
           <div>
             <dt className="text-label-sm text-text-muted">Chain / token</dt>
             <dd className="text-text">
-              {proof.chainId} · <span className="font-mono">{proof.tokenAddress}</span>
+              <span>{proof.chainId} · </span>
+              <CryptoValueAction
+                displayValue={shortHash(proof.tokenAddress)}
+                href={arcExplorerHref(proof.tokenAddress, 'address')}
+                hrefLabel="Open USDC token address"
+                value={proof.tokenAddress}
+                what="USDC token address"
+              />
             </dd>
           </div>
           <div>
             <dt className="text-label-sm text-text-muted">Block</dt>
-            <dd className="font-mono text-text">{proof.blockNumber}</dd>
+            <dd className="flex flex-wrap items-center gap-xs font-mono text-text">
+              <span>{proof.blockNumber}</span>
+              <CopyButton value={proof.blockNumber} what="block number" />
+            </dd>
           </div>
         </dl>
         <ul className="mt-lg flex flex-col gap-xs text-label-sm text-text-muted">

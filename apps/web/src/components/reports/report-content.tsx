@@ -14,6 +14,7 @@ import { Download, ExternalLink } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { describeReportError, formatBytes, formatTimestamp } from './report-format';
+import { arcExplorerHref, CryptoValueAction } from './crypto-value';
 import { ASSET_TYPE_LABELS } from '@/components/programs/program-format';
 import { apiRequest } from '@/lib/api-client';
 
@@ -154,9 +155,13 @@ export function ReportContent({ report, token }: ReportContentProps) {
           )}
           {report.affectedScope.contractAddress === undefined ? null : (
             <Row label="Contract">
-              <span className="break-all font-mono text-label-md">
-                {report.affectedScope.contractAddress}
-              </span>
+              <CryptoValueAction
+                displayValue={`${report.affectedScope.contractAddress.slice(0, 6)}…${report.affectedScope.contractAddress.slice(-4)}`}
+                href={arcExplorerHref(report.affectedScope.contractAddress, 'address')}
+                hrefLabel="Open affected contract in the Arc explorer"
+                value={report.affectedScope.contractAddress}
+                what="affected contract address"
+              />
             </Row>
           )}
         </dl>

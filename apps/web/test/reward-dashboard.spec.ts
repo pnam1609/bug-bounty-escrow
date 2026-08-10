@@ -153,10 +153,8 @@ describe('RW-03 transaction evidence', () => {
     );
 
     expect(html).toContain(`aria-label="Full transaction hash ${TRANSACTION_HASH}"`);
-    expect(html).toContain("<span>Copy</span>");
-    expect(html).toContain(
-      '<span class="sr-only"> the full transaction hash</span>',
-    );
+    expect(html).toContain('<span>Copy</span>');
+    expect(html).toContain('<span class="sr-only"> the full transaction hash</span>');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('View on Arc explorer (opens external site)');
     expect(html).toContain('target="_blank"');
@@ -252,7 +250,7 @@ describe('RW-03 reward rows and states', () => {
     expect(empty).toContain('href="/programs"');
     expect(empty.toLowerCase()).not.toContain('wallet');
     expect(filtered).toContain('No rewards match this status');
-    expect(error).toContain("We couldn&#x27;t load your rewards");
+    expect(error).toContain('We couldn&#x27;t load your rewards');
     expect(error).toContain(
       'Your reports and settlement records have not changed. Try loading them again.',
     );
@@ -316,7 +314,7 @@ describe('RW-04 payout wallet', () => {
     expect(html).toContain('Enter a public EVM address only.');
   });
 
-  it('keeps the saved summary masked and exposes the full value only through explicit copy', () => {
+  it('keeps the saved summary masked while exposing copy and Arc explorer actions', () => {
     const html = renderToStaticMarkup(
       createElement(PayoutWalletCard, {
         wallet: savedWallet,
@@ -329,7 +327,8 @@ describe('RW-04 payout wallet', () => {
     expect(html).toContain('Payout wallet saved: 0xaaaa…aaaa.');
     expect(html).toContain('<span>Copy</span>');
     expect(html).toContain(' the full payout wallet address');
-    expect(html).not.toContain(ADDRESS);
+    expect(html).toContain(`/address/${ADDRESS}`);
+    expect(html).toContain('Open payout wallet address in Arc explorer');
   });
 
   it('validates strict non-zero EVM addresses and requires confirmation for active replacements', () => {

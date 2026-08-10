@@ -20,14 +20,9 @@ import {
   Input,
 } from '@bug-bounty-escrow/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, Wallet } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import {
-  useEffect,
-  useId,
-  useState,
-  type FormEvent,
-} from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 
 import {
   isPayoutWalletConfirmationError,
@@ -39,6 +34,7 @@ import {
 } from './reward-wallet-model';
 import { withReturnTo } from '@/components/auth/use-auth-redirect';
 import { CopyButton } from '@/components/reports/copy-value';
+import { arcExplorerHref } from '@/components/reports/crypto-value';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { useAuth } from '@/providers/auth-provider';
@@ -73,8 +69,8 @@ function WalletExplanation() {
       <div className="flex flex-col gap-xs">
         <p className="text-label-lg text-text">Why this address is needed</p>
         <p className="text-body-sm text-text-muted">
-          An approved reward needs a public EVM destination before Arc can settle USDC to you.
-          This address is only a payout destination. It does not sign you in or set your role.
+          An approved reward needs a public EVM destination before Arc can settle USDC to you. This
+          address is only a payout destination. It does not sign you in or set your role.
         </p>
       </div>
     </div>
@@ -171,7 +167,19 @@ export function PayoutWalletCard({
                   {storedWallet.maskedAddress}
                 </code>
               </div>
-              <CopyButton value={storedWallet.address} what="payout wallet address" />
+              <div className="flex items-center gap-xs">
+                <CopyButton value={storedWallet.address} what="payout wallet address" />
+                <a
+                  aria-label="Open payout wallet address in Arc explorer (opens external site)"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-low hover:underline"
+                  href={arcExplorerHref(storedWallet.address, 'address')}
+                  rel="noreferrer"
+                  target="_blank"
+                  title="Open payout wallet address in Arc explorer"
+                >
+                  <ExternalLink aria-hidden="true" className="size-4" />
+                </a>
+              </div>
             </div>
             {wallet.canUpdate && !editing ? (
               <Button className="w-fit" onClick={() => setEditing(true)} variant="secondary">
@@ -200,7 +208,8 @@ export function PayoutWalletCard({
                 inputMode="text"
                 onChange={(event) => {
                   setDraft(event.target.value);
-                  if (fieldError !== null) setFieldError(payoutWalletAddressError(event.target.value));
+                  if (fieldError !== null)
+                    setFieldError(payoutWalletAddressError(event.target.value));
                 }}
                 placeholder="0x…"
                 spellCheck={false}
@@ -291,7 +300,10 @@ function PayoutWalletLoading() {
     <Card aria-busy="true" className="gap-md" padding="lg" role="status">
       <p className="text-label-lg text-text">Payout wallet</p>
       <p className="text-body-sm text-text-muted">Checking whether a reward needs a wallet…</p>
-      <div aria-hidden="true" className="h-20 rounded-md bg-surface-raised motion-safe:animate-pulse" />
+      <div
+        aria-hidden="true"
+        className="h-20 rounded-md bg-surface-raised motion-safe:animate-pulse"
+      />
     </Card>
   );
 }

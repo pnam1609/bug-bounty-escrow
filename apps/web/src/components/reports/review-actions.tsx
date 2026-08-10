@@ -62,7 +62,7 @@ import {
   shortReportId,
   type ReportStatus,
 } from './report-format';
-import { CopyValueAction } from './copy-value';
+import { arcExplorerHref, CryptoValueAction } from './crypto-value';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import {
@@ -1155,18 +1155,20 @@ export function SettlementPreflight({ intent }: { readonly intent: RewardSettlem
         >
           <div className="min-w-0">
             <p className="text-label-sm text-text-muted">Researcher wallet</p>
-            <CopyValueAction
+            <CryptoValueAction
               displayValue={maskAddress(intent.recipientAddress)}
               value={intent.recipientAddress}
               what="researcher wallet address"
+              href={arcExplorerHref(intent.recipientAddress, 'address')}
             />
           </div>
           <div className="min-w-0">
             <p className="text-label-sm text-text-muted">Escrow</p>
-            <CopyValueAction
+            <CryptoValueAction
               displayValue={maskAddress(intent.escrowAddress)}
               value={intent.escrowAddress}
               what="escrow address"
+              href={arcExplorerHref(intent.escrowAddress, 'address')}
             />
           </div>
         </div>

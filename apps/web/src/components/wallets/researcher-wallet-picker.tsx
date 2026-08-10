@@ -6,11 +6,12 @@ import {
 } from '@bug-bounty-escrow/shared';
 import { Button, Callout, Card, RadioGroup, RadioGroupCard } from '@bug-bounty-escrow/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ShieldCheck, Wallet } from 'lucide-react';
+import { ExternalLink, Plus, ShieldCheck, Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { AddResearcherWalletDialog } from './add-researcher-wallet-dialog';
 import { PAYOUT_WALLETS_PATH, payoutWalletSelectionError } from './researcher-wallet-model';
+import { arcExplorerHref } from '@/components/reports/crypto-value';
 import { apiRequest } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import type { RewardWalletAvailability } from '@/components/submit-bug/submit-bug-model';
@@ -138,6 +139,16 @@ export function ResearcherWalletPicker({
               />
               <div className="flex justify-end">
                 <CopyButton value={wallet.address} what="reward wallet address" />
+                <a
+                  aria-label="Open reward wallet address in Arc explorer (opens external site)"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-low hover:underline"
+                  href={arcExplorerHref(wallet.address, 'address')}
+                  rel="noreferrer"
+                  target="_blank"
+                  title="Open reward wallet address in Arc explorer"
+                >
+                  <ExternalLink aria-hidden="true" className="size-4" />
+                </a>
               </div>
             </div>
           ))}

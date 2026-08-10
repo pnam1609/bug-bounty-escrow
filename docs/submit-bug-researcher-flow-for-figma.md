@@ -474,7 +474,7 @@ flowchart LR
 | SR-03WA   | Add wallet                 | Wallet dialog                        | Connect MetaMask/OKX; address lấy từ connector, không chọn wallet type     |
 | SR-03WB   | Verify wallet              | Wallet dialog/signature pending      | Ký exact server challenge và persist proof-of-control                      |
 | SR-03WV   | Wallet validation/recovery | Client/server state                  | Missing selection, wrong chain/account, reject, expired/replayed challenge |
-| SR-04     | Review                     | Step 5                               | Kiểm tra disclosure và payout recipient trước submit                      |
+| SR-04     | Review                     | Step 5                               | Kiểm tra disclosure và payout recipient trước submit                       |
 | SR-05     | Submitting report          | Mutation pending                     | Tạo report trên server                                                     |
 | SR-06     | Uploading attachment       | Upload pending                       | Upload file qua signed URL                                                 |
 | SR-07     | Submitted                  | `/reports/:id`                       | Xác nhận report đã gửi                                                     |
@@ -540,7 +540,9 @@ Select the in-scope asset where you found the vulnerability, then choose every p
 UI:
 
 - `Affected asset` là searchable select hoặc radio-card list cho eligible scopes.
-- Mỗi option hiển thị asset name, asset type, URL/short address và short scope description.
+- Mỗi option hiển thị asset name, asset type, URL/short address và short scope description. EVM
+  contract addresses are also available as an ArcScan address link with an explicit copy action;
+  the radio-card remains selectable without nested interactive controls.
 - Chỉ render items `isInScope = true`.
 - Sau khi chọn asset, render `Impacts in scope — {assetType}` dưới dạng checkbox list; cho chọn một hoặc nhiều.
 - Mỗi impact option hiển thị title, program-defined severity và guidance ngắn.
@@ -737,6 +739,8 @@ UI:
 - Each selectable card shows optional label, masked/checksummed address with explicit copy action,
   `EVM · Arc Testnet` and `Verified` + verified time. Selection uses a radio-group semantic because
   exactly one wallet is attached to a report.
+- Because this is an authenticated wallet owned by the researcher, the address may also open its
+  ArcScan address page; copy remains available for the exact value.
 - Previously verified wallets do not require another signature merely because the composer was
   reopened. Server still re-authorizes current ownership/verified state at submit.
 - `Setup new wallet` opens SR-03WA. It adds a wallet; it does not overwrite or delete existing wallets.
@@ -918,6 +922,8 @@ Payout wallet card:
 
 - Shows the report's server snapshot: optional label, masked/checksummed address with explicit copy,
   `Verified`, `EVM · Arc Testnet` and the current server lock state.
+- A researcher-owned snapshot may link to the ArcScan address page while editable; once settlement
+  is locked, preserve the masked/copy-only privacy boundary returned by the server.
 - `Edit wallet` opens the same verified-wallet selector and can add/verify another wallet. The action
   is enabled only when the report detail returns `canChangePayoutWallet = true`; the browser does not
   infer capability from status alone.
@@ -1163,26 +1169,26 @@ bất kỳ prototype scenario nào. Address chỉ đến từ active MetaMask/OK
 
 Ưu tiên instance và semantic Variables trong `BBE Design System` của file hiện tại.
 
-| Figma pattern                   | shadcn/Tailwind mapping                                            |
+| Figma pattern                   | shadcn/Tailwind mapping                                             |
 | ------------------------------- | ------------------------------------------------------------------ |
-| Primary/secondary/ghost action  | `Button` variants                                                  |
-| Composer sections               | `Card`, `CardHeader`, `CardContent`, `CardFooter`                  |
-| Title                           | `Input`                                                            |
-| Vulnerability description / PoC | Shared Markdown editor (`Edit` / `Preview`) backed by a `Textarea` |
-| Affected asset                  | searchable `Select` hoặc `RadioGroup` cards                        |
-| Program impacts                 | `Checkbox` list trong scrollable `Card`                            |
-| Proposed severity               | segmented `RadioGroup`                                             |
-| Custom impact                   | repeatable `Input` + icon-only remove `Button`                     |
-| Report/program status           | `Badge`                                                            |
-| Step progress                   | Semantic list + progress indicator                                 |
-| Privacy/guidance                | `Alert` / callout                                                  |
-| Attachment                      | Styled file input / dropzone                                       |
-| Saved payout wallets            | `RadioGroup` cards + `Badge` + copy `Button`                       |
+| Primary/secondary/ghost action  | `Button` variants                                                   |
+| Composer sections               | `Card`, `CardHeader`, `CardContent`, `CardFooter`                   |
+| Title                           | `Input`                                                             |
+| Vulnerability description / PoC | Shared Markdown editor (`Edit` / `Preview`) backed by a `Textarea`  |
+| Affected asset                  | searchable `Select` hoặc `RadioGroup` cards                         |
+| Program impacts                 | `Checkbox` list trong scrollable `Card`                             |
+| Proposed severity               | segmented `RadioGroup`                                              |
+| Custom impact                   | repeatable `Input` + icon-only remove `Button`                      |
+| Report/program status           | `Badge`                                                             |
+| Step progress                   | Semantic list + progress indicator                                  |
+| Privacy/guidance                | `Alert` / callout                                                   |
+| Attachment                      | Styled file input / dropzone                                        |
+| Saved payout wallets            | `RadioGroup` cards + `Badge` + copy `Button`                        |
 | Add/verify wallet               | `Dialog`, RainbowKit modal trigger, read-only `Input`, status alert |
-| Discard confirmation            | `AlertDialog`                                                      |
-| Review summary                  | Definition list + `Separator`                                      |
-| Loading                         | Disabled Button + spinner/progress                                 |
-| AI review status/result         | `Card`, `Badge`, progress skeleton, read-only details dialog/sheet |
+| Discard confirmation            | `AlertDialog`                                                       |
+| Review summary                  | Definition list + `Separator`                                       |
+| Loading                         | Disabled Button + spinner/progress                                  |
+| AI review status/result         | `Card`, `Badge`, progress skeleton, read-only details dialog/sheet  |
 
 Layout rules:
 

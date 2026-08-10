@@ -113,6 +113,7 @@ import {
   FundingAllocations,
   FundingConfirmationEvidence,
   FundingPending,
+  CryptoValue,
   type SourceDepositStatus,
 } from './program-funding-views';
 import { CREATE_PROGRAM_STEPS } from './program-wizard';
@@ -581,7 +582,13 @@ function ReadinessRow({ item }: { readonly item: ProgramReadinessItem }) {
       <span className="flex min-w-0 flex-1 flex-col gap-xs sm:flex-row sm:items-start sm:justify-between sm:gap-lg">
         <span className="flex min-w-0 flex-col">
           <span className="text-label-lg text-text">{item.title}</span>
-          <span className="text-label-md text-text-muted">{item.detail}</span>
+          <span className="text-label-md text-text-muted">
+            {item.cryptoValue === undefined ? (
+              item.detail
+            ) : (
+              <CryptoValue label="escrow contract address" value={item.cryptoValue} />
+            )}
+          </span>
         </span>
         <span
           className={`shrink-0 text-label-sm font-semibold uppercase ${
@@ -599,7 +606,10 @@ function escrowSummary(
   program: Program,
   chainLabel: string,
   canonicalEscrowAddress = program.escrowAddress,
+  deploymentTransactionHash?: string,
+  deploymentEvidence?: EscrowDeployment,
 ): ReactNode {
+  const displayedEscrowAddress = canonicalEscrowAddress ?? deploymentEvidence?.contractAddress;
   return (
     <>
       <SummaryRow label="Network" value={chainLabel} />
@@ -607,11 +617,119 @@ function escrowSummary(
       <SummaryRow
         label="Escrow contract"
         value={
-          canonicalEscrowAddress === undefined
-            ? 'Not deployed'
-            : shortenAddress(canonicalEscrowAddress)
+          displayedEscrowAddress === undefined ? (
+            'Not deployed'
+          ) : (
+            <CryptoValue label="escrow contract address" value={displayedEscrowAddress} />
+          )
         }
       />
+      {deploymentEvidence !== undefined || deploymentTransactionHash === undefined ? null : (
+        <SummaryRow
+          label="Deployment transaction"
+          value={
+            <CryptoValue
+              kind="transaction"
+              label="escrow deployment transaction hash"
+              value={deploymentTransactionHash}
+            />
+          }
+        />
+      )}
+      {deploymentEvidence === undefined ? null : (
+        <>
+          <SummaryRow
+            label="Program key"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="escrow program key"
+                value={deploymentEvidence.programKey}
+              />
+            }
+          />
+          <SummaryRow
+            label="Owner wallet"
+            value={
+              <CryptoValue
+                label="escrow owner wallet address"
+                value={deploymentEvidence.ownerWallet}
+              />
+            }
+          />
+          {deploymentEvidence.platformAdminWallet === undefined ? null : (
+            <SummaryRow
+              label="Platform admin wallet"
+              value={
+                <CryptoValue
+                  label="escrow platform admin wallet address"
+                  value={deploymentEvidence.platformAdminWallet}
+                />
+              }
+            />
+          )}
+          <SummaryRow
+            label="Withdraw recipient"
+            value={
+              <CryptoValue
+                label="escrow withdrawal recipient address"
+                value={deploymentEvidence.withdrawRecipient}
+              />
+            }
+          />
+          <SummaryRow
+            label="USDC token"
+            value={
+              <CryptoValue
+                label="escrow USDC token address"
+                value={deploymentEvidence.tokenAddress}
+              />
+            }
+          />
+          <SummaryRow
+            label="Artifact checksum"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="escrow artifact checksum"
+                value={deploymentEvidence.artifactChecksum}
+              />
+            }
+          />
+          <SummaryRow
+            label="Circle contract"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="Circle contract ID"
+                value={deploymentEvidence.circleContractId}
+              />
+            }
+          />
+          <SummaryRow
+            label="Circle transaction"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="Circle transaction ID"
+                value={deploymentEvidence.circleTransactionId}
+              />
+            }
+          />
+          {deploymentEvidence.transactionHash === undefined ? null : (
+            <SummaryRow
+              label="Deployment transaction"
+              value={
+                <CryptoValue
+                  kind="transaction"
+                  label="escrow deployment transaction hash"
+                  value={deploymentEvidence.transactionHash}
+                />
+              }
+            />
+          )}
+        </>
+      )}
     </>
   );
 }
@@ -642,6 +760,7 @@ export function ProgramLifecycle({
   const [view, setView] = useState<'readiness' | 'fund'>('readiness');
   const [deployOpen, setDeployOpen] = useState(false);
   const [deploymentFeeQuote, setDeploymentFeeQuote] = useState<DeploymentFeeQuote>();
+  const [deploymentFeeApprovalHash, setDeploymentFeeApprovalHash] = useState<string>();
   const [deploymentFeePaymentHash, setDeploymentFeePaymentHash] = useState<string>();
   const [deploymentFeeLoading, setDeploymentFeeLoading] = useState(false);
   const [deploymentFeeError, setDeploymentFeeError] = useState<string>();
@@ -649,6 +768,8 @@ export function ProgramLifecycle({
   const [deploymentFeeStage, setDeploymentFeeStage] = useState<DeploymentFeeStage>('idle');
   const deploymentFeeStageRef = useRef<DeploymentFeeStage>('idle');
   const [deploymentStatus, setDeploymentStatus] = useState<EscrowDeployment['status']>();
+  const [deploymentTransactionHash, setDeploymentTransactionHash] = useState<string>();
+  const [deploymentEvidence, setDeploymentEvidence] = useState<EscrowDeployment>();
   // Keep the canonical deployment address available immediately after the durable endpoint
   // confirms it, before the parent program query has refreshed its cache.
   const [confirmedEscrowAddress, setConfirmedEscrowAddress] = useState(program.escrowAddress);
@@ -715,6 +836,7 @@ export function ProgramLifecycle({
     setWalletSession(undefined);
     setWalletPending(false);
     setWalletError(undefined);
+    setDeploymentFeeApprovalHash(undefined);
     setDeploymentFeePaymentHash(undefined);
     setFundingReadiness(undefined);
     setFundingSelection(undefined);
@@ -845,6 +967,10 @@ export function ProgramLifecycle({
         );
         if (cancelled) return;
         const current = response.data;
+        setDeploymentEvidence(current);
+        if (current.transactionHash !== undefined) {
+          setDeploymentTransactionHash(current.transactionHash);
+        }
         if (['accepted', 'pending', 'verifying'].includes(current.status)) {
           setDeploymentStatus(current.status);
           timer = globalThis.setTimeout(() => void poll(), 2_000);
@@ -1042,6 +1168,7 @@ export function ProgramLifecycle({
     },
     onSuccess: (quote) => {
       setDeploymentFeeQuote(quote);
+      setDeploymentFeeApprovalHash(undefined);
       setDeploymentFeePaymentHash(undefined);
       setDeploymentFeeError(undefined);
     },
@@ -1106,6 +1233,7 @@ export function ProgramLifecycle({
       if (typeof approvalHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(approvalHash)) {
         throw new Error('The wallet did not return a valid deployment-fee approval hash.');
       }
+      setDeploymentFeeApprovalHash(approvalHash);
       await waitForWalletReceipt(
         walletSession.wallet.provider as unknown as {
           request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -1169,7 +1297,6 @@ export function ProgramLifecycle({
     },
     onSuccess: (quote) => {
       setDeploymentFeeQuote(quote);
-      setDeploymentFeePaymentHash(undefined);
       setDeploymentFeeError(undefined);
       setDeploymentFeeNotice(undefined);
       deploymentFeeStageRef.current = 'idle';
@@ -1201,6 +1328,10 @@ export function ProgramLifecycle({
         { method: 'POST', token: session?.access_token, body },
       );
       setDeploymentStatus(deployment.data.status);
+      setDeploymentEvidence(deployment.data);
+      if (deployment.data.transactionHash !== undefined) {
+        setDeploymentTransactionHash(deployment.data.transactionHash);
+      }
       if (deployment.data.status === 'failed' || deployment.data.status === 'reverted') {
         throw new DeploymentSupportRequiredError();
       }
@@ -3052,6 +3183,7 @@ export function ProgramLifecycle({
                 <SummaryRow label="Program" value={program.name} />
                 <SummaryRow label="Network" value={chainLabel} />
                 <SummaryRow label="Reward token" value="USDC" />
+                {escrowSummary(program, chainLabel, undefined, undefined, deploymentEvidence)}
               </div>
               <p className="text-body-sm text-low">
                 Do not close this window until the escrow address is available.
@@ -3148,7 +3280,13 @@ export function ProgramLifecycle({
             <GuidancePanel eyebrow="Escrow summary" title={formatUsdc(program.totalPool)}>
               <p>Current reward pool</p>
               <div className="flex flex-col">
-                {escrowSummary(program, chainLabel, escrowAddress)}
+                {escrowSummary(
+                  program,
+                  chainLabel,
+                  escrowAddress,
+                  deploymentTransactionHash,
+                  deploymentEvidence,
+                )}
               </div>
               <Callout variant="warning">
                 Funding does not publish the program. Pool credit waits for verified Arc USDC and
@@ -3349,17 +3487,27 @@ export function ProgramLifecycle({
                 <SummaryRow
                   label="Platform admin wallet"
                   value={
-                    withdrawalIntent === undefined
-                      ? 'Managed by the platform'
-                      : shortenAddress(withdrawalIntent.walletAddress)
+                    withdrawalIntent === undefined ? (
+                      'Managed by the platform'
+                    ) : (
+                      <CryptoValue
+                        label="platform admin wallet address"
+                        value={withdrawalIntent.walletAddress}
+                      />
+                    )
                   }
                 />
                 <SummaryRow
                   label="Withdrawal recipient"
                   value={
-                    withdrawalIntent === undefined
-                      ? 'Verified by the server'
-                      : shortenAddress(withdrawalIntent.recipientAddress)
+                    withdrawalIntent === undefined ? (
+                      'Verified by the server'
+                    ) : (
+                      <CryptoValue
+                        label="withdrawal recipient address"
+                        value={withdrawalIntent.recipientAddress}
+                      />
+                    )
                   }
                 />
                 <SummaryRow
@@ -3374,6 +3522,30 @@ export function ProgramLifecycle({
                   label="State"
                   value={withdrawalIntent?.status.replaceAll('_', ' ') ?? 'Not started'}
                 />
+                {withdrawalIntent?.closeTransactionHash === undefined ? null : (
+                  <SummaryRow
+                    label="Close transaction"
+                    value={
+                      <CryptoValue
+                        kind="transaction"
+                        label="escrow close transaction hash"
+                        value={withdrawalIntent.closeTransactionHash}
+                      />
+                    }
+                  />
+                )}
+                {withdrawalIntent?.withdrawTransactionHash === undefined ? null : (
+                  <SummaryRow
+                    label="Withdrawal transaction"
+                    value={
+                      <CryptoValue
+                        kind="transaction"
+                        label="escrow withdrawal transaction hash"
+                        value={withdrawalIntent.withdrawTransactionHash}
+                      />
+                    }
+                  />
+                )}
               </div>
               <Callout variant="warning">
                 Closing and withdrawing are privileged platform-admin operations. The backend
@@ -3420,7 +3592,13 @@ export function ProgramLifecycle({
             <p className="text-h2 text-text">{formatUsdc(program.totalPool)}</p>
             <div className="flex flex-col">
               <SummaryRow label="Remaining" value={formatUsdc(program.remainingPool)} />
-              {escrowSummary(program, chainLabel, escrowAddress)}
+              {escrowSummary(
+                program,
+                chainLabel,
+                escrowAddress,
+                deploymentTransactionHash,
+                deploymentEvidence,
+              )}
             </div>
             <p className="text-label-sm uppercase text-text-muted">Next action</p>
             <p className="text-body-sm text-primary">
@@ -3533,8 +3711,58 @@ export function ProgramLifecycle({
                 <SummaryRow label="Network" value={`Chain ${deploymentFeeQuote.chainId}`} />
                 <SummaryRow
                   label="Recipient"
-                  value={shortenAddress(deploymentFeeQuote.recipientAddress)}
+                  value={
+                    <CryptoValue
+                      label="deployment fee recipient address"
+                      value={deploymentFeeQuote.recipientAddress}
+                    />
+                  }
                 />
+                <SummaryRow
+                  label="USDC token"
+                  value={
+                    <CryptoValue
+                      label="deployment fee USDC token address"
+                      value={deploymentFeeQuote.tokenAddress}
+                    />
+                  }
+                />
+                {deploymentFeeApprovalHash === undefined ? null : (
+                  <SummaryRow
+                    label="USDC approval transaction"
+                    value={
+                      <CryptoValue
+                        kind="transaction"
+                        label="deployment fee USDC approval transaction hash"
+                        value={deploymentFeeApprovalHash}
+                      />
+                    }
+                  />
+                )}
+                {deploymentFeeQuote.paymentTransactionHash === undefined ? null : (
+                  <SummaryRow
+                    label="Fee transaction"
+                    value={
+                      <CryptoValue
+                        kind="transaction"
+                        label="deployment fee transaction hash"
+                        value={deploymentFeeQuote.paymentTransactionHash}
+                      />
+                    }
+                  />
+                )}
+                {deploymentFeePaymentHash === undefined ? null : (
+                  <SummaryRow
+                    label="Submitted fee transaction"
+                    value={
+                      <CryptoValue
+                        kind="transaction"
+                        label="submitted deployment fee transaction hash"
+                        value={deploymentFeePaymentHash}
+                      />
+                    }
+                  />
+                )}
                 <SummaryRow
                   label="Status"
                   value={

@@ -80,6 +80,8 @@ describe('SR-09 review summary', () => {
     expect(markup).toContain('Aegis Protocol');
     expect(markup).toContain('Aegis Staking Pool');
     expect(markup).toContain('Smart contract');
+    expect(markup).toContain('Open affected contract in the Arc explorer');
+    expect(markup).toContain('address/0xA41e5f0d2c8b9a7361f4e2d3c5b6a7980f1e2d3c');
     expect(markup).toContain('Impacts and severity');
     expect(markup).toContain('Direct theft of user funds');
     expect(markup).toContain('Permanent freezing of user funds');
@@ -166,7 +168,8 @@ describe('SR-09 review summary', () => {
     expect(markup).toContain('Reward wallet');
     expect(markup).toContain('0xaaaa…aaaa');
     expect(markup).toContain('the full reward wallet address');
-    expect(markup).not.toContain(selectedWallet.address);
+    expect(markup).toContain(`/address/${selectedWallet.address}`);
+    expect(markup).toContain('Open reward wallet address in the Arc explorer');
     expect(markup).not.toContain('Make this report public');
     expect(markup).not.toContain('Save draft');
     expect(markup).not.toContain('>Publish<');

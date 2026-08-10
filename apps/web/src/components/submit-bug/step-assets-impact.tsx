@@ -43,6 +43,7 @@ import {
   type ProgramScope,
   type ReportDraft,
 } from './submit-bug-model';
+import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 
 export interface StepAssetsImpactProps {
   readonly allowCustomImpact: boolean;
@@ -174,6 +175,18 @@ export function StepAssetsImpact({
             ))
           )}
         </RadioGroup>
+        {scope?.contractAddress === undefined ? null : (
+          <div className="flex flex-wrap items-center gap-sm rounded-md border border-border bg-surface-raised p-md">
+            <span className="text-label-sm uppercase text-text-muted">Contract address</span>
+            <CryptoValueAction
+              displayValue={`${scope.contractAddress.slice(0, 6)}…${scope.contractAddress.slice(-4)}`}
+              href={arcExplorerHref(scope.contractAddress, 'address')}
+              hrefLabel="Open affected contract in the Arc explorer"
+              value={scope.contractAddress}
+              what="affected contract address"
+            />
+          </div>
+        )}
         {errors['affectedScopeId'] === undefined ? null : (
           <p className="text-label-sm text-error" id="affectedScopeId-error" role="alert">
             {errors['affectedScopeId']}

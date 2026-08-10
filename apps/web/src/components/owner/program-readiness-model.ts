@@ -16,6 +16,7 @@ export type ProgramReadinessId =
 
 export interface ProgramReadinessItem {
   readonly complete: boolean;
+  readonly cryptoValue?: string;
   readonly detail: string;
   readonly id: ProgramReadinessId;
   readonly status: string;
@@ -30,10 +31,6 @@ function formatUsdc(amount: string): string {
   const value = Number(amount);
   if (!Number.isFinite(value)) return `${amount} USDC`;
   return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} USDC`;
-}
-
-function shortenAddress(address: string): string {
-  return address.length <= 12 ? address : `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 function authorableInScopeTypes(program: Program): readonly AuthorableAssetType[] {
@@ -137,11 +134,12 @@ export function buildProgramReadiness(program: Program): readonly ProgramReadine
     {
       complete: deployed,
       detail: deployed
-        ? shortenAddress(escrowAddress)
+        ? 'Program-specific Arc escrow contract'
         : 'Deploy a program-specific escrow contract',
       id: 'escrow-contract',
       status: deployed ? 'Complete' : 'Not deployed',
       title: 'Escrow contract',
+      ...(deployed ? { cryptoValue: escrowAddress } : {}),
     },
     {
       complete: funded,

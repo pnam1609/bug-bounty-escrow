@@ -644,6 +644,13 @@ coi Circle provider acceptance là paid.
 ### Paid
 
 - Success badge, exact USDC amount, recipient masked + copy, Arc transaction link/hash và paid time.
+- Settlement crypto values shown to an authorized owner/reviewer use the same interaction
+  contract: shortened escrow, token or contract addresses link to the relevant ArcScan
+  address page and expose a separate copy action. Arc transaction hashes link to
+  `https://testnet.arcscan.app/tx/{hash}` and expose copy; block numbers/hashes, log indexes and
+  provider IDs are copy-only unless an explorer route is explicitly known. The researcher recipient
+  remains masked and copy-only when the API exposes a masked snapshot; it must not gain an explorer
+  link that bypasses the settlement privacy boundary.
 - Final severity và review history vẫn giữ.
 - Paid không tự public report; disclosure là owner flow riêng sau program end.
 

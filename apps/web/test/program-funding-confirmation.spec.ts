@@ -54,9 +54,7 @@ describe('CP-13 immutable funding confirmation', () => {
 
     expect(response.data).toEqual(confirmationArtifact);
     expect(response.data.programId).toBe('31000000-0000-4000-8000-000000000001');
-    expect(response.data.postTotalFundedAmount).toBe(
-      response.data.requiredTotalFundedAmount,
-    );
+    expect(response.data.postTotalFundedAmount).toBe(response.data.requiredTotalFundedAmount);
   });
 
   it('renders the API artifact without wallet or mutable local funding state', () => {
@@ -64,19 +62,24 @@ describe('CP-13 immutable funding confirmation', () => {
       success: true,
       data: confirmationArtifact,
     }).data;
-    const html = renderToStaticMarkup(
-      createElement(FundingConfirmationEvidence, { artifact }),
-    );
+    const html = renderToStaticMarkup(createElement(FundingConfirmationEvidence, { artifact }));
 
-    expect(html).toContain(
-      `data-funding-confirmation="${artifact.fundingIntentId}"`,
-    );
+    expect(html).toContain(`data-funding-confirmation="${artifact.fundingIntentId}"`);
     expect(html).toContain('Canonical funding confirmation');
     expect(html).toContain('Unified Balance');
     expect(html).toContain('Artifact version');
     expect(html).toContain('1.1.0');
     expect(html).toContain('Destination evidence');
     expect(html).toContain('Funding sync transaction');
+    expect(html).toContain(`https://testnet.arcscan.app/address/${artifact.escrowAddress}`);
+    expect(html).toContain(`https://testnet.arcscan.app/address/${artifact.tokenAddress}`);
+    expect(html).toContain(`https://testnet.arcscan.app/tx/${artifact.destinationTransactionHash}`);
+    expect(html).toContain(`https://testnet.arcscan.app/tx/${artifact.syncTransactionHash}`);
+    expect(html).toContain(`https://testnet.arcscan.app/block/${artifact.destinationBlockNumber}`);
+    expect(html).toContain('Copy');
+    expect(html).not.toContain(
+      `https://testnet.arcscan.app/block/${artifact.destinationBlockHash}`,
+    );
     expect(html).toContain('Provider + gas reserve');
     expect(html).toContain('Actual Arc net received');
     expect(html).toContain('Required lifetime funded');

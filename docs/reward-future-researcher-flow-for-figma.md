@@ -99,6 +99,12 @@ Các trạng thái `rejected` và `duplicate` đóng report mà không đi vào 
 - Wallet proof uses MetaMask/OKX via RainbowKit/Wagmi and a short-lived, single-use server challenge
   signed with `personal_sign`; it is proof of address control, not authentication or a transaction.
 - Report body, PoC và private attachment không xuất hiện trong reward list.
+- Researcher-owned wallet, token and escrow addresses use the shared crypto-value interaction:
+  shortened values link to the ArcScan address page and have an explicit copy action;
+  Arc transaction hashes link to `https://testnet.arcscan.app/tx/{hash}` and have copy. A
+  report-level recipient supplied only as a masked settlement snapshot remains masked/copy-only.
+  Block evidence, provider IDs and checksums are copy-only unless an explorer route is known. The
+  reward view must never invent a hash or link when the server has not supplied verified evidence.
 
 ### Design system
 
@@ -671,8 +677,11 @@ Submit bug và là read-only/conditional-edit metadata trong researcher report/r
 7. Submit chỉ gửi verified wallet ID. Server atomically re-authorize và snapshot wallet ID,
    checksummed address, Arc chain, verification time/version vào report; arbitrary address và mutable
    profile default không phải recipient authority.
-8. Summary mask address nhưng explicit copy có accessible full value. Owner/reviewer chỉ nhận report
-   snapshot cần cho settlement, không nhận toàn bộ wallet registry hoặc verification proof.
+8. Summary mask address nhưng explicit copy có accessible full value. Trong các màn hình wallet mà
+   researcher đã authenticated và đang xem wallet do chính mình sở hữu, address có thể mở ArcScan
+   address link và vẫn phải có copy action. Owner/reviewer chỉ nhận report snapshot cần cho
+   settlement, không nhận toàn bộ wallet registry hoặc verification proof; masked recipient snapshot
+   ở settlement remains copy-only.
 9. Researcher detail chỉ cho `Edit wallet` khi server capability cho phép. Server atomically deny khi
    report `duplicate`, `rejected` hoặc `paid`, program ended/closed, hoặc đã có report-specific reward
    settlement intent, approval, payout/funding evidence. Allowed edit writes snapshot history/audit

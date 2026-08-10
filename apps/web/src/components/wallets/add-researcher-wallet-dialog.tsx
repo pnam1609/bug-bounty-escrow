@@ -22,6 +22,7 @@ import {
 } from '@bug-bounty-escrow/ui';
 import { useAccountModal, useChainModal, useConnectModal } from '@rainbow-me/rainbowkit';
 import { useAccount, useSwitchChain } from 'wagmi';
+import { ExternalLink } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { EIP1193Provider } from 'viem';
 
@@ -40,6 +41,8 @@ import {
 } from './wallet-signature';
 import { WalletAccountButton } from './wallet-account-button';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
+import { CopyButton } from '@/components/reports/copy-value';
+import { arcExplorerHref } from '@/components/reports/crypto-value';
 
 type VerificationPhase = 'idle' | 'requesting' | 'signing' | 'verifying';
 
@@ -302,7 +305,22 @@ export function AddResearcherWalletDialog({
               helperText="This address comes from the active RainbowKit account."
               label="Wallet address"
             >
-              <Input className="font-mono" readOnly spellCheck={false} value={address} />
+              <div className="flex flex-col items-start gap-xs">
+                <Input className="font-mono" readOnly spellCheck={false} value={address} />
+                <div className="flex items-center gap-xs">
+                  <CopyButton value={address} what="wallet address" />
+                  <a
+                    aria-label="Open wallet address in Arc explorer (opens external site)"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-low hover:underline"
+                    href={arcExplorerHref(address, 'address')}
+                    rel="noreferrer"
+                    target="_blank"
+                    title="Open wallet address in Arc explorer"
+                  >
+                    <ExternalLink aria-hidden="true" className="size-4" />
+                  </a>
+                </div>
+              </div>
             </Field>
           ) : (
             <Callout title="Connect a supported wallet" variant="info">

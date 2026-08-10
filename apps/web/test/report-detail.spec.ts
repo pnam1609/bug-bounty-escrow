@@ -613,6 +613,8 @@ describe('SR-12 report detail', () => {
     expect(markup).toContain('Private disclosure');
     expect(markup).toContain('Aegis Vault');
     expect(markup).toContain('Smart contract');
+    expect(markup).toContain('Open affected contract in the Arc explorer');
+    expect(markup).toContain('address/0x1111111111111111111111111111111111111111');
     expect(markup).toContain('Permanent freezing of user funds');
     expect(markup).toContain('Reward accounting remains locked');
     expect(markup).toContain('Researcher proposed');

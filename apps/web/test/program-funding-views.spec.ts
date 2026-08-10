@@ -620,10 +620,10 @@ describe('CP-11 and CP-12 funding views', () => {
     expect(html).toContain('https://sepolia.etherscan.io/tx/');
     expect(html).toContain('https://sepolia.arbiscan.io/tx/');
     expect(html).toContain('https://sepolia.basescan.org/tx/');
-    expect(html.match(/View transaction/g) ?? []).toHaveLength(4);
+    expect(html.match(/https:\/\/[^"]+\/tx\//g) ?? []).toHaveLength(4);
 
     const withoutHash = render({ arc: hashes['arc']!, eth: '   ' });
-    expect(withoutHash.match(/View transaction/g) ?? []).toHaveLength(1);
+    expect(withoutHash.match(/https:\/\/[^"]+\/tx\//g) ?? []).toHaveLength(1);
     expect(withoutHash).not.toContain('https://sepolia.etherscan.io/tx/');
   });
 });

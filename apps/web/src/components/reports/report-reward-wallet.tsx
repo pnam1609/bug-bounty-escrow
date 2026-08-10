@@ -7,10 +7,11 @@ import {
 } from '@bug-bounty-escrow/shared';
 import { Button, Card, CardDescription, CardHeader, CardTitle } from '@bug-bounty-escrow/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, Wallet } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Wallet } from 'lucide-react';
 import { useId, useState } from 'react';
 
 import { CopyButton } from './copy-value';
+import { arcExplorerHref } from './crypto-value';
 import { ResearcherWalletPicker } from '@/components/wallets/researcher-wallet-picker';
 import { reportWalletUpdateError } from '@/components/wallets/researcher-wallet-model';
 import { apiRequest } from '@/lib/api-client';
@@ -103,7 +104,21 @@ export function ReportRewardWallet({ principalId, report, token }: ReportRewardW
             <code className="font-mono text-body-sm text-text">{wallet.maskedAddress}</code>
             <p className="text-label-sm text-text-muted">EVM · Arc Testnet · USDC</p>
           </div>
-          <CopyButton value={wallet.address} what="reward wallet address" />
+          <div className="flex items-center gap-xs">
+            <CopyButton value={wallet.address} what="reward wallet address" />
+            {canEdit ? (
+              <a
+                aria-label="Open reward wallet address in Arc explorer (opens external site)"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-low hover:underline"
+                href={arcExplorerHref(wallet.address, 'address')}
+                rel="noreferrer"
+                target="_blank"
+                title="Open reward wallet address in Arc explorer"
+              >
+                <ExternalLink aria-hidden="true" className="size-4" />
+              </a>
+            ) : null}
+          </div>
         </div>
       ) : (
         <div className="rounded-md border border-warning bg-surface-raised p-lg">

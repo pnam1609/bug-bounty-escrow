@@ -29,6 +29,7 @@ import {
   formatUsdcFull,
   RESOURCE_TYPE_LABELS,
 } from './program-format';
+import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 
 /*
  * Program detail panels — submit-bug flow §8 `PG-DETAIL`: `Information` (overview, reward
@@ -74,6 +75,35 @@ function BulletList({ items }: { readonly items: readonly string[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+function shortenAddress(address: string): string {
+  return address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
+function ScopeResource({
+  assetUrl,
+  contractAddress,
+}: {
+  readonly assetUrl: string | undefined;
+  readonly contractAddress: string | undefined;
+}) {
+  if (assetUrl === undefined && contractAddress === undefined) return null;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-xs text-label-md text-text-muted">
+      {assetUrl === undefined ? null : <span className="break-all">{assetUrl}</span>}
+      {contractAddress === undefined ? null : (
+        <CryptoValueAction
+          displayValue={shortenAddress(contractAddress)}
+          href={arcExplorerHref(contractAddress, 'address')}
+          hrefLabel="Open contract address in the Arc explorer"
+          value={contractAddress}
+          what="contract address"
+        />
+      )}
+    </div>
   );
 }
 
@@ -448,12 +478,10 @@ export function ScopePanel({
                             In scope
                           </span>
                         </div>
-                        {scope.assetUrl === undefined &&
-                        scope.contractAddress === undefined ? null : (
-                          <p className="truncate text-label-md text-text-muted">
-                            {scope.assetUrl ?? scope.contractAddress}
-                          </p>
-                        )}
+                        <ScopeResource
+                          assetUrl={scope.assetUrl}
+                          contractAddress={scope.contractAddress}
+                        />
                         {scope.description === undefined ? null : (
                           <p className="text-body-sm text-text-muted">{scope.description}</p>
                         )}
@@ -535,12 +563,10 @@ export function ScopePanel({
                             Out of scope
                           </span>
                         </div>
-                        {scope.assetUrl === undefined &&
-                        scope.contractAddress === undefined ? null : (
-                          <p className="truncate text-label-md text-text-muted">
-                            {scope.assetUrl ?? scope.contractAddress}
-                          </p>
-                        )}
+                        <ScopeResource
+                          assetUrl={scope.assetUrl}
+                          contractAddress={scope.contractAddress}
+                        />
                         {scope.description === undefined ? null : (
                           <p className="text-body-sm text-text-muted">{scope.description}</p>
                         )}

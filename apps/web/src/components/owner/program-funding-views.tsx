@@ -14,7 +14,9 @@ import {
   StatusBadge,
 } from '@bug-bounty-escrow/ui';
 import { CheckCircle2, Circle, LoaderCircle, Plus, Trash2, Wallet } from 'lucide-react';
+import type { ReactNode } from 'react';
 
+import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 import {
   FUNDING_NETWORK_IDS,
   FUNDING_NETWORKS,
@@ -34,6 +36,39 @@ import {
 import { fieldId, formatUsdc, shortenAddress } from './program-draft';
 import { AffixedField, FormCard, SummaryRow } from './wizard-parts';
 import { RainbowKitFundingButton } from './rainbowkit-funding-button';
+
+export type CryptoValueKind = 'address' | 'block' | 'copy' | 'transaction';
+
+export interface CryptoValueProps {
+  readonly kind?: CryptoValueKind;
+  readonly label: string;
+  readonly network?: FundingNetworkId;
+  readonly value: string;
+}
+
+/** Displays an on-chain value using the shared copy/explorer action. */
+export function CryptoValue({
+  kind = 'address',
+  label,
+  network = 'Arc_Testnet',
+  value,
+}: CryptoValueProps) {
+  const href =
+    kind === 'copy'
+      ? undefined
+      : kind === 'transaction'
+        ? sourceTransactionExplorerHref(network, value)
+        : arcExplorerHref(value, kind);
+  return (
+    <CryptoValueAction
+      displayValue={shortenAddress(value)}
+      href={href}
+      hrefLabel={`Open ${label} in the ${network === 'Arc_Testnet' ? 'Arc' : FUNDING_NETWORKS[network].label} explorer`}
+      value={value}
+      what={label}
+    />
+  );
+}
 
 export type SourceDepositStatus =
   | 'not_started'
@@ -295,18 +330,12 @@ export function FundingAllocations({
                             </p>
                             {depositTransactionHashes[source.rowId] === undefined ||
                             depositTransactionHashes[source.rowId]!.trim() === '' ? null : (
-                              <a
-                                className="text-label-md text-link underline-offset-2 hover:underline"
-                                href={sourceTransactionExplorerHref(
-                                  source.network,
-                                  depositTransactionHashes[source.rowId]!.trim(),
-                                )}
-                                rel="noopener noreferrer"
-                                target="_blank"
-                              >
-                                View transaction{' '}
-                                {shortenAddress(depositTransactionHashes[source.rowId]!.trim())}
-                              </a>
+                              <CryptoValue
+                                kind="transaction"
+                                label={`${network.label} deposit transaction hash`}
+                                network={source.network}
+                                value={depositTransactionHashes[source.rowId]!.trim()}
+                              />
                             )}
                           </>
                         ) : null}
@@ -464,9 +493,11 @@ export function FundingAllocations({
           <SummaryRow
             label="Candidate escrow"
             value={
-              program.escrowAddress === undefined
-                ? 'Escrow not deployed'
-                : shortenAddress(program.escrowAddress)
+              program.escrowAddress === undefined ? (
+                'Escrow not deployed'
+              ) : (
+                <CryptoValue label="candidate escrow address" value={program.escrowAddress} />
+              )
             }
           />
           <SummaryRow label="Recipient verification" value="Required before signing" />
@@ -586,11 +617,24 @@ export function FundingPending({
           <SummaryRow
             label="Locked wallet"
             value={
-              walletAddress === undefined
-                ? `${shortenAddress(intent.walletAddress)} · disconnected`
-                : walletMatchesIntent
-                  ? shortenAddress(walletAddress)
-                  : `${shortenAddress(walletAddress)} · wrong account`
+              walletAddress === undefined ? (
+                <>
+                  {
+                    <CryptoValue
+                      label="locked funding wallet address"
+                      value={intent.walletAddress}
+                    />
+                  }
+                  <span className="text-label-sm text-text-muted">disconnected</span>
+                </>
+              ) : walletMatchesIntent ? (
+                <CryptoValue label="locked funding wallet address" value={walletAddress} />
+              ) : (
+                <>
+                  {<CryptoValue label="connected wallet address" value={walletAddress} />}
+                  <span className="text-label-sm text-text-muted">wrong account</span>
+                </>
+              )
             }
           />
           <SummaryRow label="Route" value={fundingRouteLabel(selection.routeMode)} />
@@ -618,31 +662,54 @@ export function FundingPending({
           <SummaryRow
             label="Verified escrow"
             value={
-              verifiedRecipient === undefined
-                ? 'Awaiting server-verified intent'
-                : shortenAddress(verifiedRecipient)
+              verifiedRecipient === undefined ? (
+                'Awaiting server-verified intent'
+              ) : (
+                <CryptoValue label="verified escrow address" value={verifiedRecipient} />
+              )
             }
           />
           {destinationTransactionHash === undefined ? null : (
             <SummaryRow
               label="Destination transaction"
-              value={shortenAddress(destinationTransactionHash)}
+              value={
+                <CryptoValue
+                  kind="transaction"
+                  label="destination transaction hash"
+                  value={destinationTransactionHash}
+                />
+              }
             />
           )}
           {transferId === undefined ? null : (
-            <SummaryRow label="Circle transfer" value={truncateEvidence(transferId)} />
+            <SummaryRow
+              label="Circle transfer"
+              value={<CryptoValue kind="copy" label="Circle transfer ID" value={transferId} />}
+            />
           )}
           {intent.recovery?.operationId === undefined ? null : (
             <SummaryRow
               label="Circle operation"
-              value={truncateEvidence(intent.recovery.operationId)}
+              value={
+                <CryptoValue
+                  kind="copy"
+                  label="Circle operation ID"
+                  value={intent.recovery.operationId}
+                />
+              }
             />
           )}
           {(intent.recovery?.sourceTransactionHashes ?? []).map((hash, index) => (
             <SummaryRow
               key={hash}
               label={`Source transaction ${index + 1}`}
-              value={shortenAddress(hash)}
+              value={
+                <CryptoValue
+                  kind="copy"
+                  label={`source transaction ${index + 1} hash`}
+                  value={hash}
+                />
+              }
             />
           ))}
         </div>
@@ -746,28 +813,114 @@ export function FundingConfirmationEvidence({
       >
         <div className="flex flex-col">
           <SummaryRow label="Route" value={fundingRouteLabel(artifact.routeMode)} />
-          <SummaryRow label="Escrow" value={shortenAddress(artifact.escrowAddress)} />
+          <SummaryRow
+            label="Escrow"
+            value={<CryptoValue label="escrow address" value={artifact.escrowAddress} />}
+          />
           <SummaryRow label="Artifact version" value={artifact.artifactVersion} />
-          <SummaryRow label="Artifact checksum" value={shortenAddress(artifact.artifactChecksum)} />
+          <SummaryRow
+            label="Artifact checksum"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="artifact checksum"
+                value={artifact.artifactChecksum}
+              />
+            }
+          />
           <SummaryRow
             label="Canonical Arc USDC"
-            value={`${shortenAddress(artifact.tokenAddress)} · ${artifact.tokenDecimals} decimals`}
+            value={
+              <span className="inline-flex flex-wrap items-center justify-end gap-xs">
+                <CryptoValue
+                  label="canonical Arc USDC token address"
+                  value={artifact.tokenAddress}
+                />
+                <span className="text-label-sm text-text-muted">
+                  {artifact.tokenDecimals} decimals
+                </span>
+              </span>
+            }
           />
           <SummaryRow
             label="Destination transaction"
-            value={shortenAddress(artifact.destinationTransactionHash)}
+            value={
+              <CryptoValue
+                kind="transaction"
+                label="destination transaction hash"
+                value={artifact.destinationTransactionHash}
+              />
+            }
           />
           <SummaryRow
-            label="Destination evidence"
-            value={`log ${artifact.destinationLogIndex} · block ${artifact.destinationBlockNumber} · ${shortenAddress(artifact.destinationBlockHash)}`}
+            label="Destination log"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="destination log index"
+                value={String(artifact.destinationLogIndex)}
+              />
+            }
+          />
+          <SummaryRow
+            label="Destination block"
+            value={
+              <CryptoValue
+                kind="block"
+                label="destination block number"
+                value={artifact.destinationBlockNumber}
+              />
+            }
+          />
+          <SummaryRow
+            label="Destination evidence · block hash"
+            value={
+              <CryptoValue
+                kind="copy"
+                label="destination block hash"
+                value={artifact.destinationBlockHash}
+              />
+            }
           />
           <SummaryRow
             label="Funding sync transaction"
-            value={shortenAddress(artifact.syncTransactionHash)}
+            value={
+              <CryptoValue
+                kind="transaction"
+                label="funding sync transaction hash"
+                value={artifact.syncTransactionHash}
+              />
+            }
           />
           <SummaryRow
-            label="Sync evidence"
-            value={`${artifact.syncLogIndex === undefined ? 'no event log' : `log ${artifact.syncLogIndex}`} · block ${artifact.syncBlockNumber} · ${shortenAddress(artifact.syncBlockHash)}`}
+            label="Sync log"
+            value={
+              artifact.syncLogIndex === undefined ? (
+                'No event log'
+              ) : (
+                <CryptoValue
+                  kind="copy"
+                  label="sync log index"
+                  value={String(artifact.syncLogIndex)}
+                />
+              )
+            }
+          />
+          <SummaryRow
+            label="Sync block"
+            value={
+              <CryptoValue
+                kind="block"
+                label="sync block number"
+                value={artifact.syncBlockNumber}
+              />
+            }
+          />
+          <SummaryRow
+            label="Sync evidence · block hash"
+            value={
+              <CryptoValue kind="copy" label="sync block hash" value={artifact.syncBlockHash} />
+            }
           />
         </div>
       </FormCard>
@@ -941,7 +1094,7 @@ function routeProgress(
   recoverySteps: readonly RecoveryStep[],
 ): readonly {
   readonly label: string;
-  readonly detail: string;
+  readonly detail: ReactNode;
   readonly state: ProgressItemState;
 }[] {
   const routeDelivered =
@@ -1065,7 +1218,7 @@ function fundingRouteStep(
   names: readonly string[],
   recoverySteps: readonly RecoveryStep[],
   fallback: ProgressItemState,
-): { readonly label: string; readonly detail: string; readonly state: ProgressItemState } {
+): { readonly label: string; readonly detail: ReactNode; readonly state: ProgressItemState } {
   const observed = [...recoverySteps].reverse().find((step) => {
     const normalized = step.name.toLowerCase().replace(/[^a-z0-9]/g, '');
     return names.some((name) => normalized.includes(name.replace(/[^a-z0-9]/g, '')));
@@ -1080,9 +1233,20 @@ function fundingRouteStep(
   return {
     label,
     detail:
-      observed.transactionHash === undefined
-        ? `Server state: ${observed.state}.`
-        : `Server state: ${observed.state} · ${shortenAddress(observed.transactionHash)}.`,
+      observed.transactionHash === undefined ? (
+        `Server state: ${observed.state}.`
+      ) : (
+        <span className="inline-flex flex-wrap items-center gap-xs">
+          <span>{`Server state: ${observed.state} ·`}</span>
+          <CryptoValue
+            {...(observed.network === undefined
+              ? { kind: 'copy' as const }
+              : { kind: 'transaction' as const, network: observed.network })}
+            label={`${label} transaction hash`}
+            value={observed.transactionHash}
+          />
+        </span>
+      ),
     state:
       observed.state === 'success'
         ? 'complete'
@@ -1090,8 +1254,4 @@ function fundingRouteStep(
           ? 'active'
           : 'active',
   };
-}
-
-function truncateEvidence(value: string): string {
-  return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-8)}`;
 }

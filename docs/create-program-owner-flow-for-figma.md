@@ -1490,6 +1490,9 @@ Content:
 - Reusable Scope cards, mỗi card hiển thị:
   - Asset name.
   - URL hoặc shortened contract address.
+  - Contract address is a shortened link to the ArcScan address page with a separate
+    copy action. A normal website URL remains a normal external URL link and is never treated as a
+    blockchain address.
   - In scope / Out of scope badge.
   - Description preview.
   - `Edit` và overflow action `Remove`.
@@ -2290,6 +2293,12 @@ Recovery hiển thị như state của chính CP-12, không tạo screen/route h
   thì fail closed và không hiển thị success/publish handoff.
 - Source breakdown hiển thị Ethereum Sepolia/Arbitrum Sepolia/Base Sepolia/Arc Testnet allocations
   đã dùng; đây là off-chain verified evidence, không phải contract state.
+- Crypto values in CP-10 through CP-13 (contract, escrow, token, fee recipient, owner recipient
+  and wallet addresses) are rendered as shortened ArcScan address links with an explicit
+  copy action. Arc transaction hashes use an ArcScan transaction link plus copy; source-chain
+  transaction hashes use their own explorer when known. Circle operation IDs, block hashes/numbers,
+  artifact checksums and program keys remain copy-only evidence. Links are never rendered for ordinary
+  program URLs, and values remain server-derived/read-only.
 - Hiển thị collateralization:
   - `Ready` khi `available_pool = canonical Arc USDC balance - totalApprovedOutstanding` và
     `available_pool >= max_bounty`.
