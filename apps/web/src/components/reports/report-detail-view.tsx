@@ -149,6 +149,7 @@ function PaidSettlementSummary({ proof }: { readonly proof: ReportPaidSettlement
 
 export function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
   const attachment = report.attachments[0];
+  const paidSettlementProof = report.status === 'paid' ? report.paidSettlementProof : undefined;
 
   return (
     <Card className="h-fit gap-xl" padding="lg">
@@ -189,14 +190,14 @@ export function DisclosureSummary({ report }: { readonly report: ReportDetail })
           )}
         </RailRow>
         <RailRow label="Visibility">Authorized reviewers</RailRow>
-        {report.approvedReward === undefined ? null : (
+        {paidSettlementProof === undefined && report.approvedReward !== undefined ? (
           <RailRow label="Approved reward">{`${report.approvedReward} USDC`}</RailRow>
-        )}
-        {report.status !== 'paid' || report.paidSettlementProof === undefined ? null : (
+        ) : null}
+        {paidSettlementProof === undefined ? null : (
           <div className="sm:col-span-2">
             <dt className="sr-only">Reward payment</dt>
             <dd>
-              <PaidSettlementSummary proof={report.paidSettlementProof} />
+              <PaidSettlementSummary proof={paidSettlementProof} />
             </dd>
           </div>
         )}

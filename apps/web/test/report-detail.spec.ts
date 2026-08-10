@@ -127,6 +127,7 @@ describe('SR-12 report detail', () => {
     expect(markup).toContain('Reward payment verified');
     expect(markup).toContain('250 USDC');
     expect(markup).toContain('Transaction hash');
+    expect(markup).not.toContain('Approved reward');
     expect(markup).toContain(`href="https://testnet.arcscan.app/tx/0x${'a'.repeat(64)}"`);
     expect(markup).not.toContain('Chain / token');
     expect(markup).not.toContain('Block');

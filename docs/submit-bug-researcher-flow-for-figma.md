@@ -928,7 +928,7 @@ Payout wallet card:
 summary` render settlement proof server-derived: amount, masked recipient và payout transaction hash
   với copy + ArcScan transaction link. Researcher xem chain, block và settlement metadata trên
   explorer; không hiển thị proof cho tới khi payout operation đã confirmed và không biến
-  `approvedReward` thành transaction evidence.
+  `approvedReward` thành transaction evidence hoặc lặp lại dòng Approved reward trong paid box.
 - `Edit wallet` opens the same verified-wallet selector and can add/verify another wallet. The action
   is enabled only when the report detail returns `canChangePayoutWallet = true`; the browser does not
   infer capability from status alone.

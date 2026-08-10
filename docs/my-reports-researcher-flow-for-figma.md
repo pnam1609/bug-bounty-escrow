@@ -190,7 +190,8 @@ Nếu `finalSeverity` tồn tại, accessible label hoặc tooltip phải nói �
 
 ### Reward
 
-- Hiển thị `approvedReward` khi giá trị tồn tại.
+- Hiển thị `approvedReward` khi giá trị tồn tại và chưa có paid settlement proof; khi report đã
+  paid, dùng amount trong box `Reward payment` để tránh lặp lại `Approved reward`.
 - Token thanh toán của sản phẩm hiện là USDC.
 - Nếu chưa có `approvedReward`, hiển thị em dash `—`; không hiển thị `0 USDC`.
 - `paid` chỉ được coi là đã thanh toán khi report status là `paid` và dữ liệu settlement hợp lệ.

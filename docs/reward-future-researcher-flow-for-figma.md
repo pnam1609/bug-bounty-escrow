@@ -422,7 +422,8 @@ For now, follow rewards in My reports
 Body:
 
 ```text
-Approved reward and paid timestamps remain visible on each report detail.
+Approved reward remains visible until payment; after a paid settlement is verified, the report
+detail uses the amount in the Reward payment box instead of repeating Approved reward.
 ```
 
 Primary action:
