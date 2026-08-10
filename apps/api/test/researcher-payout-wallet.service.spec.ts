@@ -10,7 +10,7 @@ import {
 const RESEARCHER_ID = '10000000-0000-4000-8000-000000000001';
 const CHALLENGE_ID = '20000000-0000-4000-8000-000000000001';
 const WALLET_ID = '30000000-0000-4000-8000-000000000001';
-const issuedAt = '2026-08-10T10:00:00.000Z';
+const issuedAt = '2099-08-10T10:00:00.000Z';
 const expiresAt = '2099-08-10T10:05:00.000Z';
 const account = privateKeyToAccount(`0x${'1'.padStart(64, '0')}`);
 const otherAccount = privateKeyToAccount(`0x${'2'.padStart(64, '0')}`);
@@ -123,6 +123,66 @@ describe('researcher payout-wallet verification service', () => {
         verifiedMessageHash: keccak256(stringToHex(message)),
       }),
     );
+  });
+
+  it('accepts PostgreSQL timestamptz serialization that represents the signed UTC instants', async () => {
+    const canonicalIssuedAt = '2099-08-10T10:00:00.000Z';
+    const canonicalExpiresAt = '2099-08-10T10:05:00.000Z';
+    const message = buildResearcherPayoutWalletMessage({
+      domain: 'bountyescrow.xyz',
+      uri: 'https://bountyescrow.xyz/rewards/wallets',
+      address: account.address,
+      nonce: '0123456789abcdef0123456789abcdef',
+      issuedAt: canonicalIssuedAt,
+      expiresAt: canonicalExpiresAt,
+      challengeId: CHALLENGE_ID,
+    });
+    const completePayoutWalletVerification = vi.fn().mockResolvedValue(WALLET_ID);
+    const service = serviceWith({
+      findPayoutWalletChallenge: vi.fn().mockResolvedValue({
+        ...challenge(message),
+        issued_at: '2099-08-10T10:00:00+00:00',
+        expires_at: '2099-08-10T10:05:00+00:00',
+      }),
+      completePayoutWalletVerification,
+      findVerifiedPayoutWallet: vi.fn().mockResolvedValue(wallet()),
+    });
+
+    await expect(
+      service.verifyPayoutWallet(principal, CHALLENGE_ID, {
+        signature: await account.signMessage({ message }),
+      }),
+    ).resolves.toEqual(wallet());
+    expect(completePayoutWalletVerification).toHaveBeenCalledWith(
+      expect.objectContaining({ verifiedMessageHash: keccak256(stringToHex(message)) }),
+    );
+  });
+
+  it('fails closed when persisted challenge timestamps are malformed even if the message is signed', async () => {
+    const message = buildResearcherPayoutWalletMessage({
+      domain: 'bountyescrow.xyz',
+      uri: 'https://bountyescrow.xyz/rewards/wallets',
+      address: account.address,
+      nonce: '0123456789abcdef0123456789abcdef',
+      issuedAt: 'not-a-timestamp',
+      expiresAt,
+      challengeId: CHALLENGE_ID,
+    });
+    const completePayoutWalletVerification = vi.fn();
+    const service = serviceWith({
+      findPayoutWalletChallenge: vi.fn().mockResolvedValue({
+        ...challenge(message),
+        issued_at: 'not-a-timestamp',
+      }),
+      completePayoutWalletVerification,
+    });
+
+    await expect(
+      service.verifyPayoutWallet(principal, CHALLENGE_ID, {
+        signature: await account.signMessage({ message }),
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(completePayoutWalletVerification).not.toHaveBeenCalled();
   });
 
   it('rejects a valid signature from the wrong connected account without consuming the nonce', async () => {

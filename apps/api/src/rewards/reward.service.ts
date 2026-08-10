@@ -40,6 +40,13 @@ function walletVerificationLocation(webAppOrigin: string): { domain: string; uri
   };
 }
 
+function canonicalUtcTimestamp(value: string): { iso: string; epochMs: number } | null {
+  const epochMs = Date.parse(value);
+  if (!Number.isFinite(epochMs)) return null;
+
+  return { iso: new Date(epochMs).toISOString(), epochMs };
+}
+
 export function buildResearcherPayoutWalletMessage(input: {
   domain: string;
   uri: string;
@@ -211,7 +218,19 @@ export class RewardService {
         'This wallet verification request is no longer active.',
       );
     }
-    if (Date.parse(challenge.expires_at) <= Date.now()) {
+    const canonicalIssuedAt = canonicalUtcTimestamp(challenge.issued_at);
+    const canonicalExpiresAt = canonicalUtcTimestamp(challenge.expires_at);
+    if (
+      canonicalIssuedAt === null ||
+      canonicalExpiresAt === null ||
+      canonicalExpiresAt.epochMs - canonicalIssuedAt.epochMs !== WALLET_CHALLENGE_TTL_MS
+    ) {
+      throw this.walletConflict(
+        'wallet_verification_challenge_mismatch',
+        'The wallet verification request does not match this application.',
+      );
+    }
+    if (canonicalExpiresAt.epochMs <= Date.now()) {
       throw this.walletConflict(
         'wallet_verification_challenge_expired',
         'This wallet verification request has expired.',
@@ -220,22 +239,22 @@ export class RewardService {
 
     const { domain, uri } = walletVerificationLocation(this.config.WEB_APP_ORIGIN);
     const expectedMessage = buildResearcherPayoutWalletMessage({
-      domain: challenge.domain,
-      uri: challenge.uri,
+      domain,
+      uri,
       address: challenge.address,
       nonce: challenge.nonce,
-      issuedAt: challenge.issued_at,
-      expiresAt: challenge.expires_at,
+      issuedAt: canonicalIssuedAt.iso,
+      expiresAt: canonicalExpiresAt.iso,
       challengeId: challenge.id,
     });
-    const expectedMessageHash = keccak256(stringToHex(expectedMessage));
+    const signedMessageHash = keccak256(stringToHex(challenge.message));
     if (
       Number(challenge.chain_id) !== ARC_TESTNET_CHAIN_ID ||
       challenge.domain !== domain ||
       challenge.uri !== uri ||
       challenge.purpose !== WALLET_CHALLENGE_PURPOSE ||
       challenge.message !== expectedMessage ||
-      challenge.message_hash.toLowerCase() !== expectedMessageHash.toLowerCase()
+      challenge.message_hash.toLowerCase() !== signedMessageHash.toLowerCase()
     ) {
       throw this.walletConflict(
         'wallet_verification_challenge_mismatch',
@@ -270,7 +289,7 @@ export class RewardService {
       researcherId: principal.userId,
       challengeId,
       verifiedAddress: recoveredAddress,
-      verifiedMessageHash: expectedMessageHash,
+      verifiedMessageHash: signedMessageHash,
       ...(input.label === undefined ? {} : { label: input.label }),
     });
     const wallet = await this.repository.findVerifiedPayoutWallet(principal.userId, walletId);
