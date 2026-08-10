@@ -1256,16 +1256,24 @@ giữ product promise đơn giản.
 ### Desktop shell
 
 - Viewport: `1440 × 1200` cho các màn desktop dài trong flow create program.
-- Header cao `80px`; sidebar và workspace content cao `1120px` để toàn bộ form/action phía dưới luôn nằm trong frame.
-- Header dùng Owner workspace navigation hiện có.
-- Sidebar active item: `Programs`.
+- Header cao `80px`, trải toàn chiều rộng; không render sidebar/workspace rail.
+- Owner navigation nằm trong account dropdown dùng chung trên mọi owner route: `My programs`,
+  `Reports / review`, `Transactions · Future` (disabled), `Account settings` và `Log out`.
+- Header chỉ owner mới có action `Open workspace`; không lặp lại các destination của dropdown bằng
+  một rail hoặc một navigation thứ hai.
 - Main content max width: `1120px`.
 - Wizard gồm:
   - Breadcrumb: `Programs / Create program`.
   - Page title và `Draft` badge.
   - Horizontal stepper có node tròn, connector và trạng thái completed/current/upcoming.
   - Form card.
-  - Sticky action footer bên trong form card.
+- Sticky action footer bên trong form card.
+
+App shell requirement (consolidation): create-program screens phải dùng cùng owner header và short
+footer như owner report screens; landing page là ngoại lệ duy nhất dùng marketing footer. Notion
+ticket ID/status cho shell consolidation cần được xác nhận từ Delivery Backlog (không suy đoán khi
+chưa có live Notion access). Acceptance: không có owner sidebar, dropdown item order/copy ổn định ở
+tất cả step, và researcher không thể thấy hoặc dùng owner navigation.
 
 ### Step labels
 

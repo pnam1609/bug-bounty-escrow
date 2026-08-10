@@ -12,6 +12,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { FORBIDDEN_TITLE, forbiddenMessageForPath } from '@/components/role-guard-model';
 import { safeReturnPath } from '@/lib/api-client';
 import { useAuth } from '@/providers/auth-provider';
+import { AppFooter } from '@/components/programs/researcher-shell';
 
 /*
  * ACCESS-01 · Forbidden (82:414).
@@ -34,6 +35,7 @@ function ForbiddenFrame({ children }: { readonly children: ReactNode }) {
         {/* 620px content column, node 82:415. */}
         <div className="w-full max-w-[620px]">{children}</div>
       </div>
+      <AppFooter />
     </div>
   );
 }

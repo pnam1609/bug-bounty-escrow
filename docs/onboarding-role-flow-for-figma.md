@@ -61,14 +61,14 @@ click được.
 
 ## 3. Quy tắc hệ thống mà thiết kế phải phản ánh
 
-| Trạng thái user | Trang được phép vào | Kết quả mặc định |
-| --- | --- | --- |
-| Chưa đăng nhập | Public program pages, login, register | Không thấy dashboard riêng |
-| Đã xác thực, chưa onboarding | Onboarding | Mọi protected route redirect về `/onboarding` |
-| Owner đã onboarding | Owner workspace và public pages | Redirect về `/owner/programs` |
-| Researcher đã onboarding | Researcher workspace và public pages | Redirect về `/programs` hoặc `/reports` tùy entry point |
-| Reviewer được cấp quyền | Review workspace và public pages | Redirect về `/review` |
-| Sai role cho protected route | Không hiển thị dữ liệu trang | Hiển thị forbidden state hoặc redirect an toàn |
+| Trạng thái user              | Trang được phép vào                   | Kết quả mặc định                                        |
+| ---------------------------- | ------------------------------------- | ------------------------------------------------------- |
+| Chưa đăng nhập               | Public program pages, login, register | Không thấy dashboard riêng                              |
+| Đã xác thực, chưa onboarding | Onboarding                            | Mọi protected route redirect về `/onboarding`           |
+| Owner đã onboarding          | Owner workspace và public pages       | Redirect về `/owner/programs`                           |
+| Researcher đã onboarding     | Researcher workspace và public pages  | Redirect về `/programs` hoặc `/reports` tùy entry point |
+| Reviewer được cấp quyền      | Review workspace và public pages      | Redirect về `/review`                                   |
+| Sai role cho protected route | Không hiển thị dữ liệu trang          | Hiển thị forbidden state hoặc redirect an toàn          |
 
 Các nguyên tắc bắt buộc:
 
@@ -108,22 +108,22 @@ flowchart TD
 
 Thiết kế desktop và responsive mobile web cho các frame sau.
 
-| ID | Screen | Route gợi ý | Mục đích |
-| --- | --- | --- | --- |
-| AUTH-01 | Public entry | `/programs` | Entry point trước đăng ký |
-| AUTH-02 | Register | `/register` | Tạo account bằng email/password |
-| AUTH-03 | Check email | `/register/check-email` | Chờ xác nhận email nếu Supabase yêu cầu |
-| AUTH-04 | Login | `/login` | Đăng nhập và tiếp tục hành trình trước đó |
-| ONB-01 | Onboarding intro | `/onboarding` | Giải thích lựa chọn account type |
-| ONB-02 | Select account type | `/onboarding` | Chọn owner hoặc researcher |
-| ONB-03 | Profile details | `/onboarding` | Nhập display name |
-| ONB-04 | Confirm selection | `/onboarding` | Review trước khi lưu lựa chọn một lần |
-| ONB-05 | Submitting | `/onboarding` | Ngăn double submit và báo đang xử lý |
-| ONB-06 | Conflict/error | `/onboarding` | Xử lý retry, conflict hoặc lỗi mạng |
-| OWNER-01 | Owner landing | `/owner/programs` | Điểm đến sau onboarding owner |
-| RES-01 | Researcher landing | `/programs` | Điểm đến sau onboarding researcher |
-| ACCESS-01 | Forbidden | N/A | Wrong-role protected route |
-| PROFILE-01 | Account settings | Route tương lai | Hiển thị role read-only trong MVP |
+| ID         | Screen              | Route gợi ý             | Mục đích                                  |
+| ---------- | ------------------- | ----------------------- | ----------------------------------------- |
+| AUTH-01    | Public entry        | `/programs`             | Entry point trước đăng ký                 |
+| AUTH-02    | Register            | `/register`             | Tạo account bằng email/password           |
+| AUTH-03    | Check email         | `/register/check-email` | Chờ xác nhận email nếu Supabase yêu cầu   |
+| AUTH-04    | Login               | `/login`                | Đăng nhập và tiếp tục hành trình trước đó |
+| ONB-01     | Onboarding intro    | `/onboarding`           | Giải thích lựa chọn account type          |
+| ONB-02     | Select account type | `/onboarding`           | Chọn owner hoặc researcher                |
+| ONB-03     | Profile details     | `/onboarding`           | Nhập display name                         |
+| ONB-04     | Confirm selection   | `/onboarding`           | Review trước khi lưu lựa chọn một lần     |
+| ONB-05     | Submitting          | `/onboarding`           | Ngăn double submit và báo đang xử lý      |
+| ONB-06     | Conflict/error      | `/onboarding`           | Xử lý retry, conflict hoặc lỗi mạng       |
+| OWNER-01   | Owner landing       | `/owner/programs`       | Điểm đến sau onboarding owner             |
+| RES-01     | Researcher landing  | `/programs`             | Điểm đến sau onboarding researcher        |
+| ACCESS-01  | Forbidden           | N/A                     | Wrong-role protected route                |
+| PROFILE-01 | Account settings    | Route tương lai         | Hiển thị role read-only trong MVP         |
 
 Nếu prototype dùng multi-step onboarding, giữ toàn bộ dữ liệu đã nhập khi back.
 Nếu dùng single-page onboarding, vẫn phải có bước xác nhận rõ ràng trước khi lưu.
@@ -196,7 +196,7 @@ Suggested copy:
 - Eyebrow: `One last step`
 - Heading: `How will you participate?`
 - Body: `Choose the workspace that matches what you want to do first. Your
-  account type cannot be changed by yourself after setup.`
+account type cannot be changed by yourself after setup.`
 
 Không nhắc blockchain, wallet hoặc reviewer tại intro nếu chưa cần thiết.
 
@@ -208,7 +208,7 @@ Hiển thị hai selection cards, không dùng dropdown cho thiết kế đích.
 
 - Title: `Security researcher`
 - Description: `Find vulnerabilities, submit private reports, respond to review
-  requests, and track rewards.`
+requests, and track rewards.`
 - Icon gợi ý: shield/search.
 - Value gửi API: `researcher`.
 
@@ -216,7 +216,7 @@ Hiển thị hai selection cards, không dùng dropdown cho thiết kế đích.
 
 - Title: `Program owner`
 - Description: `Publish bounty programs, define scopes and rewards, review
-  reports, and fund payouts.`
+reports, and fund payouts.`
 - Icon gợi ý: briefcase/program.
 - Value gửi API: `owner`.
 
@@ -296,15 +296,15 @@ Success routing:
 
 ### 6.8. Error and recovery
 
-| Case | UI behavior | Suggested message/action |
-| --- | --- | --- |
-| Validation error | Focus field/card đầu tiên lỗi | `Choose an account type and enter a display name.` |
-| Session hết hạn | Không submit lại vô hạn | `Your session expired. Sign in again to continue.` |
-| Network error | Giữ nguyên form | `We couldn't save your profile. Try again.` |
-| Same-data retry | Xem như success | Route theo role trả về từ API |
-| Conflict vì onboarding đã hoàn tất với dữ liệu khác | Không cho ghi đè | `Your account has already been set up. Continue to your workspace.` |
-| Role trả về không khớp lựa chọn do trạng thái mới hơn | Tin dữ liệu server | Route theo profile server, không theo state local |
-| Unauthorized/forged reviewer | Generic forbidden/validation | Không hiển thị reviewer option hay hướng dẫn tự sửa request |
+| Case                                                  | UI behavior                   | Suggested message/action                                            |
+| ----------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------- |
+| Validation error                                      | Focus field/card đầu tiên lỗi | `Choose an account type and enter a display name.`                  |
+| Session hết hạn                                       | Không submit lại vô hạn       | `Your session expired. Sign in again to continue.`                  |
+| Network error                                         | Giữ nguyên form               | `We couldn't save your profile. Try again.`                         |
+| Same-data retry                                       | Xem như success               | Route theo role trả về từ API                                       |
+| Conflict vì onboarding đã hoàn tất với dữ liệu khác   | Không cho ghi đè              | `Your account has already been set up. Continue to your workspace.` |
+| Role trả về không khớp lựa chọn do trạng thái mới hơn | Tin dữ liệu server            | Route theo profile server, không theo state local                   |
+| Unauthorized/forged reviewer                          | Generic forbidden/validation  | Không hiển thị reviewer option hay hướng dẫn tự sửa request         |
 
 Ở conflict state, CTA chính là `Continue to workspace`; CTA phụ có thể là
 `Contact support`.
@@ -331,35 +331,44 @@ Figma cần thể hiện ít nhất:
 
 ## 7. Navigation sau onboarding
 
+### Quy tắc app shell dùng chung
+
+Mọi màn hình đã đăng nhập dùng một website header duy nhất, trải toàn chiều rộng; không render
+left sidebar/workspace rail cho owner, researcher hoặc reviewer. Nội dung của account dropdown được
+quyết định bởi role từ `GET /api/me`, không suy ra từ route hiện tại và không thay đổi giữa các
+màn hình:
+
+- Researcher: `Browse programs` (`/programs`), `My reports` (`/reports`), `Rewards` (`/rewards`),
+  `Account settings` (`/account/settings`) và `Log out`.
+- Owner: `My programs` (`/owner/programs`), `Reports / review` (`/review`),
+  `Transactions · Future` (disabled), `Account settings` và `Log out`.
+- Reviewer: `Review inbox` (`/review`), `Account settings` và `Log out`; không hiển thị owner-only
+  destinations.
+
+Chỉ owner có action `Open workspace` trong header; researcher không có action này. Các role pill,
+avatar/name và dropdown trigger giữ cùng vị trí/kích thước ở mọi route. Mọi app screen dùng short
+footer chung; landing page là ngoại lệ và dùng marketing footer riêng.
+
+Requirement/acceptance mapping: shell/navigation consolidation (Notion ticket ID cần được xác nhận
+từ Delivery Backlog; trạng thái không được suy đoán khi chưa có live Notion access). Acceptance:
+role menu ổn định trên mọi route, không có sidebar duplicate, không lộ owner links cho researcher và
+researcher không có `Open workspace`.
+
 ### Owner workspace
 
-Primary navigation:
-
-- Programs.
-- Reports/Review inbox.
-- Transactions hoặc funding khi feature được triển khai.
-- Account menu.
+Primary navigation nằm trong account dropdown theo quy tắc app shell dùng chung. Không có sidebar.
 
 Primary CTA: `Create program`.
 
 ### Researcher workspace
 
-Primary navigation:
-
-- Browse programs.
-- My reports.
-- Rewards khi feature được triển khai.
-- Account menu.
+Primary navigation nằm trong account dropdown theo quy tắc app shell dùng chung. Không có sidebar.
 
 Primary CTA: `Submit report`.
 
 ### Reviewer workspace
 
-Primary navigation:
-
-- Review inbox.
-- Assigned programs.
-- Account menu.
+Primary navigation nằm trong account dropdown theo quy tắc app shell dùng chung. Không có sidebar.
 
 Reviewer UI không được xuất hiện như một lựa chọn onboarding.
 

@@ -49,13 +49,13 @@ Nội dung report là dữ liệu riêng tư. My Reports không phải trang pub
 
 ### Routes
 
-| Mục đích | Route |
-| --- | --- |
-| My Reports | `/reports` |
-| Private report detail | `/reports/:id` |
-| Submit report | `/reports/new?programSlug=:programSlug` |
-| Browse Programs | `/programs` |
-| Program detail | `/programs/:slug` |
+| Mục đích              | Route                                   |
+| --------------------- | --------------------------------------- |
+| My Reports            | `/reports`                              |
+| Private report detail | `/reports/:id`                          |
+| Submit report         | `/reports/new?programSlug=:programSlug` |
+| Browse Programs       | `/programs`                             |
+| Program detail        | `/programs/:slug`                       |
 
 ### API
 
@@ -68,14 +68,14 @@ GET /api/reports/:id
 
 Query hiện có:
 
-| Query | Kiểu | Ý nghĩa |
-| --- | --- | --- |
-| `page` | positive integer | Trang hiện tại, mặc định `1` |
-| `limit` | positive integer | Số item mỗi trang, mặc định `20`, tối đa `100` |
-| `programId` | UUID | Lọc theo program |
-| `researcherId` | UUID | Lọc theo researcher; server vẫn phải áp quyền |
-| `status` | report status | Lọc một status chính xác |
-| `severity` | severity | Hiện lọc theo `proposed_severity` |
+| Query          | Kiểu             | Ý nghĩa                                        |
+| -------------- | ---------------- | ---------------------------------------------- |
+| `page`         | positive integer | Trang hiện tại, mặc định `1`                   |
+| `limit`        | positive integer | Số item mỗi trang, mặc định `20`, tối đa `100` |
+| `programId`    | UUID             | Lọc theo program                               |
+| `researcherId` | UUID             | Lọc theo researcher; server vẫn phải áp quyền  |
+| `status`       | report status    | Lọc một status chính xác                       |
+| `severity`     | severity         | Hiện lọc theo `proposed_severity`              |
 
 API hiện chưa hỗ trợ:
 
@@ -103,13 +103,13 @@ File:
 
 Page: `researcher`
 
-| ID | View | Figma node |
-| --- | --- | --- |
-| MR-01 | My Reports — All | [281:1876](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1876) |
+| ID    | View                           | Figma node                                                                                                                        |
+| ----- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| MR-01 | My Reports — All               | [281:1876](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1876) |
 | MR-02 | My Reports — Needs information | [281:1900](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1900) |
-| MR-03 | My Reports — Empty | [281:1924](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1924) |
-| SR-15 | Submitted report detail | [272:1882](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=272-1882) |
-| RS-00 | Browse bounties | [116:4](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=116-4) |
+| MR-03 | My Reports — Empty             | [281:1924](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=281-1924) |
+| SR-15 | Submitted report detail        | [272:1882](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=272-1882) |
+| RS-00 | Browse bounties                | [116:4](https://www.figma.com/design/Zdx9FTCAedUZ5R3phehFAp/Bug-Bounty-Escrow-%E2%80%94-Dark-Desktop-Preview?node-id=116-4)       |
 
 Các giá trị tên program, report, reward, timestamp và metrics trong Figma là sample data để review visual; không phải production constants.
 
@@ -183,7 +183,7 @@ informational
 UI hiển thị:
 
 ```ts
-displaySeverity = finalSeverity ?? proposedSeverity
+displaySeverity = finalSeverity ?? proposedSeverity;
 ```
 
 Nếu `finalSeverity` tồn tại, accessible label hoặc tooltip phải nói đây là final severity. Nếu chưa tồn tại, phải nói đây là proposed severity. Không được làm researcher hiểu nhầm proposed severity đã được program xác nhận.
@@ -205,18 +205,18 @@ Nếu `finalSeverity` tồn tại, accessible label hoặc tooltip phải nói �
 
 ## 6. Status presentation
 
-| Status | Label UI | Nhóm | Tone gợi ý | Hành động chính |
-| --- | --- | --- | --- | --- |
-| `draft` | Draft | Draft | Neutral | Continue editing |
-| `submitted` | Submitted | Under review | Info | View report |
-| `triaged` | Triaged | Under review | Info | View report |
-| `needs_information` | Needs information | Action required | Warning | Add information |
-| `rejected` | Rejected | Closed | Destructive | View decision |
-| `duplicate` | Duplicate | Closed | Neutral | View duplicate reference |
-| `validated` | Validated | Decision | Success | View validation |
-| `reward_approved` | Reward approved | Settlement | Success | View reward |
-| `payment_pending` | Payment pending | Settlement | Warning/Info | Track payment |
-| `paid` | Paid | Completed | Success | View payment |
+| Status              | Label UI          | Nhóm            | Tone gợi ý   | Hành động chính          |
+| ------------------- | ----------------- | --------------- | ------------ | ------------------------ |
+| `draft`             | Draft             | Draft           | Neutral      | Continue editing         |
+| `submitted`         | Submitted         | Under review    | Info         | View report              |
+| `triaged`           | Triaged           | Under review    | Info         | View report              |
+| `needs_information` | Needs information | Action required | Warning      | Add information          |
+| `rejected`          | Rejected          | Closed          | Destructive  | View decision            |
+| `duplicate`         | Duplicate         | Closed          | Neutral      | View duplicate reference |
+| `validated`         | Validated         | Decision        | Success      | View validation          |
+| `reward_approved`   | Reward approved   | Settlement      | Success      | View reward              |
+| `payment_pending`   | Payment pending   | Settlement      | Warning/Info | Track payment            |
+| `paid`              | Paid              | Completed       | Success      | View payment             |
 
 Badge color chỉ là hỗ trợ thị giác. Text label luôn bắt buộc.
 
@@ -238,6 +238,16 @@ Account menu:
 
 - `My reports` mở `/reports`.
 - `Browse programs` mở `/programs`.
+- Dùng cùng researcher account dropdown trên mọi màn hình: `Browse programs`, `My reports`,
+  `Rewards`, `Account settings` và `Log out`.
+- Không render owner sidebar hoặc duplicate navigation tabs; researcher không có `Open workspace`.
+- Mọi researcher screen dùng short footer chung, kể cả danh sách có paging/infinite loading; landing
+  page là ngoại lệ dùng marketing footer.
+
+App-shell requirement/acceptance: role menu phải được lấy từ server profile và không thay đổi theo
+route. Notion shell ticket ID/status cần được xác nhận từ Delivery Backlog; không suy đoán trạng thái
+khi chưa có live Notion access. Acceptance gồm menu item order/copy ổn định, không có sidebar và
+không lộ owner-only links cho researcher.
 
 Report detail:
 
@@ -249,8 +259,8 @@ Report detail:
 ### Header
 
 - Dùng Researcher header của BBE Design System.
-- Active navigation: `My reports`.
-- Không dùng owner workspace navigation.
+- Không dùng left sidebar hoặc fixed navigation tabs; account dropdown là navigation chính.
+- Active navigation state (nếu có) chỉ đánh dấu `My reports`; không hiện owner workspace navigation.
 
 ### Page heading
 
@@ -309,15 +319,15 @@ Quy tắc:
 
 Columns:
 
-| Column | Data | Quy tắc |
-| --- | --- | --- |
-| Report | Reference + `title` | Title tối đa 2 dòng; không lộ description |
-| Program | `programName` | Link tới `/programs/:programSlug` |
-| Severity | `finalSeverity ?? proposedSeverity` | Badge có label accessible |
-| Status | `status` | Dùng mapping ở mục 6 |
-| Reward | `approvedReward` | USDC hoặc `—` |
-| Updated | `updatedAt` | Relative time + exact datetime accessible |
-| Action | Chevron | Toàn row mở `/reports/:id` |
+| Column   | Data                                | Quy tắc                                   |
+| -------- | ----------------------------------- | ----------------------------------------- |
+| Report   | Reference + `title`                 | Title tối đa 2 dòng; không lộ description |
+| Program  | `programName`                       | Link tới `/programs/:programSlug`         |
+| Severity | `finalSeverity ?? proposedSeverity` | Badge có label accessible                 |
+| Status   | `status`                            | Dùng mapping ở mục 6                      |
+| Reward   | `approvedReward`                    | USDC hoặc `—`                             |
+| Updated  | `updatedAt`                         | Relative time + exact datetime accessible |
+| Action   | Chevron                             | Toàn row mở `/reports/:id`                |
 
 Mobile action không nằm trong scope hiện tại, nhưng desktop row vẫn phải hỗ trợ keyboard focus và Enter.
 
@@ -608,19 +618,19 @@ Khi thiết kế tablet/mobile sau:
 
 Figma phải giữ cấu trúc gần với implementation:
 
-| Figma pattern | shadcn/ui |
-| --- | --- |
-| Primary/secondary action | `Button` |
-| Program/status/severity filter | `Select` |
-| Status/severity token | `Badge` |
-| Metrics | `Card` |
-| Report list | `Table` |
-| Needs-information notice | `Alert` |
-| Account/filtered empty | reusable empty-state composition |
-| Pagination | `Button` + pagination composition |
-| Loading | `Skeleton` |
-| Error feedback | `Alert` |
-| Relative timestamp detail | `Tooltip` where useful |
+| Figma pattern                  | shadcn/ui                         |
+| ------------------------------ | --------------------------------- |
+| Primary/secondary action       | `Button`                          |
+| Program/status/severity filter | `Select`                          |
+| Status/severity token          | `Badge`                           |
+| Metrics                        | `Card`                            |
+| Report list                    | `Table`                           |
+| Needs-information notice       | `Alert`                           |
+| Account/filtered empty         | reusable empty-state composition  |
+| Pagination                     | `Button` + pagination composition |
+| Loading                        | `Skeleton`                        |
+| Error feedback                 | `Alert`                           |
+| Relative timestamp detail      | `Tooltip` where useful            |
 
 Tailwind conventions:
 

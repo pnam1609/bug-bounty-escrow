@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { ReactNode, Ref } from 'react';
 
 import { SUPPORT_HREF } from './role-options';
+import { AppFooter } from '@/components/programs/researcher-shell';
 
 /*
  * Chrome for every ONB-* desktop frame.
@@ -151,6 +152,7 @@ export function OnboardingShell({
           </div>
         </div>
       </div>
+      <AppFooter />
     </div>
   );
 }

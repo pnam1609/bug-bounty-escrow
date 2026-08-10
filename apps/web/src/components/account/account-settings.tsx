@@ -1,30 +1,12 @@
 'use client';
 
 import { updateProfileResponseSchema, type CurrentUser } from '@bug-bounty-escrow/shared';
-import {
-  Button,
-  Callout,
-  Card,
-  CardHeader,
-  CardTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  Field,
-  Input,
-  SiteBrand,
-  SiteFooter,
-  SiteHeader,
-} from '@bug-bounty-escrow/ui';
+import { Button, Callout, Card, CardHeader, CardTitle, Field, Input } from '@bug-bounty-escrow/ui';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 
-import { LogoutMenuItem, useLogoutAction } from './logout-action';
+import { useLogoutAction } from './logout-action';
 import {
   ACCOUNT_SETTINGS_COPY as COPY,
   ACCOUNT_SETTINGS_PATH,
@@ -42,11 +24,10 @@ import {
   ROLE_LANDING_PATHS,
   SUPPORT_HREF,
 } from '@/components/onboarding/role-options';
-import { ResearcherHeader } from '@/components/programs/researcher-shell';
+import { AppFooter, AppHeader } from '@/components/programs/researcher-shell';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { apiRequest, safeReturnPath } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
-import { getSiteCopyright } from '@/lib/site-footer';
 import { useAuth } from '@/providers/auth-provider';
 
 /*
@@ -81,8 +62,8 @@ const SIGN_IN_HREF = withReturnTo('/login', safeReturnPath(ACCOUNT_SETTINGS_PATH
 
 /**
  * §5.1/§5.3: the website header with no sidebar, and a `1104px` content column centred beneath it.
- * Researchers reuse the BT-09 header/menu directly. The route also admits owner/reviewer accounts,
- * whose workspace destinations remain role-specific while sharing the same logout action.
+ * Every role reuses the shared app header/menu. The route also admits owner/reviewer accounts,
+ * whose destinations remain role-specific through the centralized role menu.
  *
  * §8 ACC-00: with no confirmed profile the header is the safe shell — brand and footer only. No
  * initials, no name and no role-specific destination, so a previous visitor's identity can never be
@@ -95,81 +76,19 @@ function AccountShell({
   readonly children: ReactNode;
   readonly user?: CurrentUser | undefined;
 }) {
-  const header =
-    user?.role === 'researcher' ? (
-      <ResearcherHeader />
-    ) : (
-      <SiteHeader
-        actions={user === undefined ? null : <WorkspaceAccountMenu user={user} />}
-        brand={
-          <Link
-            className="rounded-md"
-            href={user === undefined ? PROGRAMS_PATH : ROLE_LANDING_PATHS[user.role]}
-          >
-            <SiteBrand />
-          </Link>
-        }
-      />
-    );
-
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      {header}
+      <AppHeader
+        brandHref={user === undefined ? PROGRAMS_PATH : ROLE_LANDING_PATHS[user.role]}
+        showAccount={user !== undefined}
+      />
       <main className="flex-1">
         <div className="mx-auto w-full max-w-[1104px] px-lg py-2xl md:px-2xl lg:px-[64px]">
           {children}
         </div>
       </main>
-      <SiteFooter copyright={getSiteCopyright()} variant="short" />
+      <AppFooter />
     </div>
-  );
-}
-
-/**
- * §5.2. Identity summary, the viewer's own destinations, a separator, then `Log out`. Radix
- * supplies `aria-haspopup`, the expanded state, arrow-key roving and Escape, so none of that is
- * re-implemented here. No role switcher: role is a backend decision (§3.2).
- */
-function WorkspaceAccountMenu({ user }: { readonly user: CurrentUser }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="inline-flex min-h-11 items-center gap-md rounded-full px-sm text-body-sm text-text"
-          type="button"
-        >
-          <span
-            aria-hidden="true"
-            className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface-raised text-label-md text-text"
-          >
-            {avatarInitials(user.displayName)}
-          </span>
-          <span className="hidden sm:inline">{user.displayName}</span>
-          <ChevronDown aria-hidden="true" className="size-4 text-text-muted" />
-          <span className="sr-only">Open account menu</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="min-w-56">
-        <DropdownMenuLabel>
-          <span className="block text-body-sm text-text">{user.displayName}</span>
-          <span className="block text-label-sm text-text-muted">{ROLE_LABELS[user.role]}</span>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href={ROLE_LANDING_PATHS[user.role]}>
-            {user.role === 'reviewer' ? 'Review inbox' : 'Browse programs'}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          {/* §5.2: the current destination carries the selected treatment. */}
-          <Link aria-current="page" className="bg-ambient text-text" href={ACCOUNT_SETTINGS_PATH}>
-            {COPY.title}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <LogoutMenuItem />
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

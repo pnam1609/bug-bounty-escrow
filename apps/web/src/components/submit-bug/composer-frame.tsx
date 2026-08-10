@@ -9,33 +9,13 @@
  * Researcher screens carry no workspace sidebar, so `WorkspaceShell` is used without one.
  */
 
-import { Stepper, SiteFooter, WorkspaceShell } from '@bug-bounty-escrow/ui';
+import { Stepper, WorkspaceShell } from '@bug-bounty-escrow/ui';
 import Link from 'next/link';
-import { Fragment, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
-import { ResearcherHeader } from '@/components/programs/researcher-shell';
-import { getSiteCopyright } from '@/lib/site-footer';
+import { AppFooter, ResearcherHeader } from '@/components/programs/researcher-shell';
 
 import { STEP_COUNT, SUBMIT_BUG_STEPS, type StepIndex } from './submit-bug-model';
-
-function ShortFooter() {
-  return (
-    <SiteFooter
-      variant="short"
-      copyright={getSiteCopyright(' · Arc Testnet')}
-      legal={
-        <Fragment>
-          <Link href="/" className="text-label-sm text-text-muted hover:text-text">
-            Privacy
-          </Link>
-          <Link href="/" className="text-label-sm text-text-muted hover:text-text">
-            Terms
-          </Link>
-        </Fragment>
-      }
-    />
-  );
-}
 
 export interface ComposerBreadcrumb {
   readonly href?: string;
@@ -55,7 +35,7 @@ export interface ComposerFrameProps {
 /** Shell + breadcrumb only. Used by the terminal states (submitting, recovery, closed). */
 export function ComposerFrame({ breadcrumbs, children }: ComposerFrameProps) {
   return (
-    <WorkspaceShell header={<ResearcherHeader />} footer={<ShortFooter />}>
+    <WorkspaceShell header={<ResearcherHeader />} footer={<AppFooter />}>
       <nav aria-label="Breadcrumb" className="mb-xl">
         <ol className="flex flex-wrap items-center gap-sm text-body-sm text-text-muted">
           {breadcrumbs.map((crumb, index) => (

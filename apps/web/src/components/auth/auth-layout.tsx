@@ -1,6 +1,8 @@
 import { Card, SiteBrand } from '@bug-bounty-escrow/ui';
 import type { ReactNode } from 'react';
 
+import { AppFooter } from '@/components/programs/researcher-shell';
+
 /**
  * The two-panel auth frame: Figma `Layout / Sign In / Desktop` (61:115) and
  * `Layout / Sign Up / Desktop` (61:116) are the same shell with different brand copy, so it is
@@ -64,6 +66,7 @@ export function AuthLayout({
           <div className={`flex w-full flex-col ${FORM_COLUMN_WIDTH}`}>{children}</div>
         </main>
       </div>
+      <AppFooter />
     </div>
   );
 }

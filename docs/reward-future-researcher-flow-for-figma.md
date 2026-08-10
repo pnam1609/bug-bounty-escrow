@@ -163,7 +163,7 @@ CTA phải dùng route thật.
 - Không có left sidebar.
 - Main content rộng tối đa `1312px`, căn giữa.
 - Short footer nằm sau toàn bộ content, không overlay card hoặc CTA.
-- Header dùng researcher account menu hiện có.
+- Header dùng researcher account menu dùng chung trên mọi researcher route; không có `Open workspace`.
 
 Navigation/account menu:
 
@@ -185,10 +185,14 @@ Navigation/account menu:
 ### Footer
 
 - Desktop dùng `Footer / Desktop · Short`.
-- Mobile future preview không cần footer nếu tạo khoảng trống cuối page rõ ràng và không có nội dung
-  bị cắt.
-- Infinite-scroll reward list trong feature hoàn chỉnh có thể bỏ footer theo cùng rule của
-  `ResearcherShell`.
+- Mobile cũng dùng short footer chung, sau content và không overlay card/CTA.
+- Không bỏ footer chỉ vì list dài hoặc infinite loading; mọi app screen dùng cùng footer, landing
+  page mới là ngoại lệ dùng marketing footer.
+
+App-shell requirement/acceptance: menu gồm `Browse programs`, `My reports`, `Rewards · Future`,
+`Account settings` và `Log out` với thứ tự/copy ổn định; không có sidebar hay owner-only item.
+Notion shell ticket ID/status cần được xác nhận từ Delivery Backlog; không suy đoán trạng thái khi
+chưa có live Notion access.
 
 ## 6. Information architecture
 
@@ -267,21 +271,21 @@ flowchart TD
 Các state dưới đây là requirement tương lai, không được trộn vào preview như dữ liệu đang hoạt
 động:
 
-| ID    | Screen/state            | Mục đích                                    |
-| ----- | ----------------------- | ------------------------------------------- |
-| RW-00 | Loading                 | Chờ reward summary của researcher           |
-| RW-01 | Empty                   | Chưa có report ở settlement lifecycle       |
-| RW-02 | Reward list             | Liệt kê reward theo report                  |
-| RW-03 | Filtered list           | Lọc theo approved, pending hoặc paid        |
-| RW-04 | Load error              | Retry request, không dựng dữ liệu giả       |
-| RW-05 | Session expired         | Sign in lại với safe internal return path   |
-| RW-06 | Wrong role              | Safe forbidden state                        |
-| RW-07 | Wallet not set          | Legacy recovery: quay về report để add/select verified wallet |
-| RW-08 | Wallet verification error | Account/chain/signature/challenge failure, retry safely       |
-| RW-09 | Wallet verified/selected | Xác nhận masked address và report snapshot                    |
-| RW-09L | Wallet locked          | Read-only snapshot after server settlement/funding evidence    |
-| RW-10 | Payment pending         | Hiển thị transaction đang chờ confirmations |
-| RW-11 | Paid                    | Hiển thị confirmed settlement evidence      |
+| ID     | Screen/state              | Mục đích                                                      |
+| ------ | ------------------------- | ------------------------------------------------------------- |
+| RW-00  | Loading                   | Chờ reward summary của researcher                             |
+| RW-01  | Empty                     | Chưa có report ở settlement lifecycle                         |
+| RW-02  | Reward list               | Liệt kê reward theo report                                    |
+| RW-03  | Filtered list             | Lọc theo approved, pending hoặc paid                          |
+| RW-04  | Load error                | Retry request, không dựng dữ liệu giả                         |
+| RW-05  | Session expired           | Sign in lại với safe internal return path                     |
+| RW-06  | Wrong role                | Safe forbidden state                                          |
+| RW-07  | Wallet not set            | Legacy recovery: quay về report để add/select verified wallet |
+| RW-08  | Wallet verification error | Account/chain/signature/challenge failure, retry safely       |
+| RW-09  | Wallet verified/selected  | Xác nhận masked address và report snapshot                    |
+| RW-09L | Wallet locked             | Read-only snapshot after server settlement/funding evidence   |
+| RW-10  | Payment pending           | Hiển thị transaction đang chờ confirmations                   |
+| RW-11  | Paid                      | Hiển thị confirmed settlement evidence                        |
 
 ## 9. Chi tiết RF-01 — Rewards future desktop
 

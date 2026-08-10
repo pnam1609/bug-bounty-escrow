@@ -35,6 +35,9 @@ vi.mock('@/components/account/logout-action', () => ({
 
 import {
   RESEARCHER_ACCOUNT_MENU_ITEMS,
+  OWNER_ACCOUNT_MENU_ITEMS,
+  REVIEWER_ACCOUNT_MENU_ITEMS,
+  APP_HEADER_NAV_ITEMS,
   RESEARCHER_CONTENT_WIDTHS,
   RESEARCHER_LOGOUT_LABEL,
   ResearcherHeader,
@@ -111,9 +114,9 @@ describe('researcher header', () => {
     expect(html).toContain('href="/register"');
     expect(html).toContain('>Create account<');
     expect(html).not.toContain('Open account menu');
-    expect(html).not.toContain('>How it works<');
-    expect(html).not.toContain('>Escrow<');
-    expect(html).not.toContain('>Security<');
+    expect(html).toContain('>How it works<');
+    expect(html).toContain('>Escrow<');
+    expect(html).toContain('>Security<');
     expect(html.toLowerCase()).not.toContain('wallet');
   });
 
@@ -132,9 +135,9 @@ describe('researcher header', () => {
     expect(html).not.toContain('>Sign in<');
     expect(html).not.toContain('>Create account<');
     expect(html).not.toContain('href="/logout"');
-    expect(html).not.toContain('>How it works<');
-    expect(html).not.toContain('>Escrow<');
-    expect(html).not.toContain('>Security<');
+    expect(html).toContain('>How it works<');
+    expect(html).toContain('>Escrow<');
+    expect(html).toContain('>Security<');
     expect(html.toLowerCase()).not.toContain('wallet');
   });
 
@@ -147,6 +150,32 @@ describe('researcher header', () => {
     ]);
     expect(RESEARCHER_LOGOUT_LABEL).toBe('Log out');
     expect(RESEARCHER_ACCOUNT_MENU_ITEMS.map((item) => item.href)).not.toContain('/logout');
+  });
+
+  it('keeps owner and reviewer destinations out of the researcher menu', () => {
+    expect(RESEARCHER_ACCOUNT_MENU_ITEMS.map((item) => item.href)).not.toContain('/owner/programs');
+    expect(RESEARCHER_ACCOUNT_MENU_ITEMS.map((item) => item.href)).not.toContain('/review');
+    expect(RESEARCHER_ACCOUNT_MENU_ITEMS.map((item) => item.href)).toContain('/reports');
+    expect(RESEARCHER_ACCOUNT_MENU_ITEMS.map((item) => item.href)).toContain('/rewards');
+  });
+
+  it('defines shared marketing navigation and role-specific account destinations', () => {
+    expect(APP_HEADER_NAV_ITEMS.map((item) => item.label)).toEqual([
+      'Programs',
+      'How it works',
+      'Escrow',
+      'Security',
+    ]);
+    expect(OWNER_ACCOUNT_MENU_ITEMS.map((item) => item.label)).toEqual([
+      'My programs',
+      'Reports / review inbox',
+      'Transactions · Future',
+      'Account settings',
+    ]);
+    expect(REVIEWER_ACCOUNT_MENU_ITEMS.map((item) => item.label)).toEqual([
+      'Review inbox',
+      'Account settings',
+    ]);
   });
 
   it('uses only standard width utilities in the shared full-width and detail shells', () => {
@@ -212,7 +241,7 @@ describe('route shell header boundaries', () => {
     }
   });
 
-  it('keeps owner and review routes on their workspace navigation without marketing links', () => {
+  it('uses one shared header/footer and no workspace rail for owner and review routes', () => {
     const ownerHtml = renderToStaticMarkup(
       createElement(OwnerWorkspace, null, createElement('p', null, 'Owner content')),
     );
@@ -220,13 +249,17 @@ describe('route shell header boundaries', () => {
       createElement(ReviewShell, null, createElement('p', null, 'Review content')),
     );
 
-    expect(ownerHtml).toContain('aria-label="Owner workspace"');
     expect(ownerHtml).toContain('Open account menu');
-    expect(reviewHtml).toContain('aria-label="Review workspace"');
+    expect(ownerHtml).toContain('>Open workspace<');
+    expect(ownerHtml).not.toContain('<aside');
+    expect(ownerHtml).toContain('Arc testnet operational');
+    expect(reviewHtml).toContain('Open account menu');
+    expect(reviewHtml).not.toContain('<aside');
+    expect(reviewHtml).toContain('Arc testnet operational');
     for (const html of [ownerHtml, reviewHtml]) {
-      expect(html).not.toContain('>How it works<');
-      expect(html).not.toContain('>Escrow<');
-      expect(html).not.toContain('>Security<');
+      expect(html).toContain('>How it works<');
+      expect(html).toContain('>Escrow<');
+      expect(html).toContain('>Security<');
       expect(html).not.toContain('>Sign in<');
     }
   });

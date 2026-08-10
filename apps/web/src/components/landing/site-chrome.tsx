@@ -13,9 +13,7 @@ import {
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { ROLE_LANDING_PATHS } from '@/components/onboarding/role-options';
 import { HeaderAccountMenu } from '@/components/programs/researcher-shell';
-import { useCurrentUser } from '@/hooks/use-current-user';
 import { getSiteCopyright } from '@/lib/site-footer';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -38,7 +36,6 @@ const HEADER_NAV: readonly ChromeLink[] = [
 
 function LandingHeaderActions() {
   const { loading, session } = useAuth();
-  const user = useCurrentUser();
 
   // Never flash anonymous CTAs while Supabase is restoring a persisted session.
   if (loading) {
@@ -65,16 +62,7 @@ function LandingHeaderActions() {
     );
   }
 
-  return (
-    <>
-      {user.data === undefined ? null : (
-        <Button asChild className="hidden sm:inline-flex" size="md" variant="ghost">
-          <Link href={ROLE_LANDING_PATHS[user.data.role]}>Open workspace</Link>
-        </Button>
-      )}
-      <HeaderAccountMenu />
-    </>
-  );
+  return <HeaderAccountMenu />;
 }
 
 /*
