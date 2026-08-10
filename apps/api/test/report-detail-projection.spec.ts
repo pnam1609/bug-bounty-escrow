@@ -1,5 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
+import { reportResponseSchema } from '@bug-bounty-escrow/shared';
 
 import { ReportRepository } from '../src/reports/report.repository.js';
 import { ReportService } from '../src/reports/report.service.js';
@@ -289,7 +290,7 @@ describe('SR-12 private report detail projection', () => {
               transaction_hash: `0x${'b'.repeat(64)}`,
               event_log_index: 8,
               transfer_log_index: 9,
-              block_number: '42',
+              block_number: 42,
               block_hash: `0x${'c'.repeat(64)}`,
               updated_at: '2026-07-26T15:00:00.000Z',
             },
@@ -319,10 +320,12 @@ describe('SR-12 private report detail projection', () => {
       recipientAddressMasked: '0xaaaa…aaaa',
       rewardEventLogIndex: 8,
       transferLogIndex: 9,
+      blockNumber: '42',
       exactEventVerified: true,
       canonicalTransferVerified: true,
       accountingApplied: true,
     });
+    expect(() => reportResponseSchema.parse({ success: true, data: detail })).not.toThrow();
   });
 
   it('keeps researcher resubmits chronological and never labels them as reviewer activity', async () => {

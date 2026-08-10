@@ -136,7 +136,7 @@ interface ReportRow {
       transaction_hash: string | null;
       event_log_index: number | null;
       transfer_log_index: number | null;
-      block_number: string | null;
+      block_number: string | number | bigint | null;
       block_hash: string | null;
       updated_at: string;
     }>;
@@ -164,6 +164,16 @@ interface ReportPayoutWalletStateRow {
   readonly verified_at: string | null;
   readonly can_edit: boolean;
   readonly blocked_reason: string | null;
+}
+
+function normalizeBlockNumber(value: string | number | bigint): string;
+function normalizeBlockNumber(
+  value: string | number | bigint | null | undefined,
+): string | undefined;
+function normalizeBlockNumber(
+  value: string | number | bigint | null | undefined,
+): string | undefined {
+  return value == null ? undefined : String(value);
 }
 
 interface ReportProgramFilterOptionRow {
@@ -415,7 +425,7 @@ function mapDetail(
           tokenAddress: paidIntent.escrow_contracts.token_address,
           recipientAddressMasked: maskAddress(paidIntent.recipient_address),
           amount: money(paidIntent.amount),
-          blockNumber: paidOperation.block_number,
+          blockNumber: normalizeBlockNumber(paidOperation.block_number),
           blockHash: paidOperation.block_hash,
           rewardEventLogIndex: paidOperation.event_log_index,
           transferLogIndex: paidOperation.transfer_log_index,
