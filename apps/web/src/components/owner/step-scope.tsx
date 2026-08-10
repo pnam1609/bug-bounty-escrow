@@ -40,21 +40,14 @@ import {
   type ScopeRow,
 } from './program-draft';
 import { GuidancePanel } from './owner-workspace';
-import {
-  DeleteRowButton,
-  FormCard,
-  InlineAction,
-  StepActions,
-  StepLayout,
-  ValidationSummary,
-} from './wizard-parts';
+import { FormCard, InlineAction, StepActions, StepLayout, ValidationSummary } from './wizard-parts';
 import { arcExplorerHref, CryptoValueAction } from '@/components/reports/crypto-value';
 
 const MAX_SCOPES = 50;
 function ScopeStatusBadge({ inScope }: { readonly inScope: boolean }) {
   return (
     <span
-      className={`inline-flex w-full items-center gap-sm rounded-full border bg-surface-raised px-md py-xs text-label-sm font-semibold uppercase ${
+      className={`inline-flex w-fit items-center gap-sm self-start rounded-full border bg-surface-raised px-md py-xs text-label-sm font-semibold uppercase ${
         inScope ? 'border-escrow text-escrow' : 'border-error text-error'
       }`}
     >
@@ -192,14 +185,16 @@ export function StepScope({ draft, errors, onBack, onContinue, update }: StepSco
               )}
               <div className="flex items-center gap-md">
                 <InlineAction onClick={() => openEdit(scope)}>Edit</InlineAction>
-                <DeleteRowButton
-                  label={`Delete scope ${scope.assetName}`}
+                <InlineAction
                   onClick={() =>
                     update({
                       scopes: draft.scopes.filter((entry) => entry.rowId !== scope.rowId),
                     })
                   }
-                />
+                  tone="danger"
+                >
+                  Remove
+                </InlineAction>
               </div>
             </li>
           );

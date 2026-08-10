@@ -1493,9 +1493,10 @@ Content:
   - Contract address is a shortened link to the ArcScan address page with a separate
     copy action. A normal website URL remains a normal external URL link and is never treated as a
     blockchain address.
-  - In scope / Out of scope badge.
+  - Content-sized `In scope` / `Out of scope` badge; the badge must not stretch across the scope card.
   - Description preview.
-  - `Edit` và overflow action `Remove`.
+  - Text actions `Edit` and destructive `Remove`, both meeting the same minimum interactive target;
+    `Remove` is rendered in the error/destructive color and is not icon-only.
 - Secondary button: `Add scope`.
 
 Empty state:
