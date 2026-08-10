@@ -74,6 +74,7 @@ const expectedMigrations = [
   '20260810000200_sr_owner_submit_guard.sql',
   '20260810000300_ai_manual_review_recovery.sql',
   '20260810000400_verified_researcher_payout_wallets.sql',
+  '20260810000500_fix_ai_manual_review_retry.sql',
 ];
 
 const tableMigrations = new Map([
@@ -305,6 +306,17 @@ for (const requiredFragment of [
 ]) {
   if (!manualAiRecovery.includes(requiredFragment)) {
     fail(`AI manual-review recovery migration is missing ${requiredFragment}`);
+  }
+}
+const manualAiRecoveryFix = migrationContents.get('20260810000500_fix_ai_manual_review_retry.sql');
+for (const requiredFragment of [
+  'create or replace function public.retry_report_ai_run_atomic',
+  'delete from public.ai_triage_results as result',
+  'where result.run_id = run_record.id',
+  'grant execute on function public.retry_report_ai_run_atomic',
+]) {
+  if (!manualAiRecoveryFix.includes(requiredFragment)) {
+    fail(`AI manual-review retry fix migration is missing ${requiredFragment}`);
   }
 }
 const verifiedResearcherWallets = migrationContents.get(

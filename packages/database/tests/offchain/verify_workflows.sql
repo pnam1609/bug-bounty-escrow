@@ -2407,4 +2407,49 @@ begin
 end;
 $ai_queue_replay_and_supersession$;
 
+-- AI-RECOVERY: retrying a failed run must reset the durable queue row.  This exercises the
+-- failed-run branch that previously raised 42702 because run_id was ambiguous in the DELETE.
+do $ai_manual_retry_failed_run$
+declare
+  target_report uuid := '33000000-0000-4000-8000-000000000041';
+  target_program uuid := '31000000-0000-4000-8000-000000000010';
+  target_hash text;
+  target_run uuid;
+  retried_run uuid;
+  retried_status text;
+begin
+  select content_hash into target_hash
+  from public.reports
+  where id = target_report and program_id = target_program;
+
+  select id into target_run
+  from public.ai_triage_runs
+  where report_id = target_report
+    and source_content_hash = target_hash
+  order by created_at desc, id desc
+  limit 1;
+
+  if target_hash is null or target_run is null then
+    raise exception 'AI manual retry fixture is missing its report or run';
+  end if;
+
+  update public.ai_triage_runs
+  set status = 'failed', attempt_count = 1, error_code = 'synthetic_failure',
+      error_message = 'synthetic failure', finished_at = now()
+  where id = target_run;
+
+  select public.retry_report_ai_run_atomic(target_report, target_program, target_hash)
+    into retried_run;
+
+  select status into retried_status
+  from public.ai_triage_runs
+  where id = target_run;
+
+  if retried_run is distinct from target_run or retried_status <> 'queued' then
+    raise exception 'AI manual retry did not reset failed run (returned %, status %)',
+      retried_run, retried_status;
+  end if;
+end;
+$ai_manual_retry_failed_run$;
+
 rollback;

@@ -1,5 +1,6 @@
--- Allow an authorized report detail to recover a terminal/missing AI result without creating a
--- second submission revision or consuming another per-program FIFO sequence number.
+-- Qualify the result-row predicate in manual AI recovery.  The original function's run_id
+-- variable conflicted with ai_triage_results.run_id when retrying a failed run, causing a 500
+-- before the durable queue row could be reset.
 
 create or replace function public.retry_report_ai_run_atomic(
   target_report_id uuid,
@@ -78,9 +79,6 @@ begin
       return run_record.id;
     end if;
 
-    -- A failed run or completed run without a usable result is the same immutable revision. Remove
-    -- only the unusable result row so the worker can persist a fresh structured result for the
-    -- existing run id; the report revision and FIFO sequence remain untouched for auditability.
     delete from public.ai_triage_results as result
     where result.run_id = run_record.id;
 
@@ -106,8 +104,6 @@ begin
     return run_record.id;
   end if;
 
-  -- Legacy reports can have an immutable revision persisted before the worker run was inserted.
-  -- Reuse its canonical sequence rather than creating a new revision during recovery.
   insert into public.ai_triage_runs (
     report_id, program_id, revision_id, submission_revision,
     program_submission_sequence, source_content_hash
