@@ -290,7 +290,7 @@ describe('SR-12 report detail', () => {
     expect(researcherMarkup).not.toContain(candidateId);
     expect(reviewerMarkup).toContain(candidateId);
     expect(reviewerMarkup).toContain('Authorized duplicate candidates');
-    expect(reviewerMarkup).toContain('href="/reports/10000000-0000-4000-8000-000000000099"');
+    expect(reviewerMarkup).toContain('href="/review/10000000-0000-4000-8000-000000000099"');
   });
 
   it('gates Mark duplicate above 40 percent and never offers it for the first sequence', () => {
@@ -321,6 +321,25 @@ describe('SR-12 report detail', () => {
       );
 
     expect(renderCandidate(0.41, 2)).toContain('Mark duplicate');
+    expect(
+      renderToStaticMarkup(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentReportStatus: 'triaged',
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: () => undefined,
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence: 2,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [{ ...candidate, confidence: 0.41 }],
+          },
+        }),
+      ),
+    ).not.toContain('Mark duplicate');
     expect(renderCandidate(0.4, 2)).not.toContain('Mark duplicate');
     expect(renderCandidate(0.39, 2)).not.toContain('Mark duplicate');
     expect(renderCandidate(0.99, 1)).not.toContain('Mark duplicate');
@@ -349,6 +368,64 @@ describe('SR-12 report detail', () => {
         '2026-07-27T09:00:00.000Z',
       ),
     ).toBe(true);
+    for (const reportStatus of ['validated', 'duplicate', 'paid'] as const) {
+      const terminalMarkup = renderToStaticMarkup(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentReportStatus: reportStatus,
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: () => undefined,
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence: 2,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [{ ...candidate, status: 'submitted' }],
+          },
+        }),
+      );
+      expect(terminalMarkup).not.toContain('Mark duplicate');
+      expect(terminalMarkup).toContain('data-status="submitted"');
+      expect(
+        canMarkDuplicateCandidate(
+          { status: 'ready', submissionSequence: 2 },
+          { ...candidate, status: 'submitted' },
+          '2026-07-27T09:00:00.000Z',
+          reportStatus,
+        ),
+      ).toBe(false);
+    }
+    for (const candidateStatus of ['validated', 'duplicate', 'paid'] as const) {
+      const candidateMarkup = renderToStaticMarkup(
+        createElement(ReportAiReviewCard, {
+          audience: 'reviewer',
+          currentContentHash: '0xhash',
+          currentReportStatus: 'submitted',
+          currentSubmissionRevision: 1,
+          currentSubmittedAt: '2026-07-27T09:00:00.000Z',
+          onMarkDuplicate: () => undefined,
+          review: {
+            status: 'ready',
+            submissionRevision: 1,
+            submissionSequence: 2,
+            sourceContentHash: '0xhash',
+            duplicateCandidates: [{ ...candidate, status: candidateStatus }],
+          },
+        }),
+      );
+      expect(candidateMarkup).not.toContain('Mark duplicate');
+      expect(candidateMarkup).toContain(`data-status="${candidateStatus}"`);
+      expect(
+        canMarkDuplicateCandidate(
+          { status: 'ready', submissionSequence: 2 },
+          { ...candidate, status: candidateStatus },
+          '2026-07-27T09:00:00.000Z',
+          'submitted',
+        ),
+      ).toBe(false);
+    }
     expect(
       canMarkDuplicateCandidate(
         { status: 'ready', submissionSequence: 1 },
@@ -510,7 +587,7 @@ describe('SR-12 report detail', () => {
     );
 
     expect(markup).toContain('Validated');
-    expect(markup).toContain('href="/reports/10000000-0000-4000-8000-000000000099"');
+    expect(markup).toContain('href="/review/10000000-0000-4000-8000-000000000099"');
     expect(markup).not.toContain('Mark duplicate');
   });
 

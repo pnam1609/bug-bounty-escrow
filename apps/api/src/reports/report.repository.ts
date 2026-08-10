@@ -27,6 +27,7 @@ import type {
   UpdateReportPayoutWalletRequest,
   ValidateReportRequest,
 } from '@bug-bounty-escrow/shared';
+import { uuidSchema } from '@bug-bounty-escrow/shared';
 import { randomUUID } from 'node:crypto';
 
 import { API_CONFIG } from '../config/api-config.module.js';
@@ -612,6 +613,17 @@ export class ReportRepository {
     if (query.severity !== undefined) {
       request = request.eq('proposed_severity', query.severity);
     }
+    if (query.search !== undefined) {
+      const search = query.search.trim();
+      // UUID columns cannot use PostgREST `ilike`; use an exact UUID match when the input is a
+      // valid report id and otherwise search the title. The program filter above remains in force
+      // so this lookup can never expose a report from another owner/reviewer program.
+      if (uuidSchema.safeParse(search).success) {
+        request = request.eq('id', search);
+      } else {
+        request = request.ilike('title', `%${escapeIlikePattern(search)}%`);
+      }
+    }
 
     const from = (query.page - 1) * query.limit;
     const { data, error, count } = await request
@@ -1135,4 +1147,8 @@ export class ReportRepository {
 
     return new Map(((data ?? []) as DuplicateTargetRow[]).map((target) => [target.id, target]));
   }
+}
+
+function escapeIlikePattern(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }

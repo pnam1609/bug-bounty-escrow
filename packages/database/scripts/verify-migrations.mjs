@@ -75,6 +75,7 @@ const expectedMigrations = [
   '20260810000300_ai_manual_review_recovery.sql',
   '20260810000400_verified_researcher_payout_wallets.sql',
   '20260810000500_fix_ai_manual_review_retry.sql',
+  '20260810000600_duplicate_target_ordering.sql',
 ];
 
 const tableMigrations = new Map([
@@ -317,6 +318,18 @@ for (const requiredFragment of [
 ]) {
   if (!manualAiRecoveryFix.includes(requiredFragment)) {
     fail(`AI manual-review retry fix migration is missing ${requiredFragment}`);
+  }
+}
+const duplicateTargetOrdering = migrationContents.get(
+  '20260810000600_duplicate_target_ordering.sql',
+);
+for (const requiredFragment of [
+  'create or replace function public.mark_report_duplicate_atomic',
+  'original_record.submitted_at >= report_record.submitted_at',
+  "'duplicate_target_invalid'",
+]) {
+  if (!duplicateTargetOrdering.includes(requiredFragment)) {
+    fail(`Duplicate target ordering migration is missing ${requiredFragment}`);
   }
 }
 const verifiedResearcherWallets = migrationContents.get(

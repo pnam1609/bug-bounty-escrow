@@ -7,6 +7,7 @@ import {
   reopenDuplicateRequestSchema,
   rejectReportRequestSchema,
   reportResponseSchema,
+  reportListResponseSchema,
   rewardSettlementIntentResponseSchema,
   requestInformationRequestSchema,
   parseUsdcBaseUnits,
@@ -15,6 +16,7 @@ import {
   type ApproveRewardRequest,
   type AiDuplicateCandidate,
   type ReportDetail,
+  type ReportSummary,
   type RewardSettlementIntent,
   type Severity,
 } from '@bug-bounty-escrow/shared';
@@ -50,7 +52,7 @@ import {
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, LoaderCircle } from 'lucide-react';
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useAccount } from 'wagmi';
 import type { EIP1193Provider } from 'viem';
 
@@ -73,6 +75,12 @@ import { eligibleDuplicateCandidates } from './report-ai-review-card';
 
 function formatDuplicateCandidateTime(value: string | undefined): string {
   return value === undefined ? 'timestamp unavailable' : formatTimestamp(value);
+}
+
+type DuplicateTargetOption = Pick<ReportSummary, 'id' | 'title' | 'status' | 'submittedAt'>;
+
+function duplicateTargetOptionLabel(option: DuplicateTargetOption): string {
+  return `${option.title || 'Untitled report'} · ${shortReportId(option.id)} · ${formatDuplicateCandidateTime(option.submittedAt)}`;
 }
 
 import {
@@ -495,10 +503,18 @@ interface MarkDuplicateActionProps extends ActionProps {
 export function duplicateTargetIsSafe(
   currentReportId: string,
   currentProgramId: string,
-  target: Pick<ReportDetail, 'id' | 'programId'> | undefined,
+  target: Pick<ReportDetail, 'id' | 'programId' | 'submittedAt'> | undefined,
+  currentSubmittedAt?: string,
 ): boolean {
   return (
-    target !== undefined && target.id !== currentReportId && target.programId === currentProgramId
+    target !== undefined &&
+    target.id !== currentReportId &&
+    target.programId === currentProgramId &&
+    target.submittedAt !== undefined &&
+    currentSubmittedAt !== undefined &&
+    Number.isFinite(Date.parse(target.submittedAt)) &&
+    Number.isFinite(Date.parse(currentSubmittedAt)) &&
+    Date.parse(target.submittedAt) < Date.parse(currentSubmittedAt)
   );
 }
 
@@ -515,10 +531,17 @@ function MarkDuplicateAction({
   token,
 }: MarkDuplicateActionProps) {
   const [originalId, setOriginalId] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [reason, setReason] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const form = useActionForm(() => {
     setOriginalId('');
+    setSearchText('');
+    setSearchOpen(false);
+    setActiveSearchIndex(0);
     setReason('');
     setFieldError(null);
   });
@@ -536,6 +559,8 @@ function MarkDuplicateAction({
       (candidate) => candidate.candidateReportId === initialOriginalReportId,
     );
     setOriginalId(isEligible ? initialOriginalReportId : '');
+    setSearchText(isEligible ? initialOriginalReportId : '');
+    setSearchOpen(false);
     setReason('');
     setFieldError(null);
     if (isEligible) form.change(true);
@@ -548,6 +573,38 @@ function MarkDuplicateAction({
   const candidateShapeValid = markDuplicateRequestSchema.safeParse({
     originalReportId: candidateId,
   }).success;
+  const normalizedSearch = searchText.trim();
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(normalizedSearch), 250);
+    return () => window.clearTimeout(timer);
+  }, [normalizedSearch]);
+  const reportSearchQuery = useQuery({
+    queryKey: ['review-duplicate-targets', currentProgramId, debouncedSearch],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        page: '1',
+        limit: '20',
+        programId: currentProgramId,
+        search: debouncedSearch,
+      });
+      return apiRequest(`/api/reports?${params.toString()}`, reportListResponseSchema, { token });
+    },
+    enabled: form.open && searchOpen && debouncedSearch.length > 0,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const searchedOptions: DuplicateTargetOption[] = (reportSearchQuery.data?.data ?? []).filter(
+    (report) =>
+      duplicateTargetIsSafe(currentReportId, currentProgramId, report, currentSubmittedAt),
+  );
+  const aiOptions: DuplicateTargetOption[] = eligibleCandidates.map((candidate) => ({
+    id: candidate.candidateReportId,
+    title: candidate.title ?? 'Untitled report',
+    status: candidate.status ?? 'submitted',
+    submittedAt: candidate.submittedAt,
+  }));
+  const targetOptions = normalizedSearch.length === 0 ? aiOptions : searchedOptions;
+  const activeOption = targetOptions[activeSearchIndex];
   const targetQuery = useQuery({
     queryKey: ['review-duplicate-target', currentReportId, candidateId],
     queryFn: () =>
@@ -560,8 +617,39 @@ function MarkDuplicateAction({
     staleTime: 30_000,
   });
   const target = targetQuery.data?.data;
-  const targetIsSameProgram = duplicateTargetIsSafe(currentReportId, currentProgramId, target);
+  const targetIsSameProgram = duplicateTargetIsSafe(
+    currentReportId,
+    currentProgramId,
+    target,
+    currentSubmittedAt,
+  );
   const targetReady = targetIsSameProgram;
+
+  function selectTarget(option: DuplicateTargetOption): void {
+    setOriginalId(option.id);
+    setSearchText(duplicateTargetOptionLabel(option));
+    setSearchOpen(false);
+    setActiveSearchIndex(0);
+    setFieldError(null);
+  }
+
+  function handleTargetKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Escape') {
+      setSearchOpen(false);
+      return;
+    }
+    if (!searchOpen || targetOptions.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSearchIndex((index) => (index + 1) % targetOptions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSearchIndex((index) => (index - 1 + targetOptions.length) % targetOptions.length);
+    } else if (event.key === 'Enter' && activeOption !== undefined) {
+      event.preventDefault();
+      selectTarget(activeOption);
+    }
+  }
 
   async function confirm() {
     setFieldError(null);
@@ -607,38 +695,72 @@ function MarkDuplicateAction({
     >
       <Field
         error={fieldError ?? undefined}
-        helperText="Only earlier, server-authorized AI candidates above the action threshold are available."
+        helperText="Search by report title or ID. Results are limited to this program; the server verifies the original before closing this report."
         label="Original report"
         required
       >
-        <Select
-          onValueChange={(value) => {
-            setOriginalId(value);
-            setFieldError(null);
-          }}
-          value={originalId}
-        >
-          <SelectTrigger
+        <div className="relative w-full">
+          <Input
+            aria-activedescendant={
+              searchOpen && activeOption !== undefined
+                ? `duplicate-target-option-${activeOption.id}`
+                : undefined
+            }
+            aria-autocomplete="list"
+            aria-controls="duplicate-target-options"
+            aria-expanded={searchOpen}
             aria-invalid={fieldError !== null || undefined}
+            autoComplete="off"
             id="duplicate-target"
+            onChange={(event) => {
+              setSearchText(event.target.value);
+              setOriginalId('');
+              setSearchOpen(true);
+              setActiveSearchIndex(0);
+              setFieldError(null);
+            }}
+            onFocus={() => {
+              setSearchOpen(true);
+              setActiveSearchIndex(0);
+            }}
+            onKeyDown={handleTargetKeyDown}
+            placeholder="Search by title or report ID"
+            role="combobox"
             size="lg"
-          >
-            <SelectValue
-              placeholder={
-                eligibleCandidates.length === 0
-                  ? 'No eligible earlier report'
-                  : 'Select an earlier report'
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            {eligibleCandidates.map((candidate) => (
-              <SelectItem key={candidate.candidateReportId} value={candidate.candidateReportId}>
-                {`${candidate.title ?? 'Untitled report'} · ${shortReportId(candidate.candidateReportId)} · ${formatDuplicateCandidateTime(candidate.submittedAt)}`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+            value={searchText}
+          />
+          {searchOpen ? (
+            <div
+              className="absolute left-0 right-0 top-full z-10 mt-xs max-h-60 overflow-y-auto rounded-md border border-border bg-surface-raised p-xs shadow-overlay"
+              id="duplicate-target-options"
+              role="listbox"
+            >
+              {reportSearchQuery.isPending ? (
+                <p className="px-sm py-xs text-body-sm text-text-muted">Searching reports…</p>
+              ) : targetOptions.length === 0 ? (
+                <p className="px-sm py-xs text-body-sm text-text-muted">
+                  {normalizedSearch.length === 0
+                    ? 'No AI suggestions. Search by title or report ID.'
+                    : 'No reports found in this program.'}
+                </p>
+              ) : (
+                targetOptions.map((option, index) => (
+                  <button
+                    aria-selected={index === activeSearchIndex}
+                    className="block w-full truncate rounded-sm px-sm py-xs text-left text-body-sm text-text hover:bg-ambient focus-visible:bg-ambient"
+                    id={`duplicate-target-option-${option.id}`}
+                    key={option.id}
+                    onClick={() => selectTarget(option)}
+                    role="option"
+                    type="button"
+                  >
+                    {duplicateTargetOptionLabel(option)}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
       </Field>
       {candidateId === '' || !candidateShapeValid ? null : targetQuery.isPending ? (
         <p aria-live="polite" className="text-body-sm text-text-muted">

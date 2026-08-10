@@ -187,6 +187,7 @@ export function ReviewDetailView({ id }: ReviewDetailViewProps) {
           <ReportAiReviewCard
             audience="reviewer"
             currentContentHash={report.contentHash}
+            currentReportStatus={report.status}
             currentSubmittedAt={report.submittedAt ?? report.createdAt}
             onGenerateAiReview={generateAiReview}
             {...(viewer.data?.role === 'owner' || viewer.data?.role === 'reviewer'

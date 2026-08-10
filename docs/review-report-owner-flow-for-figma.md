@@ -77,7 +77,7 @@ Mapping dự kiến:
 | Request information          | FE-REV-004, BE-RPT-006                                                     |
 | Validate                     | FE-REV-005, BE-RPT-007                                                     |
 | Reject                       | FE-REV-006, BE-RPT-008                                                     |
-| Duplicate                    | FE-REV-007, BE-RPT-009                                                     |
+| Duplicate (AI shortcut, same-program title/ID search, owner links) | FE-REV-007, BE-RPT-009; live Notion acceptance must be updated, no new ID guessed |
 | Reward approval/settlement   | FE-REV-008/009, BE-RPT-010/011 và Arc reward-settlement contract hiện hành |
 | Persisted AI review          | Ticket AI review tương ứng phải được map từ Notion live; không suy đoán ID |
 
@@ -367,16 +367,21 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
   result đã persist và khớp current submission revision/content hash.
 - Summary và inline result luôn mang label `AI suggestion`; không có action `View full AI review` và
   không mở AI result trong panel/dialog riêng.
-- AI output không prefill final severity, duplicate target, decision form hoặc reward field. Human
-  reviewer phải tự chọn và confirm mọi quyết định.
+- AI output tự nó không prefill final severity, duplicate target, decision form hoặc reward field.
+  Explicit click vào inline duplicate shortcut chỉ được phép preselect candidate trong human dialog;
+  human reviewer vẫn phải tự review và confirm, không có auto-submit.
 - Với owner/reviewer, mỗi candidate đã được server re-authorize hiển thị timestamp `submittedAt`
   của report gốc và được sort chronological ascending (earliest first; UUID tie-break). Title và
-  short ID của candidate là link tới `/reports/:id` để đọc detail khi principal còn quyền. Chỉ
+  short ID của candidate là link tới `/review/:id`; researcher-owned detail mới dùng `/reports/:id`.
+  Nút inline `Mark duplicate` chỉ được render khi report hiện tại đang đúng status `submitted`,
   candidate có assessment `likely`, confidence **strictly greater than 40%**, current
-  `submissionSequence > 1` và target status khác `validated` mới có nút `Mark duplicate`;
-  candidate `validated` chỉ hiển thị badge `Validated` và là evidence-only. `possible`, confidence
-  bằng/nhỏ hơn 40%, first sequence hoặc sequence thiếu/không hợp lệ chỉ là advisory evidence. Nút
-  mở dialog duplicate human hiện hành với UUID được prefill, không tự submit.
+  `submissionSequence > 1`, timestamp hợp lệ/sớm hơn và target là report đủ điều kiện. Với report
+  hiện tại `triaged`, `validated`, `rejected`, `duplicate`, `reward_approved`, `payment_pending`
+  hoặc `paid`, AI suggestion chỉ hiển thị badge/status và không có nút shortcut. Candidate target
+  `validated`, `paid`, `duplicate` hoặc `rejected` cũng chỉ hiển thị status badge, không được mark
+  trực tiếp. `possible`, confidence bằng/nhỏ hơn 40%, first sequence hoặc sequence thiếu/không hợp
+  lệ chỉ là advisory evidence. Nút mở dialog duplicate human hiện hành với UUID được prefill, không
+  tự submit.
 - Nếu result chưa current/valid/available, dùng safe state của RR-08 và vẫn để human decision
   controls khả dụng theo report status.
 
@@ -385,7 +390,8 @@ không cần frame riêng, nhưng phải được kiểm tra trong prototype.
 - Desktop: hai cột; content chính và rail 338 px, rail sticky sau khi header đã qua.
 - Rail đầu tiên là `Review decision`, tiếp theo `Where it stands`/timeline.
 - `Validate` là primary; request/reject/duplicate là secondary/destructive theo design system.
-- Không preselect hay auto-submit quyết định dựa trên AI.
+- Không tự động preselect hay auto-submit quyết định dựa trên AI; chỉ explicit human shortcut mới
+  preselect candidate trong dialog.
 
 ### Mobile
 
@@ -450,24 +456,35 @@ Focus đi vào dialog, bị trap đúng cách, Escape/Cancel không mutation và
 
 ### Mark duplicate
 
-- Chỉ từ `submitted | triaged`.
-- Selector bắt buộc chọn một original report từ danh sách server-authorized; optional reason tối đa
-  2,000 ký tự. Không dùng nhập UUID tự do làm happy path.
+- Human duplicate dialog remains available only from `submitted | triaged` according to the normal
+  transition map. The inline AI shortcut/trigger is narrower: it renders only while the current
+  report is exactly `submitted`; `validated`, `rejected`, `duplicate`, `reward_approved`,
+  `payment_pending` and `paid` must never show that inline button. API remains the authority and
+  returns a conflict if a stale client calls an invalid mutation.
+- `Original report` là một server-authorized search combobox/input, không chỉ là danh sách AI suggest.
+  Owner có thể search theo report title hoặc full report ID; kết quả chỉ gồm report cùng
+  program, có quyền đọc, sớm hơn report hiện tại và thỏa status/cycle rules. Search phải debounce,
+  bounded và giữ menu trong đúng chiều rộng input; label dài phải ellipsis nhưng vẫn có accessible
+  full value. AI candidates được dùng làm initial suggestions và shortcut preselection, không giới
+  hạn tập kết quả tìm kiếm.
+- Typed text hoặc UUID không được submit trực tiếp: owner phải chọn một option do server trả về;
+  optional reason tối đa 2,000 ký tự. Khi không có option hợp lệ, confirm disabled.
 - Target phải tồn tại, cùng program, reviewer có quyền đọc, không self-reference và không tạo cycle.
-- Select options chỉ gồm candidates cùng program, `assessment = likely`, confidence `> 0.40`,
-  timestamp hợp lệ, `submittedAt` sớm hơn report hiện tại và target status khác `validated`. Mỗi
-  option hiển thị title, short UUID và exact/relative submitted timestamp; không có option thì
-  confirm disabled. Candidate `validated` vẫn có thể được đọc qua link nhưng không được chọn để
-  mark duplicate.
+- Search options không bị giới hạn bởi `assessment`; khi chọn target thủ công, server vẫn recheck
+  candidate cùng program, `submittedAt` hợp lệ/sớm hơn, không self/cycle và status target đủ điều
+  kiện. Mỗi option hiển thị title, short UUID và exact/relative submitted timestamp.
 - Inline AI candidates chỉ là shortcut để mở dialog human: candidate phải là `likely` với confidence
-  `> 0.40`, current submission sequence phải lớn hơn 1, và report gốc phải có timestamp do server
-  trả. Candidate list sort theo `submittedAt` tăng dần (UUID tăng dần khi cùng timestamp). Report đầu
-  tiên trong program và result thiếu/không hợp lệ sequence tuyệt đối không có nút này.
+  `> 0.40`, current submission sequence phải lớn hơn 1, report gốc phải có timestamp do server trả,
+  và report hiện tại phải đang `submitted`. Candidate list sort theo `submittedAt` tăng dần (UUID
+  tăng dần khi cùng timestamp). Report đầu tiên trong program và result thiếu/không hợp lệ sequence
+  tuyệt đối không có nút này.
 - Click shortcut preselect candidate đó trong selector; mở Mark duplicate trực tiếp bắt đầu không có
-  selection. Server vẫn re-authorize target, client không thể submit arbitrary UUID để bypass selector.
+  selection. Server vẫn re-authorize target, client không thể submit arbitrary UUID hoặc bypass search
+  option bằng cách sửa DOM.
 - Trước confirm hiển thị target title + short ID để owner đối chiếu; không lộ candidate ngoài quyền.
-  Candidate title/ID trong evidence list luôn là authorized detail links, và status badge `Validated`
-  thay thế mọi duplicate action cho original report đã validated.
+  Candidate title/ID trong evidence list luôn là authorized `/review/:id` detail links, và status
+  badge (`Validated`, `Paid`, `Duplicate`, `Rejected`) thay thế mọi duplicate action cho original
+  report không còn đủ điều kiện.
 - Success → `duplicate`, hiển thị linked original; duplicate không nhận reward.
 
 ### Send validated report back for review
@@ -897,8 +914,8 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - AI result hiện ngay trong một box read-only của RR-02, sau audit timeline/evidence và trước human
   decision controls. Box gồm summary, completeness, suggested severity/scope, missing information,
   authorized duplicate candidates, provenance (revision + content hash + timestamps) và human decision
-  boundary. Các action `Validate`, `Request information`, `Reject`, `Mark duplicate` vẫn nằm ở human
-  action rail, không bị AI preselect.
+  boundary. Các action `Validate`, `Request information`, `Reject` vẫn nằm ở human action rail;
+  inline `Mark duplicate` chỉ là explicit shortcut mở cùng human dialog, không tự submit.
 - Bên ngoài box chỉ render một badge trạng thái nhỏ, không có affordance click:
   `AI review · Ready`, `AI review · Processing`, `AI review · Unavailable` hoặc
   `AI review · Superseded`. Badge là indicator, không phải button và không được diễn đạt như một
@@ -1033,7 +1050,10 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 - [ ] AC-05 — Needs-information giữ report private, lưu reason/audit, chờ researcher resubmit và sau
       resubmit quay đúng action set mà không reset initial submitted timestamp.
 - [ ] AC-06 — Duplicate target cùng program, readable, không self/cycle; UI review target trước
-      confirm và không lộ candidate ngoài quyền.
+      confirm và không lộ candidate ngoài quyền. `Original report` là server-authorized combobox
+      search theo title hoặc full report ID, không bị giới hạn bởi AI candidates, và không
+      nhận typed UUID trực tiếp. Menu giữ đúng chiều rộng input, ellipsis label dài, chọn option mới
+      enable confirm; owner/reviewer candidate links dùng `/review/:id`.
 - [ ] AC-07 — Validate chỉ ghi final severity; không reserve/payout. Assigned reviewer dừng ở waiting
       state, chỉ owner thấy reward settlement controls.
 - [ ] AC-08 — The owner reward dialog uses the server final severity and exact affected asset,
@@ -1073,9 +1093,12 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
       quota/timeout/invalid output retry bounded và không chặn human review. Free tier chỉ chạy với
       synthetic/demo/non-confidential data; private production content fail closed.
 - [ ] AC-19 — Authorized duplicate candidates show server `submittedAt` in chronological order. The
-      inline human `Mark duplicate` shortcut appears only for `likely` candidates with confidence
-      `> 0.40` and current sequence `> 1`; exactly 40%, `possible`, first/missing sequence hide it.
-      Clicking only opens the existing human confirmation dialog; server role/status/program/cycle
+      inline human `Mark duplicate` shortcut appears only when the current report is `submitted`,
+      the candidate is `likely` with confidence `> 0.40`, current sequence `> 1`, timestamp is
+      earlier and target is eligible. `triaged`, `validated`, `rejected`, `duplicate`, settlement
+      and paid reports render status badges/no shortcut; target `validated|paid|duplicate|rejected`
+      likewise renders a badge. Exactly 40%, `possible`, first/missing sequence hide it. Clicking
+      only opens the existing human confirmation dialog; server role/status/program/cycle
       authorization remains authoritative and AI cannot mutate lifecycle or payout.
 - [ ] AC-20 — Reward preflight/intent uses only the server-authorized report payout-wallet snapshot.
       Owner/reviewer cannot type, select or override researcher recipient; request-body address,
@@ -1100,6 +1123,9 @@ Không gọi provider từ browser; lỗi hiển thị rõ và cho retry. Reload
 | Review      | Request info → comment → researcher resubmit    | needs_information → submitted; audit giữ đủ vòng                                                                        |
 | Review      | Reject thiếu reason hoặc double click           | Client/server chặn; không duplicate review record                                                                       |
 | Duplicate   | Self/cross-program/cycle/unauthorized target    | Stable validation/forbidden; current report không đổi                                                                   |
+| Duplicate   | AI shortcut on `submitted` vs terminal status   | `likely` >40% eligible earlier candidate shows inline button only on `submitted`; `triaged`, `validated`, `duplicate`, `paid`, settlement and ineligible target statuses show badges/no shortcut |
+| Duplicate   | Search original by title/full ID                | Debounced same-program server search returns selectable options beyond AI suggestions; typed UUID is never submitted directly |
+| Duplicate   | Owner opens authorized candidate link           | Candidate title/ID navigates to `/review/:id`; `/reports/:id` is reserved for researcher-owned detail |
 | Race        | Hai reviewer quyết định cùng lúc                | Chỉ transition hợp lệ thắng; client thua refetch state                                                                  |
 | Reward      | Final severity mismatches proposed severity     | All active tiers for the asset render; other severities are context-only and only the final-severity tier is selectable |
 | Reward      | Flat tier                                       | Exact flat amount is prefilled and immutable; server rechecks it                                                        |

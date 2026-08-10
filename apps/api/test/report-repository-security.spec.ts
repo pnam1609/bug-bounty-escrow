@@ -9,6 +9,39 @@ const principal = {
 };
 
 describe('report repository storage boundary', () => {
+  it('scopes duplicate target search to the program and title/UUID filters', async () => {
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      ilike: vi.fn(),
+      order: vi.fn(),
+      range: vi.fn().mockResolvedValue({ data: [], error: null, count: 0 }),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.ilike.mockReturnValue(query);
+    query.order.mockReturnValue(query);
+    const repository = new ReportRepository({
+      from: vi.fn().mockReturnValue(query),
+    } as never);
+
+    await repository.list(principal, {
+      page: 1,
+      limit: 20,
+      programId: '10000000-0000-0000-0000-000000000020',
+      search: 'Earlier finding',
+    });
+    expect(query.eq).toHaveBeenCalledWith('program_id', '10000000-0000-0000-0000-000000000020');
+    expect(query.ilike).toHaveBeenCalledWith('title', '%Earlier finding%');
+
+    await repository.list(principal, {
+      page: 1,
+      limit: 20,
+      search: '10000000-0000-4000-8000-000000000099',
+    });
+    expect(query.eq).toHaveBeenCalledWith('id', '10000000-0000-4000-8000-000000000099');
+  });
+
   it('uses the server RPC canonical path for signed upload creation', async () => {
     const createSignedUploadUrl = vi.fn().mockResolvedValue({
       data: { signedUrl: 'https://storage.example.test/upload?token=private' },

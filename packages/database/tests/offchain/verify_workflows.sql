@@ -238,6 +238,31 @@ begin
     when sqlstate '22023' then null;
   end;
 
+  -- The original must have been submitted before the report under review, even when both rows
+  -- belong to the same program and the original is otherwise eligible.
+  update public.reports as original_report
+  set submitted_at = target_report.submitted_at + interval '1 hour'
+  from public.reports as target_report
+  where original_report.id = '33000000-0000-4000-8000-000000000017'
+    and target_report.id = '33000000-0000-4000-8000-000000000010';
+  begin
+    perform public.mark_report_duplicate_atomic(
+      '30000000-0000-4000-8000-000000000001',
+      '33000000-0000-4000-8000-000000000010',
+      '33000000-0000-4000-8000-000000000017',
+      'future original'
+    );
+    raise exception 'Future duplicate target unexpectedly succeeded';
+  exception
+    when sqlstate '22023' then null;
+  end;
+
+  update public.reports as original_report
+  set submitted_at = target_report.submitted_at - interval '1 hour'
+  from public.reports as target_report
+  where original_report.id = '33000000-0000-4000-8000-000000000017'
+    and target_report.id = '33000000-0000-4000-8000-000000000010';
+
   perform public.mark_report_duplicate_atomic(
     '30000000-0000-4000-8000-000000000001',
     '33000000-0000-4000-8000-000000000010',

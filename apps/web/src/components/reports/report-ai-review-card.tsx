@@ -20,6 +20,7 @@ import {
   reportReferenceAriaLabel,
   SEVERITY_LABELS,
   shortReportId,
+  type ReportStatus,
 } from './report-format';
 
 type AiReviewAudience = 'researcher' | 'reviewer';
@@ -33,6 +34,8 @@ export interface ReportAiReviewCardProps {
   readonly currentSubmissionRevision?: number;
   /** Server timestamp used to ensure duplicate targets are chronologically earlier. */
   readonly currentSubmittedAt?: string;
+  /** Current report lifecycle status; direct AI duplicate actions are only safe while submitted. */
+  readonly currentReportStatus?: ReportStatus;
   /** Opens the existing human duplicate confirmation dialog for an authorized candidate. */
   readonly onMarkDuplicate?: (candidateReportId: string) => void;
   /** Requests server-side recovery for a terminal or missing AI review. */
@@ -48,12 +51,14 @@ export function canMarkDuplicateCandidate(
     'assessment' | 'confidence' | 'status' | 'submittedAt'
   >,
   currentSubmittedAt?: string,
+  currentReportStatus?: ReportStatus,
 ): boolean {
   return (
     review.status === 'ready' &&
+    (currentReportStatus === undefined || currentReportStatus === 'submitted') &&
     review.submissionSequence !== undefined &&
     review.submissionSequence > 1 &&
-    candidate.status !== 'validated' &&
+    candidate.status === 'submitted' &&
     candidate.assessment === 'likely' &&
     candidate.confidence > DUPLICATE_ACTION_CONFIDENCE_THRESHOLD &&
     candidate.submittedAt !== undefined &&
@@ -238,10 +243,12 @@ function SafeResearcherDuplicateCopy({ assessment }: { readonly assessment: stri
 }
 
 function ReviewerCandidates({
+  currentReportStatus,
   currentSubmittedAt,
   onMarkDuplicate,
   review,
 }: {
+  readonly currentReportStatus?: ReportStatus;
   readonly currentSubmittedAt?: string;
   readonly onMarkDuplicate?: (candidateReportId: string) => void;
   readonly review: ReportAiReview;
@@ -263,14 +270,14 @@ function ReviewerCandidates({
                 <a
                   aria-label={`Open candidate report ${candidate.title ?? 'Untitled report'}`}
                   className="text-body-sm text-text underline decoration-border underline-offset-2 hover:text-escrow"
-                  href={`/reports/${candidate.candidateReportId}`}
+                  href={`/review/${candidate.candidateReportId}`}
                 >
                   {candidate.title ?? 'Untitled report'}
                 </a>
                 <a
                   aria-label={reportReferenceAriaLabel(candidate.candidateReportId)}
                   className="break-all text-label-sm text-text-muted underline decoration-border underline-offset-2 hover:text-escrow"
-                  href={`/reports/${candidate.candidateReportId}`}
+                  href={`/review/${candidate.candidateReportId}`}
                 >
                   <code>{shortReportId(candidate.candidateReportId)}…</code>
                 </a>
@@ -284,11 +291,22 @@ function ReviewerCandidates({
                 <span className="text-label-sm text-medium">
                   {candidate.assessment} · {percentage(candidate.confidence)}
                 </span>
-                {candidate.status === 'validated' ? (
-                  <StatusBadge className="bg-transparent" label="Validated" status="validated" />
+                {candidate.status !== undefined &&
+                !canMarkDuplicateCandidate(
+                  review,
+                  candidate,
+                  currentSubmittedAt,
+                  currentReportStatus,
+                ) ? (
+                  <StatusBadge className="bg-transparent" status={candidate.status} />
                 ) : null}
                 {onMarkDuplicate !== undefined &&
-                canMarkDuplicateCandidate(review, candidate, currentSubmittedAt) ? (
+                canMarkDuplicateCandidate(
+                  review,
+                  candidate,
+                  currentSubmittedAt,
+                  currentReportStatus,
+                ) ? (
                   <Button
                     onClick={() => onMarkDuplicate(candidate.candidateReportId)}
                     size="md"
@@ -309,11 +327,13 @@ function ReviewerCandidates({
 }
 
 function ReadyDetails({
+  currentReportStatus,
   currentSubmittedAt,
   onMarkDuplicate,
   review,
   audience,
 }: {
+  readonly currentReportStatus?: ReportStatus;
   readonly currentSubmittedAt?: string;
   readonly review: ReportAiReview;
   readonly audience: AiReviewAudience;
@@ -386,6 +406,7 @@ function ReadyDetails({
 
       {audience === 'reviewer' ? (
         <ReviewerCandidates
+          {...(currentReportStatus === undefined ? {} : { currentReportStatus })}
           {...(currentSubmittedAt === undefined ? {} : { currentSubmittedAt })}
           {...(onMarkDuplicate === undefined ? {} : { onMarkDuplicate })}
           review={review}
@@ -452,6 +473,7 @@ export function ReportAiReviewCard({
   review,
   audience,
   currentContentHash,
+  currentReportStatus,
   currentSubmittedAt,
   currentSubmissionRevision,
   onMarkDuplicate,
@@ -499,6 +521,7 @@ export function ReportAiReviewCard({
         <CardContent>
           <ReadyDetails
             audience={audience}
+            {...(currentReportStatus === undefined ? {} : { currentReportStatus })}
             {...(currentSubmittedAt === undefined ? {} : { currentSubmittedAt })}
             {...(onMarkDuplicate === undefined ? {} : { onMarkDuplicate })}
             review={effectiveReview}

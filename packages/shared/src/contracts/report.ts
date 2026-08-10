@@ -33,6 +33,8 @@ export const reportListQuerySchema = paginationQuerySchema
     researcherId: uuidSchema.optional(),
     status: reportStatusSchema.optional(),
     severity: reportSeveritySchema.optional(),
+    /** Case-insensitive title search, or an exact report UUID when valid. */
+    search: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 

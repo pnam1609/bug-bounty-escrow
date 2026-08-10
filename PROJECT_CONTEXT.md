@@ -256,18 +256,23 @@ Owner/reviewer duplicate candidates remain advisory and are re-authorized at rea
 projection enriches retained same-program candidates with the original report `submittedAt` (falling
 back to `createdAt` only for legacy rows), preserves the candidate status, drops rows without a valid
 timestamp and sorts them chronologically ascending with a UUID tie-break. Candidate title and short ID
-are links to `/reports/:id` only within the authorized owner/reviewer detail scope. The inline human
-`Mark duplicate` shortcut is shown only when a candidate is assessed `likely`, its confidence is
-strictly greater than 40%, the current canonical `submissionSequence` is greater than 1, and the
-candidate target is not already `validated`. A `validated` target is evidence-only and renders a
-`Validated` badge. The shortcut is hidden for `possible`, exactly 40% or lower, the first sequence,
-missing/invalid sequence, or a validated target. Clicking it only opens the existing human
-confirmation dialog; owner/reviewer role, status, same-program, self-reference and cycle checks stay
-server-authoritative, and AI cannot mutate lifecycle or payout.
-The dialog's normal path is a server-authorized select, never arbitrary UUID entry: options require a
-`likely` assessment, confidence strictly above 40%, a valid candidate title/timestamp, and a timestamp
-strictly earlier than the current report. Each option shows title, shortened UUID and exact/relative
-submitted time; an inline candidate action preselects it, while no eligible option keeps confirm disabled.
+are links to `/review/:id` for owner/reviewer detail navigation and to `/reports/:id` only in the
+researcher-owned detail surface. The inline human `Mark duplicate` shortcut is shown only while the
+current report lifecycle status is exactly `submitted`, when a candidate is assessed `likely`, its
+confidence is strictly greater than 40%, the current canonical `submissionSequence` is greater than
+1, and the candidate target is an eligible earlier report. A candidate whose target is `validated`,
+`paid`, `duplicate` or `rejected` is evidence-only and renders its status badge instead of the
+shortcut. The shortcut is hidden for `triaged` and every terminal/settlement status, `possible`,
+exactly 40% or lower, the first sequence, missing/invalid sequence, or an ineligible target. Clicking
+it only opens the existing human confirmation dialog; owner/reviewer role, status, same-program,
+self-reference and cycle checks stay server-authoritative, and AI cannot mutate lifecycle or payout.
+The dialog uses a server-authorized same-program search combobox: the input searches by report title or
+full report ID and may show AI-authorized candidates as initial suggestions, but selecting an
+original report is never limited to AI suggestions. Typed text/UUID is not submitted directly; the
+owner must select a server-returned option that is earlier than the current report and passes the same
+authorization/status/cycle rules. Each option shows title, shortened UUID and exact/relative submitted
+time; the menu is constrained to the input width with ellipsis for long labels, and no eligible option
+keeps confirm disabled.
 
 Gemini provider pin exact stable model `gemini-3.5-flash`, không dùng `latest` alias. Free tier chỉ
 được dùng cho synthetic/demo/non-confidential data: Gemini unpaid-service terms không phù hợp để gửi
@@ -1298,8 +1303,12 @@ xác nhận, còn API và `submit_report_atomic` vẫn enforce `program_owner_ca
 chặn direct request fail-closed. Researcher khác vẫn được submit khi program active và payload hợp lệ.
 
 `GET /api/reports` trả dữ liệu theo quyền của user hiện tại và hỗ trợ filter `programId`, `status`,
-`severity` và `researcherId`. Researcher chỉ thấy report của mình; owner/reviewer chỉ thấy report
-thuộc program được phép review.
+`severity`, `researcherId` và bounded `search` (title hoặc full report ID). Researcher chỉ
+thấy report của mình; owner/reviewer chỉ thấy report thuộc program được phép review. Duplicate
+dialog search phải gửi `programId` của report hiện tại và được server authorize lại; UI chỉ dùng
+`id`, title, status và `submittedAt` từ authorized report-summary rows, không đọc report body hoặc
+cross-program rows. Search option được server recheck là earlier same-program target before mutation;
+typed text/UUID không phải mutation authority.
 
 `PATCH /api/reports/:id/payout-wallet` accepts only a verified wallet ID owned by the authenticated
 researcher. The atomic policy rechecks report/program status and report-specific settlement evidence,

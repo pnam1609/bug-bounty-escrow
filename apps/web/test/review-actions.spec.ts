@@ -323,10 +323,16 @@ describe('ReviewActions reward ownership boundary', () => {
       }),
     ).toBe(false);
     expect(
-      duplicateTargetIsSafe(REPORT_ID, PROGRAM_ID, {
-        id: '10000000-0000-4000-8000-000000000099',
-        programId: PROGRAM_ID,
-      }),
+      duplicateTargetIsSafe(
+        REPORT_ID,
+        PROGRAM_ID,
+        {
+          id: '10000000-0000-4000-8000-000000000099',
+          programId: PROGRAM_ID,
+          submittedAt: '2026-07-25T10:00:00.000Z',
+        },
+        '2026-07-26T10:00:00.000Z',
+      ),
     ).toBe(true);
   });
 
