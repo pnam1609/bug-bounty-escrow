@@ -20,6 +20,7 @@ import {
   Field,
   Input,
 } from '@bug-bounty-escrow/ui';
+import { useAccountModal, useChainModal, useConnectModal } from '@rainbow-me/rainbowkit';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { useEffect, useRef, useState } from 'react';
 import type { EIP1193Provider } from 'viem';
@@ -41,6 +42,28 @@ import { WalletAccountButton } from './wallet-account-button';
 import { ApiClientError, apiRequest } from '@/lib/api-client';
 
 type VerificationPhase = 'idle' | 'requesting' | 'signing' | 'verifying';
+
+export interface WalletModalState {
+  readonly accountModalOpen: boolean;
+  readonly chainModalOpen: boolean;
+  readonly connectModalOpen: boolean;
+}
+
+export function walletDialogSuspended(state: WalletModalState): boolean {
+  return state.accountModalOpen || state.chainModalOpen || state.connectModalOpen;
+}
+
+export function walletDialogLayerState(state: WalletModalState) {
+  const suspended = walletDialogSuspended(state);
+  return {
+    ariaHidden: suspended,
+    className: suspended ? 'pointer-events-none z-40' : '',
+    inert: suspended,
+    modal: !suspended,
+    overlayClassName: suspended ? 'pointer-events-none z-40' : '',
+    suspended,
+  } as const;
+}
 
 const PHASE_LABEL: Readonly<Record<VerificationPhase, string>> = Object.freeze({
   idle: '',
@@ -64,12 +87,37 @@ export function AddResearcherWalletDialog({
 }: AddResearcherWalletDialogProps) {
   const { address, chainId, connector, isConnected } = useAccount();
   const { switchChainAsync } = useSwitchChain();
+  const { accountModalOpen } = useAccountModal();
+  const { chainModalOpen } = useChainModal();
+  const { connectModalOpen } = useConnectModal();
   const [label, setLabel] = useState('');
   const [phase, setPhase] = useState<VerificationPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const identity = useRef<string | undefined>(undefined);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const rainbowModalWasOpen = useRef(false);
   const busy = phase !== 'idle';
   const onArc = chainId === ARC_TESTNET_CHAIN_ID;
+  const layerState = walletDialogLayerState({
+    accountModalOpen,
+    chainModalOpen,
+    connectModalOpen,
+  });
+  const { suspended } = layerState;
+
+  useEffect(() => {
+    const wasOpen = rainbowModalWasOpen.current;
+    rainbowModalWasOpen.current = suspended;
+    if (!open || suspended || !wasOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = contentRef.current?.querySelector<HTMLElement>(
+        '[data-wallet-resume-focus="true"]',
+      );
+      (target ?? contentRef.current)?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, suspended]);
 
   useEffect(() => {
     const nextIdentity =
@@ -200,8 +248,22 @@ export function AddResearcherWalletDialog({
   }
 
   return (
-    <Dialog onOpenChange={(next) => !busy && onOpenChange(next)} open={open}>
-      <DialogContent closeLabel="Close add wallet" showCloseButton size="md">
+    <Dialog
+      modal={layerState.modal}
+      onOpenChange={(next) => !busy && !suspended && onOpenChange(next)}
+      open={open}
+    >
+      <DialogContent
+        aria-hidden={layerState.ariaHidden}
+        className={layerState.className}
+        closeLabel="Close add wallet"
+        data-wallet-dialog-suspended={suspended ? 'true' : 'false'}
+        inert={layerState.inert}
+        overlayClassName={layerState.overlayClassName}
+        ref={contentRef}
+        showCloseButton
+        size="md"
+      >
         <DialogHeader>
           <DialogTitle>Add your wallet</DialogTitle>
           <DialogDescription>
@@ -270,11 +332,17 @@ export function AddResearcherWalletDialog({
           {!isConnected ? (
             <WalletAccountButton />
           ) : !onArc ? (
-            <Button disabled={busy} onClick={() => void switchToArc()} type="button">
+            <Button
+              data-wallet-resume-focus="true"
+              disabled={busy}
+              onClick={() => void switchToArc()}
+              type="button"
+            >
               Switch to Arc Testnet
             </Button>
           ) : (
             <Button
+              data-wallet-resume-focus="true"
               disabled={busy}
               loading={busy}
               loadingLabel={phase === 'signing' ? 'Waiting for signature…' : 'Verifying wallet…'}

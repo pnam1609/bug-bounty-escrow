@@ -140,3 +140,42 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
   await expect(page).toHaveURL(new RegExp(`/reports/${IDS.report}$`));
   expect(api.calls('POST', createPath)).toHaveLength(1);
 });
+
+test('RW-04 RainbowKit exclusively owns interaction while its wallet modal is open', async ({
+  researcherPage: page,
+}) => {
+  await page.goto(`/reports/new?programSlug=${AEGIS_SUMMARY.slug}`);
+  await chooseAssetAndImpact(page);
+  await page.getByRole('radio', { name: /^Critical/ }).check();
+  await page.getByRole('button', { name: 'Continue to main report' }).click();
+  await writeReport(page);
+  await page.getByRole('button', { name: 'Continue to reward wallet' }).click();
+  await page.getByRole('button', { name: 'Add another wallet' }).click();
+
+  const addWalletDialog = page.locator('[data-wallet-dialog-suspended]');
+  const connectWalletButton = addWalletDialog.getByRole('button', { name: 'Connect wallet' });
+  await expect(addWalletDialog).toHaveAttribute('data-wallet-dialog-suspended', 'false');
+  await connectWalletButton.click();
+
+  const rainbowDialog = page.getByRole('dialog', { name: 'Connect a Wallet' });
+  await expect(rainbowDialog).toBeVisible();
+  await expect(addWalletDialog).toHaveAttribute('data-wallet-dialog-suspended', 'true');
+  await expect(addWalletDialog).toHaveAttribute('inert', '');
+  await expect(addWalletDialog).toHaveCSS('pointer-events', 'none');
+  await expect
+    .poll(async () => {
+      const addWalletZIndex = Number(
+        await addWalletDialog.evaluate((node) => getComputedStyle(node).zIndex),
+      );
+      const rainbowZIndex = Number(
+        await rainbowDialog.evaluate((node) => getComputedStyle(node).zIndex),
+      );
+      return rainbowZIndex > addWalletZIndex;
+    })
+    .toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(rainbowDialog).toBeHidden();
+  await expect(addWalletDialog).toHaveAttribute('data-wallet-dialog-suspended', 'false');
+  await expect(connectWalletButton).toBeFocused();
+});

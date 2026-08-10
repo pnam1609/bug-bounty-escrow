@@ -10,6 +10,7 @@ import {
   challengeStillMatches,
   payoutWalletSelectionError,
 } from '@/components/wallets/researcher-wallet-model';
+import { walletDialogLayerState } from '@/components/wallets/add-researcher-wallet-dialog';
 import {
   ARC_TESTNET_CHAIN_ID,
   signResearcherWalletChallenge,
@@ -70,6 +71,51 @@ describe('verified researcher wallet selection', () => {
     };
     expect(challengeStillMatches(challenge, ADDRESS.toUpperCase())).toBe(true);
     expect(challengeStillMatches(challenge, OTHER)).toBe(false);
+  });
+});
+
+describe('add wallet and RainbowKit modal lifecycle', () => {
+  const closed = {
+    accountModalOpen: false,
+    chainModalOpen: false,
+    connectModalOpen: false,
+  };
+
+  it('keeps the Add Wallet dialog modal and interactive while RainbowKit is closed', () => {
+    expect(walletDialogLayerState(closed)).toEqual({
+      ariaHidden: false,
+      className: '',
+      inert: false,
+      modal: true,
+      overlayClassName: '',
+      suspended: false,
+    });
+  });
+
+  it.each(['connectModalOpen', 'accountModalOpen', 'chainModalOpen'] as const)(
+    'makes Add Wallet inert and places it below the %s portal',
+    (modal) => {
+      const state = walletDialogLayerState({ ...closed, [modal]: true });
+
+      expect(state).toMatchObject({
+        ariaHidden: true,
+        inert: true,
+        modal: false,
+        suspended: true,
+      });
+      expect(state.className).toContain('pointer-events-none');
+      expect(state.className).toContain('z-40');
+      expect(state.overlayClassName).toContain('pointer-events-none');
+      expect(state.overlayClassName).toContain('z-40');
+    },
+  );
+
+  it('resumes the Add Wallet focus scope after RainbowKit closes', () => {
+    const suspended = walletDialogLayerState({ ...closed, connectModalOpen: true });
+    const resumed = walletDialogLayerState(closed);
+
+    expect(suspended.modal).toBe(false);
+    expect(resumed).toMatchObject({ inert: false, modal: true, suspended: false });
   });
 });
 

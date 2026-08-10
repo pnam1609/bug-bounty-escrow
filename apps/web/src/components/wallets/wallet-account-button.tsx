@@ -13,7 +13,12 @@ export function WalletAccountButton({ className }: { readonly className?: string
         }
         if (account === undefined) {
           return (
-            <Button className={className} onClick={openConnectModal} type="button">
+            <Button
+              className={className}
+              data-wallet-resume-focus="true"
+              onClick={openConnectModal}
+              type="button"
+            >
               Connect wallet
             </Button>
           );
@@ -22,6 +27,7 @@ export function WalletAccountButton({ className }: { readonly className?: string
           return (
             <Button
               className={className}
+              data-wallet-resume-focus="true"
               onClick={openChainModal}
               type="button"
               variant="secondary"
@@ -34,6 +40,7 @@ export function WalletAccountButton({ className }: { readonly className?: string
           <Button
             aria-label={`Open wallet account menu for ${account.displayName}`}
             className={className}
+            data-wallet-resume-focus="true"
             onClick={openAccountModal}
             type="button"
             variant="secondary"
