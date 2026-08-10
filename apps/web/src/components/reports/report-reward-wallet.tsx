@@ -71,6 +71,7 @@ export function ReportRewardWallet({ principalId, report, token }: ReportRewardW
     blockedReason === undefined
       ? 'The server has locked wallet editing for this report.'
       : BLOCKED_COPY[blockedReason];
+  const settlementComplete = report.status === 'paid' && report.paidSettlementProof !== undefined;
 
   return (
     <Card className="gap-xl" padding="lg">
@@ -85,7 +86,9 @@ export function ReportRewardWallet({ principalId, report, token }: ReportRewardW
           <div className="flex flex-col gap-xs">
             <CardTitle>Reward wallet</CardTitle>
             <CardDescription>
-              The verified Arc Testnet wallet selected for any eligible USDC reward on this report.
+              {settlementComplete
+                ? 'The verified Arc Testnet wallet that received this report’s USDC reward. See Disclosure summary for the server-verified payout transaction.'
+                : 'The verified Arc Testnet wallet selected for any eligible USDC reward on this report.'}
             </CardDescription>
           </div>
         </div>

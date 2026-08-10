@@ -329,6 +329,10 @@ function mapDetail(
     row.programs?.status === 'active' &&
     (row.status === 'draft' || row.status === 'needs_information');
   const isProgramSide = principal.role === 'owner' || principal.role === 'reviewer';
+  // Researchers may see the same server-verified payout proof on their own report. Access is
+  // still constrained by canAccessRow above, and the projection only carries a masked recipient.
+  const canViewPaidSettlementProof =
+    isProgramSide || (principal.role === 'researcher' && principal.userId === row.researcher_id);
   const canReopenDuplicate =
     principal.role === 'owner' &&
     row.status === 'duplicate' &&
@@ -391,9 +395,10 @@ function mapDetail(
           };
         })
     : undefined;
-  const paidIntent = isProgramSide
-    ? (row.reward_settlement_intents ?? []).find((intent) => intent.status === 'paid')
-    : undefined;
+  const paidIntent =
+    canViewPaidSettlementProof && row.status === 'paid' && row.paid_at !== null
+      ? (row.reward_settlement_intents ?? []).find((intent) => intent.status === 'paid')
+      : undefined;
   const paidOperation = paidIntent?.reward_settlement_operations
     ?.filter(
       (

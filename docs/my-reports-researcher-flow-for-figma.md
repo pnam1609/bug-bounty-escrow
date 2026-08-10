@@ -196,6 +196,11 @@ Nếu `finalSeverity` tồn tại, accessible label hoặc tooltip phải nói �
 - `paid` chỉ được coi là đã thanh toán khi report status là `paid` và dữ liệu settlement hợp lệ.
 - `payment_pending` không được dùng màu success.
 - Formatting phải giữ độ chính xác monetary contract; không parse bằng floating-point không an toàn.
+- Khi report ở `paid` và server trả `paidSettlementProof` hợp lệ, `Disclosure summary` phải có
+  một mục `Reward payment`/`Settlement evidence` gồm amount, chain/token, masked recipient,
+  verified/paid time và transaction hash. Transaction hash hiển thị dạng rút gọn nhưng có action
+  copy giá trị đầy đủ và icon link tới ArcScan transaction page; block number/hash và log indexes
+  là copy-only evidence. Không suy ra payment evidence chỉ từ `approvedReward` hoặc status.
 
 ## 6. Status presentation
 
@@ -540,6 +545,8 @@ Detail dùng `GET /api/reports/:id` và có thể hiển thị:
 - Participant-only comments.
 - Request for information.
 - Reward và payment state.
+- Disclosure summary hiển thị settlement evidence khi payment đã được server xác nhận; evidence
+  không xuất hiện ở `validated`, `reward_approved` hoặc `payment_pending` nếu chưa có proof hợp lệ.
 
 Detail phải có:
 

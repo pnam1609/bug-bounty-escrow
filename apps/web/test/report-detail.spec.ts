@@ -20,6 +20,7 @@ import {
 import { ReviewEvidence } from '@/components/reports/review-evidence';
 import {
   InformationRequestCallout,
+  DisclosureSummary,
   REPORT_NOT_FOUND_DESCRIPTION,
   REPORT_NOT_FOUND_TITLE,
   SUBMITTED_SUCCESS_DESCRIPTION,
@@ -97,6 +98,48 @@ const report: ReportDetail = reportDetailSchema.parse({
 });
 
 describe('SR-12 report detail', () => {
+  it('shows server-verified paid settlement details in the disclosure summary', () => {
+    const paidReport = reportDetailSchema.parse({
+      ...report,
+      approvedReward: '250.000000',
+      status: 'paid',
+      paidAt: '2026-07-26T15:01:00.000Z',
+      paidSettlementProof: {
+        transactionHash: `0x${'a'.repeat(64)}`,
+        chainId: '5042002',
+        tokenAddress: '0x3600000000000000000000000000000000000000',
+        recipientAddressMasked: '0xaaaa…aaaa',
+        amount: '250.000000',
+        blockNumber: '42',
+        blockHash: `0x${'b'.repeat(64)}`,
+        rewardEventLogIndex: 8,
+        transferLogIndex: 9,
+        exactEventVerified: true,
+        canonicalTransferVerified: true,
+        accountingApplied: true,
+        verifiedAt: '2026-07-26T15:00:00.000Z',
+      },
+    });
+
+    const markup = renderToStaticMarkup(createElement(DisclosureSummary, { report: paidReport }));
+
+    expect(markup).toContain('Disclosure summary');
+    expect(markup).toContain('Reward payment verified');
+    expect(markup).toContain('250 USDC');
+    expect(markup).toContain('Transaction hash');
+    expect(markup).toContain(`href="https://testnet.arcscan.app/tx/0x${'a'.repeat(64)}"`);
+    expect(markup).toContain(
+      `href="https://testnet.arcscan.app/address/0x3600000000000000000000000000000000000000"`,
+    );
+    expect(markup).toContain(`title="0x${'b'.repeat(64)}"`);
+    expect(markup).toContain('the full block hash');
+    expect(markup).toContain('the full RewardPaid log index');
+    expect(markup).toContain('the full USDC Transfer log index');
+    expect(markup).toContain('Paid Jul 26, 2026');
+    expect(markup).toContain('Verified Jul 26, 2026');
+    expect(markup).toContain('0xaaaa…aaaa');
+  });
+
   it('renders a non-clickable, transparent AI status badge outside the review box', () => {
     const statuses = [
       renderToStaticMarkup(

@@ -248,6 +248,8 @@ describe('SR-12 private report detail projection', () => {
   it('maps ordered human review events, same-program duplicate metadata and exact paid proof for reviewers', async () => {
     const row = reportRow();
     Object.assign(row, {
+      status: 'paid',
+      paid_at: '2026-07-26T15:01:00.000Z',
       report_reviews: [
         {
           id: '10000000-0000-4000-8000-000000000050',
@@ -408,7 +410,7 @@ describe('SR-12 private report detail projection', () => {
     ]);
   });
 
-  it('redacts internal event and settlement proof fields from the researcher projection', async () => {
+  it('redacts internal event fields from the researcher projection', async () => {
     const row = reportRow();
     Object.assign(row, {
       report_reviews: [
@@ -425,24 +427,59 @@ describe('SR-12 private report detail projection', () => {
         },
       ],
     });
+    const detail = await repositoryFor(row).findAccessible(researcher, row.id);
+    expect(detail).not.toHaveProperty('reviewEvents');
+  });
+
+  it('exposes only the masked, exact paid proof to the researcher who owns the report', async () => {
+    const row = reportRow();
     Object.assign(row, {
+      status: 'paid',
+      paid_at: '2026-07-26T15:01:00.000Z',
       reward_settlement_intents: [
         {
           status: 'paid',
           amount: '1.000000',
           recipient_address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          escrow_contracts: {
+            chain_id: 5042002,
+            token_address: '0x3600000000000000000000000000000000000000',
+          },
+          reward_settlement_operations: [
+            {
+              operation_type: 'payout',
+              status: 'confirmed',
+              transaction_hash: `0x${'f'.repeat(64)}`,
+              event_log_index: 3,
+              transfer_log_index: 4,
+              block_number: '44',
+              block_hash: `0x${'e'.repeat(64)}`,
+              updated_at: '2026-07-26T16:00:00.000Z',
+            },
+          ],
         },
       ],
     });
+
     const detail = await repositoryFor(row).findAccessible(researcher, row.id);
-    expect(detail).not.toHaveProperty('reviewEvents');
-    expect(detail).not.toHaveProperty('paidSettlementProof');
-    expect(detail).not.toHaveProperty('recipientAddressMasked');
+
+    expect(detail?.paidSettlementProof).toMatchObject({
+      transactionHash: `0x${'f'.repeat(64)}`,
+      recipientAddressMasked: '0xaaaa…aaaa',
+      amount: '1.000000',
+      exactEventVerified: true,
+      canonicalTransferVerified: true,
+      accountingApplied: true,
+    });
+    expect(detail?.paidSettlementProof).not.toHaveProperty('recipientAddress');
+    expect(() => reportResponseSchema.parse({ success: true, data: detail })).not.toThrow();
   });
 
   it('does not expose paid proof for stale or incomplete settlement evidence', async () => {
     const row = reportRow();
     Object.assign(row, {
+      status: 'paid',
+      paid_at: '2026-07-26T16:01:00.000Z',
       reward_settlement_intents: [
         {
           status: 'paid',

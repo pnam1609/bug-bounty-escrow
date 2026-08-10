@@ -105,6 +105,9 @@ Các trạng thái `rejected` và `duplicate` đóng report mà không đi vào 
   report-level recipient supplied only as a masked settlement snapshot remains masked/copy-only.
   Block evidence, provider IDs and checksums are copy-only unless an explorer route is known. The
   reward view must never invent a hash or link when the server has not supplied verified evidence.
+- The same validated paid-settlement proof must be available from the researcher report detail
+  `Disclosure summary`; reward wallet selection and payment evidence remain separate read-only
+  concerns after settlement locks the report.
 
 ### Design system
 

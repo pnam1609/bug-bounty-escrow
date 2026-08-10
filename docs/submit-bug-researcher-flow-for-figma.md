@@ -924,6 +924,10 @@ Payout wallet card:
   `Verified`, `EVM · Arc Testnet` and the current server lock state.
 - A researcher-owned snapshot may link to the ArcScan address page while editable; once settlement
   is locked, preserve the masked/copy-only privacy boundary returned by the server.
+- Khi report đã paid, report detail vẫn giữ reward wallet ở trạng thái read-only và `Disclosure
+summary` render settlement proof server-derived: amount, chain/token, masked recipient, paid time
+  và payout transaction hash với copy + ArcScan transaction link. Không hiển thị proof cho tới khi
+  payout operation đã confirmed; không biến `approvedReward` thành transaction evidence.
 - `Edit wallet` opens the same verified-wallet selector and can add/verify another wallet. The action
   is enabled only when the report detail returns `canChangePayoutWallet = true`; the browser does not
   infer capability from status alone.

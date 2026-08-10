@@ -428,7 +428,7 @@ export const reportReviewEventSchema = z
   })
   .strict();
 
-/** Proof rendered only for program-side readers after exact backend Arc verification. */
+/** Proof rendered only for authorized report readers after exact backend Arc verification. */
 export const reportPaidSettlementProofSchema = z
   .object({
     transactionHash: transactionHashSchema,

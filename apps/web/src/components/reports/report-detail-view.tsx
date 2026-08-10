@@ -1,6 +1,10 @@
 'use client';
 
-import { reportResponseSchema, type ReportDetail } from '@bug-bounty-escrow/shared';
+import {
+  reportResponseSchema,
+  type ReportDetail,
+  type ReportPaidSettlementProof,
+} from '@bug-bounty-escrow/shared';
 import {
   Button,
   Callout,
@@ -18,7 +22,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 
 import { CommentThread } from './comment-thread';
-import { ReportIdCopy } from './copy-value';
+import { arcExplorerHref, CryptoValueAction } from './crypto-value';
+import { CopyButton, ReportIdCopy } from './copy-value';
 import { ReportContent } from './report-content';
 import { ReportAiReviewCard } from './report-ai-review-card';
 import { getReportAccessFailure, REPORTS_LOGIN_HREF } from './report-access';
@@ -26,6 +31,7 @@ import { safeReportListReturnTo } from './report-detail-model';
 import {
   describeTime,
   formatTimestamp,
+  formatUsdc,
   reportReferenceAriaLabel,
   REPORT_STATUS_SUMMARY,
   SEVERITY_LABELS,
@@ -96,7 +102,98 @@ function RailRow({ children, label }: { readonly children: ReactNode; readonly l
   );
 }
 
-function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
+function shortCryptoValue(value: string): string {
+  return value.length <= 18 ? value : `${value.slice(0, 10)}…${value.slice(-8)}`;
+}
+
+function PaidSettlementSummary({
+  paidAt,
+  proof,
+}: {
+  readonly paidAt: string | undefined;
+  readonly proof: ReportPaidSettlementProof;
+}) {
+  return (
+    <div
+      aria-label="Verified reward payment"
+      className="flex flex-col gap-md rounded-md border border-escrow bg-surface-raised p-md"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-sm">
+        <p className="text-label-md text-text">Reward payment verified</p>
+        <span className="inline-flex items-center rounded-full border border-escrow px-sm py-xs text-label-sm text-escrow">
+          Paid
+        </span>
+      </div>
+      <p className="text-label-sm text-text-muted">
+        The server verified the exact escrow payout before marking this report paid.
+      </p>
+      <dl className="grid gap-md text-body-sm sm:grid-cols-2">
+        <div>
+          <dt className="text-label-sm text-text-muted">Amount</dt>
+          <dd className="text-text">{formatUsdc(proof.amount)}</dd>
+        </div>
+        <div>
+          <dt className="text-label-sm text-text-muted">Recipient</dt>
+          <dd className="font-mono text-text">{proof.recipientAddressMasked}</dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-label-sm text-text-muted">Transaction hash</dt>
+          <dd>
+            <CryptoValueAction
+              displayValue={shortCryptoValue(proof.transactionHash)}
+              href={arcExplorerHref(proof.transactionHash, 'tx')}
+              hrefLabel="Open Arc transaction"
+              value={proof.transactionHash}
+              what="reward transaction hash"
+            />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-label-sm text-text-muted">Chain / token</dt>
+          <dd className="flex flex-col items-start gap-xs text-text">
+            <span>Arc Testnet · Chain {proof.chainId} · USDC</span>
+            <CryptoValueAction
+              displayValue={shortCryptoValue(proof.tokenAddress)}
+              href={arcExplorerHref(proof.tokenAddress, 'address')}
+              hrefLabel="Open USDC token address"
+              value={proof.tokenAddress}
+              what="USDC token address"
+            />
+          </dd>
+        </div>
+        <div>
+          <dt className="text-label-sm text-text-muted">Block</dt>
+          <dd className="flex flex-col items-start gap-xs font-mono text-text">
+            <span className="flex flex-wrap items-center gap-xs">
+              <span>{proof.blockNumber}</span>
+              <CopyButton value={proof.blockNumber} what="block number" />
+            </span>
+            <span className="flex max-w-full flex-wrap items-center gap-xs">
+              <span className="truncate" title={proof.blockHash}>
+                {shortCryptoValue(proof.blockHash)}
+              </span>
+              <CopyButton value={proof.blockHash} what="block hash" />
+            </span>
+          </dd>
+        </div>
+      </dl>
+      <p className="flex flex-wrap items-center gap-xs text-label-sm text-text-muted">
+        <span>
+          Paid {formatTimestamp(paidAt ?? proof.verifiedAt)} · Verified{' '}
+          {formatTimestamp(proof.verifiedAt)} · RewardPaid log
+        </span>
+        <span>{proof.rewardEventLogIndex}</span>
+        <CopyButton value={String(proof.rewardEventLogIndex)} what="RewardPaid log index" />
+        <span aria-hidden="true">·</span>
+        <span>USDC Transfer log</span>
+        <span>{proof.transferLogIndex}</span>
+        <CopyButton value={String(proof.transferLogIndex)} what="USDC Transfer log index" />
+      </p>
+    </div>
+  );
+}
+
+export function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
   const attachment = report.attachments[0];
 
   return (
@@ -140,6 +237,14 @@ function DisclosureSummary({ report }: { readonly report: ReportDetail }) {
         <RailRow label="Visibility">Authorized reviewers</RailRow>
         {report.approvedReward === undefined ? null : (
           <RailRow label="Approved reward">{`${report.approvedReward} USDC`}</RailRow>
+        )}
+        {report.status !== 'paid' || report.paidSettlementProof === undefined ? null : (
+          <div className="sm:col-span-2">
+            <dt className="sr-only">Reward payment</dt>
+            <dd>
+              <PaidSettlementSummary paidAt={report.paidAt} proof={report.paidSettlementProof} />
+            </dd>
+          </div>
         )}
       </dl>
 
