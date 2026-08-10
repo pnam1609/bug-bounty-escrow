@@ -144,6 +144,8 @@ test('QA-E2E-006 a failed attachment upload keeps the submitted report and never
 test('RW-04 RainbowKit exclusively owns interaction while its wallet modal is open', async ({
   researcherPage: page,
 }) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(`/reports/new?programSlug=${AEGIS_SUMMARY.slug}`);
   await chooseAssetAndImpact(page);
   await page.getByRole('radio', { name: /^Critical/ }).check();
@@ -174,8 +176,21 @@ test('RW-04 RainbowKit exclusively owns interaction while its wallet modal is op
     })
     .toBe(true);
 
+  await rainbowDialog.getByRole('button', { name: 'MetaMask' }).click();
+  await expect(rainbowDialog.getByText('Scan with MetaMask')).toBeVisible();
+  await expect(rainbowDialog.getByRole('img', { name: 'QR Code' })).toBeVisible();
+  const getMetaMask = rainbowDialog.getByRole('button', { name: 'GET' });
+  await expect(getMetaMask).toBeVisible();
+  expect(pageErrors).toEqual([]);
+
+  await getMetaMask.click();
+  await expect(rainbowDialog.getByText('Get MetaMask')).toBeVisible();
+  await expect(rainbowDialog.getByRole('link', { name: /Add to Chrome/i })).toBeVisible();
+  await expect(rainbowDialog.getByRole('button', { name: /Get the app/i })).toBeVisible();
+
   await page.keyboard.press('Escape');
   await expect(rainbowDialog).toBeHidden();
   await expect(addWalletDialog).toHaveAttribute('data-wallet-dialog-suspended', 'false');
   await expect(connectWalletButton).toBeFocused();
+  expect(pageErrors).toEqual([]);
 });
